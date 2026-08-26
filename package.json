@@ -1,16 +1,21 @@
 {
   "name": "night-ralph",
   "version": "0.1.0",
-  "description": "Small orchestrator that runs a single-agent session per issue (Ralph-style) and integrates with GH and agent CLIs.",
+  "description": "Small orchestrator that runs a single-agent session per issue.",
   "bin": {
     "night-ralph": "bin/ralph.js"
   },
-  "author": "nichoth",
-  "license": "MIT",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "start": "node bin/ralph.js"
-  }
+    "start": "node bin/ralph.js",
+    "toc": "markdown-toc --maxdepth 3 -i README.md"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "markdown-toc": "^1.2.0"
+  },
+  "author": "nichoth"
 }

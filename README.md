@@ -1,8 +1,10 @@
 # night-ralph
 
-A minimal Node-based "Ralph-style" orchestrator that selects a single child issue for a PRD, invokes an agent CLI once with a combined PRD+issue prompt, then verifies the issue state.
+A minimal Node-based "Ralph-style" orchestrator that selects a single child
+issue for a PRD, invokes an agent CLI once with a combined PRD+issue prompt,
+then verifies the issue state.
 
-This package is a small starting point — it intentionally keeps dependencies to a minimum and mirrors the selection behavior from Shaurya-Sethi/nightshift (parent/blocked-by parsing, ready-for-agent label).
+<!-- toc -->
 
 ## Quickstart
 
@@ -11,7 +13,7 @@ Prerequisites:
 - GitHub CLI (`gh`) installed and authenticated (`gh auth login`)
 - An agent CLI available on PATH (default: `claude`).
 
-Install (local):
+## Install (local):
 
 ```bash
 # clone or download the zip
