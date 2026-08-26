@@ -1,43 +1,28 @@
 # night-ralph
 
-A minimal Node-based "Ralph-style" orchestrator that selects a single child
-issue for a PRD, invokes an agent CLI once with a combined PRD+issue prompt,
-then verifies the issue state.
+A minimal Node-based "Ralph-style" orchestrator that now supports both GitHub issue mode and a local Markdown ticket mode compatible with Matt Pocock's `to-tickets` local output.
 
-<!-- toc -->
+Local mode highlights
 
-## Quickstart
+- Provide `--local-dir ./tickets` and either `--prd-file ./tickets/PRD.md` or create `PRD.md` in the directory.
+- The tool reads all `*.md` files (excluding the PRD file) and treats them as child tickets.
+- It matches child tickets to the PRD by looking for a `## Parent` section that contains the PRD filename or PRD title, or by a numeric `#<number>` if you also use GitHub numbering.
+- Blockers are read from `## Blocked by` and can reference other ticket filenames (e.g. `other-ticket.md`). If a blocker file is present and not moved to `done/`, the ticket is considered blocked.
+- Successful agent runs (exit code 0) move the processed ticket to `<local-dir>/done/`. Prompts and agent logs are saved to `<local-dir>/prompts/` and `<local-dir>/logs/` respectively.
 
-Prerequisites:
-- Node 18+ and npm
-- GitHub CLI (`gh`) installed and authenticated (`gh auth login`)
-- An agent CLI available on PATH (default: `claude`).
+Usage examples
 
-## Install (local):
+Local mode:
 
 ```bash
-# clone or download the zip
-node bin/ralph.js --help
+node bin/ralph.js --local-dir ./tickets --prd-file ./tickets/PRD.md --agent claude --model claude-sonnet-4-6
+
+# Dry run
+node bin/ralph.js --local-dir ./tickets --prd-file ./tickets/PRD.md --dry-run
 ```
 
-Usage:
+GitHub mode (unchanged):
 
 ```bash
-# Dry run to inspect prompt
-node bin/ralph.js --prd 12 --repo myorg/myrepo --dry-run
-
-# Run against repo with the claude agent
 node bin/ralph.js --prd 12 --repo myorg/myrepo --agent claude --model claude-sonnet-4-6
 ```
-
-Notes:
-- Issues are filtered by the `ready-for-agent` label and must include a `## Parent` section with the PRD number to be considered.
-- Blockers are read from a `## Blocked by` section; the script skips issues with open blockers.
-- After the agent exits, the script checks whether the selected issue is closed.
-
-## Files
-- `bin/ralph.js` - main CLI
-- `package.json` - package manifest
-
-## Licensing
-MIT
