@@ -1,0 +1,190 @@
+## 2026-08-27 - US-001: Unit tests for findFeatureDirs
+
+Completed. Created test/integration.test.ts with 4 test cases (8 assertions):
+- Returns empty array when .scratch/ does not exist
+- Returns empty array when dirs lack issues/ subdirs
+- Returns correct name, dir, spec for valid feature dirs
+- Ignores non-directory entries in .scratch/
+
+Refactoring note: extracted findFeatureDirs and resolveIssuesDir from
+src/index.ts into src/resolve.ts. The top-level yargs(...).parse() call in
+index.ts runs on import, which crashes test processes. Moving the pure
+functions to resolve.ts lets tests import them without triggering CLI
+parsing. index.ts re-exports both functions so the public API is unchanged.
+
+Updated package.json:
+- build-esm: added src/resolve.ts to esbuild entry points
+- test: added integration.test.ts to build and run steps
+
+All 128 tests pass (setup: 66, orchestrator: 54, integration: 8).
+Lint clean.
+
+## 2026-08-27 - US-002: Unit tests for resolveIssuesDir with explicit flags
+
+Completed. Added 2 test cases (4 assertions) to test/integration.test.ts:
+- Returns { dir, spec } exactly as given when both flags are provided
+- No filesystem scanning occurs (temp dir has no .scratch/)
+
+Both tests confirm that resolveIssuesDir short-circuits when both --dir
+and --spec are supplied, returning them directly without touching the
+filesystem. The temp directory intentionally has no .scratch/ to prove
+no scanning happens.
+
+All 132 tests pass (setup: 66, orchestrator: 54, integration: 12).
+Lint clean.
+
+## 2026-08-28 - US-003: Subprocess CLI smoke test for execute
+
+Completed. Added 1 subprocess test (5 assertions) to
+test/integration.test.ts:
+- Spawns `node dist/index.js` with mock-agent-pass.js as provider
+- Creates temp dir with 2 ticket files (second blocked by first)
+  and a spec.md
+- Passes --dir, --spec, --timeout-secs 10 to the built CLI
+- Asserts exit code 0
+- Asserts both ticket files updated to **Status:** done on disk
+- Asserts log files created for both tickets
+
+Added helper functions: spawnCli (wraps execFile in a promise),
+makeTicketBody (generates ticket markdown with status and blockers).
+Also added readFileSync, existsSync, execFile imports to the test file.
+
+All 137 tests pass (setup: 66, orchestrator: 54, integration: 17).
+Lint clean.
+
+## 2026-08-28 - US-004: Create mock-agent-echo-args and test --model flag
+
+Completed. Created test/mock-agent-echo-args.js and added 1 test case
+(4 assertions) to test/integration.test.ts:
+- mock-agent-echo-args.js writes JSON.stringify(process.argv) to stdout,
+  then reads stdin to completion and exits 0
+- Test spawns CLI with -m test-model using the echo mock agent
+- Asserts exit code 0
+- Asserts log file created
+- Asserts log contains --model flag and test-model value
+
+Gotcha: new mock agent files need chmod +x to be spawnable by the
+orchestrator (spawn uses the shebang, not node directly).
+
+All 141 tests pass (setup: 66, orchestrator: 54, integration: 21).
+Lint clean.
+
+## 2026-08-28 - US-005: Subprocess CLI test for --dry-run
+
+Completed. Added 1 subprocess test (6 assertions) to
+test/integration.test.ts:
+- Spawns `node dist/index.js` with --dry-run, --dir, --spec flags
+- Creates temp dir with 2 ticket files (second blocked by first)
+  and a spec.md
+- Asserts exit code 0
+- Asserts stdout contains Wave 1 with 01-alpha.md
+- Asserts stdout contains Wave 2 with 02-beta.md
+- Asserts stdout contains AGENT INSTRUCTIONS (prompt preview)
+- Asserts both ticket files are NOT modified (still ready-for-agent)
+
+All 147 tests pass (setup: 66, orchestrator: 54, integration: 27).
+Lint clean.
+
+## 2026-08-28 - US-006: CLI exits gracefully when no tickets found
+
+Completed. Added 1 subprocess test (2 assertions) to
+test/integration.test.ts:
+- Spawns `node dist/index.js` with --dir pointing at an empty
+  issues directory and a valid --spec
+- Asserts exit code 0 (graceful, not a crash)
+- Asserts stdout contains "No ticket files found"
+
+The implementation already existed in src/index.ts (lines 148-150):
+scanTickets returns an empty array for an empty directory, and
+runExecute prints "No ticket files found. Exiting." then returns
+normally (exit code 0). This test validates that behavior end-to-end
+through the subprocess CLI.
+
+All 149 tests pass (setup: 66, orchestrator: 54, integration: 29).
+Lint clean.
+
+## 2026-08-28 - US-007: CLI exits with error for missing dir/spec
+
+Completed. Added 2 subprocess tests (4 assertions) to
+test/integration.test.ts:
+- Test 1: passes --dir /nonexistent/path with a valid --spec file,
+  asserts non-zero exit code and stderr contains "not found"
+- Test 2: passes valid --dir with --spec /nonexistent/spec.md,
+  asserts non-zero exit code and stderr contains "not found"
+
+The validation logic already existed in src/index.ts (lines 136-143):
+runExecute checks existsSync(dir) and existsSync(spec), prints
+"Directory not found: ..." or "Spec file not found: ..." to stderr,
+and calls process.exit(2). These tests validate that behavior
+end-to-end through the subprocess CLI.
+
+All 153 tests pass (setup: 66, orchestrator: 54, integration: 33).
+Lint clean.
+
+## 2026-08-28 - US-008: Unknown blocker warning and stripping
+
+Completed. Added 1 subprocess test (5 assertions) to
+test/integration.test.ts:
+- Creates a ticket with **Blocked by:** 99 where ticket 99 does not
+  exist in the issues directory
+- Spawns the CLI as a subprocess with mock-agent-pass.js
+- Asserts combined stdout+stderr contains "99" (the unknown blocker
+  number) and "not found" (the warning message)
+- Asserts exit code 0 (ticket completed despite invalid blocker)
+- Asserts ticket file updated to **Status:** done (blocker stripped)
+- Asserts log file created
+
+The warning and stripping logic already existed in src/index.ts
+(lines 155-170): runExecute builds a Set of known ticket numbers,
+iterates tickets to find blockers referencing unknown numbers,
+console.warn's the warning, then filters the blockers array to only
+known numbers. This test validates that behavior end-to-end through
+the subprocess CLI.
+
+All 158 tests pass (setup: 66, orchestrator: 54, integration: 38).
+Lint clean.
+
+## 2026-08-28 - US-009: Dry-run deadlock detection
+
+Completed. Added 1 subprocess test (4 assertions) to
+test/integration.test.ts:
+- Creates two tickets with circular dependencies (1 blocks 2,
+  2 blocks 1)
+- Spawns the CLI with --dry-run
+- Asserts exit code 0
+- Asserts stdout contains "Deadlocked tickets"
+- Asserts stdout lists both ticket filenames (01-alpha.md,
+  02-beta.md)
+
+The deadlock detection logic already existed in dryRun()
+(orchestrator.ts:222-231): after simulating waves, any tickets
+still in ready-for-agent state are reported as deadlocked. This
+test validates that behavior end-to-end through the subprocess
+CLI with a circular dependency scenario.
+
+All 162 tests pass (setup: 66, orchestrator: 54, integration: 42).
+Lint clean.
+
+## 2026-08-28 - US-010: Setup-then-execute composition test
+
+Completed. Added 1 composition test (12 assertions) to
+test/integration.test.ts:
+- Calls setup() with tracker:'local' in a temp project dir,
+  using dist/skills and dist/docs-templates as source dirs
+- Creates .scratch/my-feature/issues/ with 2 ticket files
+  (second blocked by first) and a spec.md
+- Spawns the CLI as a subprocess with mock-agent-pass.js,
+  passing --dir and --spec pointing at the .scratch layout
+- Asserts exit code 0
+- Asserts both tickets updated to **Status:** done
+- Asserts log files created in .scratch/my-feature/logs/
+- Asserts docs/agents/issue-tracker.md exists (from setup)
+- Asserts all 6 .agents/skills/ directories exist (from setup)
+
+Added import of setup and SKILL_DIRS from ../src/setup.js to
+the integration test file.
+
+All 174 tests pass (setup: 66, orchestrator: 54, integration: 54).
+Lint clean.
+
+All 10 user stories now have passes: true. PRD complete.

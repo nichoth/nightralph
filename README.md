@@ -1,28 +1,138 @@
-# night-ralph
+# `nightralph`
 
-A minimal Node-based "Ralph-style" orchestrator that now supports both GitHub issue mode and a local Markdown ticket mode compatible with Matt Pocock's `to-tickets` local output.
+This is a minimal Node-based AI orchestrator. It reads local markdown tickets
+produced by
+[`to-tickets` skill](https://github.com/mattpocock/skills/blob/main/skills/engineering/to-tickets/SKILL.md),
+resolves their dependency graph, and runs agents in parallel as much as possible,
+honoring the ticket dependencies.
 
-Local mode highlights
+This is inspired by [nightshift](https://github.com/Shaurya-Sethi/nightshift/).
+I made it because I noticed that the API in `nightshift` had already drifted
+from the skill definitions. This module bundles its skill dependencies,
+so they can't drift as long as you install the skills with this package.
+(See [the section on the `setup` command](#install-dependency-skills).)
 
-- Provide `--local-dir ./tickets` and either `--prd-file ./tickets/PRD.md` or create `PRD.md` in the directory.
-- The tool reads all `*.md` files (excluding the PRD file) and treats them as child tickets.
-- It matches child tickets to the PRD by looking for a `## Parent` section that contains the PRD filename or PRD title, or by a numeric `#<number>` if you also use GitHub numbering.
-- Blockers are read from `## Blocked by` and can reference other ticket filenames (e.g. `other-ticket.md`). If a blocker file is present and not moved to `done/`, the ticket is considered blocked.
-- Successful agent runs (exit code 0) move the processed ticket to `<local-dir>/done/`. Prompts and agent logs are saved to `<local-dir>/prompts/` and `<local-dir>/logs/` respectively.
+<!-- toc -->
 
-Usage examples
+- [Install](#install)
+  * [Install Dependency Skills](#install-dependency-skills)
+  * [Create Issues](#create-issues)
+  * [Execute Issues](#execute-issues)
+- [Workflow](#workflow)
+  * [`nightralph` command](#nightralph-command)
 
-Local mode:
+<!-- tocstop -->
+
+## Install
 
 ```bash
-node bin/ralph.js --local-dir ./tickets --prd-file ./tickets/PRD.md --agent claude --model claude-sonnet-4-6
-
-# Dry run
-node bin/ralph.js --local-dir ./tickets --prd-file ./tickets/PRD.md --dry-run
+npm i -S nightralph
 ```
 
-GitHub mode (unchanged):
+### Install Dependency Skills
+
+Use a subcommand in this package to add the required
+[Pocock skills](https://github.com/mattpocock/skills) to your repo.
+This command will copy some files in this package to a specific directory
+in the consumer's repo. The upstream
+[`grill-with-docs`](https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md)
+skill is exposed as `/grill`, along with its sub-skills
+`grilling` and `domain-modeling`.
+
+```sh
+npx nightralph setup
+```
+
+The Pocock skills are bundled with this git repo, at `./skills`.
+They are cloned with some metadata, visible in
+[skill/upstream.json](skills/upstream.json).
+That's how we prevent skill vs API drift.
+
+
+### Create Issues
+
+First create issues.
+
+This package bundles the skill files with the CLI, to
+**prevent version drift**. After installing this package,
+there is an `npx` command that will add the required skills to your
+local `./claude/skills/` folder.
+
+**The expected flow is**
+
+```
+grill -> to-spec -> to-tickets -> tdd
+```
+
+`to-tickets` will create issues in local markdown files.
+
+### Execute Issues
+
+`to-tickets` produces markdown files at
+`.scratch/<feature>/issues/<NN>-<slug>.md`.
 
 ```bash
-node bin/ralph.js --prd 12 --repo myorg/myrepo --agent claude --model claude-sonnet-4-6
+# Auto-discover .scratch features and run with claude
+npx nightralph claude -m claude-opus-4-6
+
+# Dry run to inspect the dependency graph and prompt
+npx nightralph claude --dry-run
+
+# Explicit paths (skips auto-discovery)
+npx nightralph claude -m claude-opus-4-6 \
+  --dir .scratch/my-feature/issues \
+  --spec .scratch/my-feature/spec.md
+```
+
+Flags:
+
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `<provider>` | yes | -- | Agent CLI to spawn (e.g. `claude`, `codex`) |
+| `-m`, `--model` | no | -- | Model flag passed to the agent |
+| `--dir` | no | auto | Path to the issues directory |
+| `--spec` | no | auto | Path to the spec file |
+| `--dry-run` | no | -- | Show wave order and prompt without running |
+| `--timeout-secs` | no | `300` | Kill agent after N seconds |
+
+Notes:
+
+* When `--dir` and `--spec` are omitted, the CLI looks for
+  `.scratch/<feature>/issues/` directories. If multiple features exist,
+  **it prompts you to pick one** with an interactive selector.
+* Tickets are selected by `**Status:** ready-for-agent` in the file body.
+* Dependencies are read from the `**Blocked by:**` field; the orchestrator
+  skips tickets whose blockers haven't completed.
+* Unblocked tickets run in parallel. After a wave finishes, newly unblocked
+  tickets start in the next wave.
+* On success (agent exit 0), the ticket's status is updated to `done`
+  in-place. Failed tickets keep their status and block dependents.
+* Agent logs are written to `<dir>/../logs/<ticket>.log`.
+
+
+## Workflow
+
+Need to use several skills, in order:
+
+```
+grill -> to-spec -> to-tickets
+```
+
+At that point you will have a number of tickets, which are markdown files
+in your local repo. This tool handles the last step, implementing the tickets,
+which normally is done with the `tdd` skill. This tool will work in a loop,
+aiming to complete 1 task per session, then restarting (a classic Ralph loop).
+
+### `nightralph` command
+
+After you have the tickets, you can use the `nightralph` loop to execute.
+
+```sh
+npx nightralph claude -m claude-opus-4-6
+```
+
+Or with a different provider:
+
+```sh
+npx nightralph codex -m gpt-5.6-terra
 ```

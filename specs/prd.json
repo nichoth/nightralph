@@ -1,0 +1,172 @@
+{
+  "project": "nightralph",
+  "branchName": "ralph/integration-test-coverage",
+  "description": "Integration tests for the CLI layer, validating subprocess execution, argument forwarding, dry-run output, edge cases, and setup-to-execute composition",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Unit tests for findFeatureDirs",
+      "description": "As a developer, I want direct tests for findFeatureDirs so that feature directory discovery is validated independently.",
+      "acceptanceCriteria": [
+        "Create test/integration.test.ts with findFeatureDirs tests",
+        "Test: returns empty array when .scratch/ does not exist",
+        "Test: returns empty array when .scratch/ has directories without issues/ subdirs",
+        "Test: returns entries with correct name, dir, and spec paths for valid feature dirs",
+        "Test: ignores non-directory entries in .scratch/",
+        "Each test creates and cleans up its own temp directory",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "findFeatureDirs is already exported from src/index.ts -- import it directly"
+    },
+    {
+      "id": "US-002",
+      "title": "Unit tests for resolveIssuesDir with explicit flags",
+      "description": "As a developer, I want to verify that when both --dir and --spec are provided, resolveIssuesDir returns them directly without scanning .scratch/.",
+      "acceptanceCriteria": [
+        "Add resolveIssuesDir tests to test/integration.test.ts",
+        "Test: returns { dir, spec } exactly as given when both flags are provided",
+        "No filesystem scanning occurs (the temp dir has no .scratch/)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "resolveIssuesDir is already exported from src/index.ts"
+    },
+    {
+      "id": "US-003",
+      "title": "Subprocess CLI smoke test for execute",
+      "description": "As a developer, I want a test that spawns node dist/index.js <provider> as a child process so that I know the yargs wiring, argument parsing, and file resolution work end-to-end.",
+      "acceptanceCriteria": [
+        "Test spawns the built CLI with --dir, --spec, and --timeout-secs pointing at a temp directory with ticket files",
+        "Uses the existing mock-agent-pass.js as the provider argument",
+        "Asserts exit code 0",
+        "Asserts ticket files on disk are updated to **Status:** done",
+        "Asserts log files are created in the expected location",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Use short --timeout-secs (e.g. 10) to avoid hanging"
+    },
+    {
+      "id": "US-004",
+      "title": "Create mock-agent-echo-args and test --model flag",
+      "description": "As a developer, I want to verify that --model (or -m) is passed through to the spawned agent process so that running npx nightralph claude -m claude-sonnet-4-6 actually forwards the model argument.",
+      "acceptanceCriteria": [
+        "Create test/mock-agent-echo-args.js that writes process.argv to stdout, then exits 0",
+        "Test spawns the CLI with -m test-model using this mock agent",
+        "Asserts the log file contains --model and test-model in the captured argv",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Subprocess CLI test for --dry-run",
+      "description": "As a developer, I want a test that runs the CLI with --dry-run so that I know the dry-run path works through yargs and produces the expected output.",
+      "acceptanceCriteria": [
+        "Test spawns the built CLI with --dry-run, --dir, and --spec",
+        "Captures stdout",
+        "Asserts output contains Wave 1: with the expected ticket filenames",
+        "Asserts output contains AGENT INSTRUCTIONS (prompt preview)",
+        "Asserts ticket files on disk are NOT modified",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "CLI exits gracefully when no tickets found",
+      "description": "As a developer, I want to verify the CLI handles the empty-directory edge case gracefully.",
+      "acceptanceCriteria": [
+        "Test points --dir at an empty directory with a valid --spec",
+        "Asserts stdout contains No ticket files found",
+        "Asserts exit code 0 (graceful, not a crash)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "CLI exits with error for missing dir/spec",
+      "description": "As a developer, I want the CLI to fail clearly when --dir or --spec point to nonexistent paths.",
+      "acceptanceCriteria": [
+        "Test passes --dir /nonexistent/path with a valid --spec",
+        "Asserts exit code is non-zero",
+        "Asserts stderr contains not found",
+        "Test passes valid --dir with --spec /nonexistent/spec.md",
+        "Asserts exit code is non-zero",
+        "Asserts stderr contains not found",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Unknown blocker warning and stripping",
+      "description": "As a developer, I want to verify that runExecute warns about blockers referencing nonexistent ticket numbers and strips them so execution proceeds.",
+      "acceptanceCriteria": [
+        "Test creates a ticket with **Blocked by:** 99 where ticket 99 does not exist",
+        "Spawns the CLI as a subprocess",
+        "Asserts stderr/stdout contains a warning mentioning blocker 99",
+        "Asserts the ticket still completes (blocker was stripped)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Dry-run deadlock detection",
+      "description": "As a developer, I want the dry-run to report deadlocked tickets (circular dependencies) so users can fix their ticket graph before running real agents.",
+      "acceptanceCriteria": [
+        "Test creates two tickets that block each other (1 blocks 2, 2 blocks 1)",
+        "Spawns the CLI with --dry-run",
+        "Asserts output contains Deadlocked tickets with both filenames",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Setup-then-execute composition test",
+      "description": "As a developer, I want a test that runs setup, then creates issue files in the expected .scratch/ layout, then runs execute -- proving the two commands compose correctly.",
+      "acceptanceCriteria": [
+        "Test calls setup() with tracker:'local' in a temp project dir",
+        "Creates .scratch/<feature>/issues/ with 2 ticket files and a spec.md",
+        "Spawns the CLI as a subprocess pointing at that project dir (using the mock agent)",
+        "Asserts tickets are marked done",
+        "Asserts logs are written to .scratch/<feature>/logs/",
+        "Asserts docs/agents/issue-tracker.md exists (from setup)",
+        "Asserts .agents/skills/ directories exist (from setup)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Most complex test -- calls setup() as a library function, then spawns CLI for execute"
+    }
+  ]
+}

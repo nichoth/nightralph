@@ -8,3 +8,5 @@
   I like, a good programming style
 * [chainlink](https://github.com/dollspace-gay/chainlink) -- a CLI issue
   tracker for AI Agents
+* [mattpocock/skills](https://github.com/mattpocock/skills) -- the skills that
+  this CLI targets.
