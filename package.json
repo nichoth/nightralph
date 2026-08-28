@@ -35,5 +35,6 @@
     "newneostandard": "^0.14.3",
     "typescript-eslint": "^8.68.0"
   },
+  "license": "SEE LICENSE IN LICENSE",
   "author": "nichoth"
 }

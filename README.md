@@ -1,7 +1,12 @@
 # `nightralph`
+[![tests](https://img.shields.io/github/actions/workflow/status/nichoth/nightralph/nodejs.yml?style=flat-square)](https://github.com/nichoth/nightralph/actions/workflows/nodejs.yml)
+[![types](https://img.shields.io/npm/types/nightralph?style=flat-square)](README.md)
+[![semantic versioning](https://img.shields.io/badge/semver-2.0.0-blue?logo=semver&style=flat-square)](https://semver.org/)
+[![install size](https://flat.badgen.net/packagephobia/install/nightralph)](https://packagephobia.com/result?p=nightralph)
+[![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
 
 This is a minimal Node-based AI orchestrator. It reads local markdown tickets
-produced by
+or remote Github issues produced by
 [`to-tickets` skill](https://github.com/mattpocock/skills/blob/main/skills/engineering/to-tickets/SKILL.md),
 resolves their dependency graph, and runs agents in parallel as much as possible,
 honoring the ticket dependencies.
@@ -34,10 +39,11 @@ npm i -S nightralph
 Use a subcommand in this package to add the required
 [Pocock skills](https://github.com/mattpocock/skills) to your repo.
 This command will copy some files in this package to a specific directory
-in the consumer's repo. The upstream
+in your repo. The upstream
 [`grill-with-docs`](https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md)
-skill is exposed as `/grill`, along with its sub-skills
-`grilling` and `domain-modeling`.
+skill is exposed as `/grill`, along with its sub-skills `grilling`
+and `domain-modeling`.
+
 
 ```sh
 npx nightralph setup
@@ -55,8 +61,8 @@ First create issues.
 
 This package bundles the skill files with the CLI, to
 **prevent version drift**. After installing this package,
-there is an `npx` command that will add the required skills to your
-local `./claude/skills/` folder.
+use [the `npx` command](#install-dependency-skills) to add the required
+skills to your local `./claude/skills/` folder or `./agents.skills/` folder.
 
 ### Create Issues
 
@@ -76,8 +82,8 @@ grill -> to-spec -> to-tickets -> tdd
 
 >
 > [!TIP]
-> The `to-tickets` skill bundled here can use any input text, meaning
-> `grill` & `to-spec` skills are not required.
+> The `to-tickets` skill bundled here can use any input text
+> describing a feature, meaning `grill` & `to-spec` skills are not required.
 >
 
 ### Execute Issues
