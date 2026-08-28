@@ -97,7 +97,7 @@ yargs(hideBin(process.argv))
                 describe:'Show wave order without running',
                 default:false,
             })
-            .option('timeout-secs', {
+            .option('timeout', {
                 type:'number',
                 describe:'Kill agent after N seconds',
                 default:300,
@@ -108,7 +108,7 @@ yargs(hideBin(process.argv))
                 model:argv.model as string|undefined,
                 spec:argv.spec as string|undefined,
                 dryRun:argv.dryRun as boolean|undefined,
-                timeoutSecs:argv.timeoutSecs as
+                timeout:argv.timeout as
                     number|undefined,
             })
         }
@@ -123,7 +123,7 @@ async function runExecute (argv:{
     model?:string
     spec?:string
     dryRun?:boolean
-    timeoutSecs?:number
+    timeout?:number
 }):Promise<void> {
     const { dir, spec } = await resolveIssuesDir(
         argv.spec
@@ -171,10 +171,10 @@ async function runExecute (argv:{
     }
 
     const logsDir = join(dirname(dir), 'logs')
-    const timeoutSecs = argv.timeoutSecs ?? 300
+    const timeout = argv.timeout ?? 300
     await runWaves(
         tickets, specBody,
-        argv.provider, argv.model ?? null, timeoutSecs,
+        argv.provider, argv.model ?? null, timeout,
         logsDir,
     )
 }

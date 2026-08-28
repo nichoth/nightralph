@@ -104,26 +104,15 @@ npx nightralph claude -m claude-opus-4-6
 # Dry run to inspect the dependency graph and prompt
 npx nightralph claude --dry-run
 
-# Explicit paths (skips auto-discovery)
-npx nightralph claude -m claude-opus-4-6 \
-  --dir .scratch/my-feature/issues \
-  --spec .scratch/my-feature/spec.md
+# Specify a feature by name
+npx nightralph claude -m claude-opus-4-6 --spec my-feature
 ```
 
-#### `--spec` option
+#### `--spec <name>` option
 
-The spec is the design document -- it captures the problem, solution,
-user stories, and architectural decisions from a conversation.
-It's the "what and why" artifact produced by the to-spec skill .
-
-
-#### `--dir` option
-
-The issues directory (.scratch/<feature>/issues/) holds individual
-implementation tickets that get executed by agents one at a time.
-Each ticket is a small unit of work with its own status, blockers,
-and lifecycle. 
-
+A feature name that resolves to `.scratch/<name>/` by convention.
+The spec file is `.scratch/<name>/spec.md` and the issues directory
+is `.scratch/<name>/issues/`.
 
 Flags:
 
@@ -131,14 +120,13 @@ Flags:
 |------|----------|---------|-------------|
 | `<provider>` | yes | -- | Agent CLI to spawn (e.g. `claude`, `codex`) |
 | `-m`, `--model` | no | -- | Model flag passed to the agent |
-| `--dir` | no | auto | Path to the issues directory |
-| `--spec` | no | auto | Path to the spec file |
+| `--spec` | no | auto | Feature name (resolves `.scratch/<name>/`) |
 | `--dry-run` | no | -- | Show wave order and prompt without running |
-| `--timeout-secs` | no | `300` | Kill agent after N seconds |
+| `--timeout` | no | `300` | Kill agent after N seconds |
 
 Notes:
 
-* When `--dir` and `--spec` are omitted, the CLI looks for
+* When `--spec` is omitted, the CLI looks for
   `.scratch/<feature>/issues/` directories. If multiple features exist,
   **it prompts you to pick one** with an interactive selector.
 * Tickets are selected by `**Status:** ready-for-agent` in the file body.

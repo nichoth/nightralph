@@ -125,7 +125,7 @@ export function spawnAgent (opts:{
     prompt:string
     agentCmd:string
     model:string|null
-    timeoutSecs:number
+    timeout:number
     logPath:string
 }):Promise<number> {
     const args:string[] = []
@@ -148,11 +148,11 @@ export function spawnAgent (opts:{
         if (!proc.killed) {
             console.warn(
                 'Agent did not exit in ' +
-                `${opts.timeoutSecs}s; killing.`
+                `${opts.timeout}s; killing.`
             )
             proc.kill('SIGKILL')
         }
-    }, opts.timeoutSecs * 1000)
+    }, opts.timeout * 1000)
 
     proc.stdin.write(opts.prompt)
     proc.stdin.end()
@@ -247,7 +247,7 @@ export async function runWaves (
     specBody:string,
     agentCmd:string,
     model:string|null,
-    timeoutSecs:number,
+    timeout:number,
     logsDir:string,
 ):Promise<void> {
     mkdirSync(logsDir, { recursive:true })
@@ -277,7 +277,7 @@ export async function runWaves (
                     prompt,
                     agentCmd,
                     model,
-                    timeoutSecs,
+                    timeout,
                     logPath,
                 })
                 return { ticket:t, exitCode:code }
