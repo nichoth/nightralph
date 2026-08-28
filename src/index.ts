@@ -86,13 +86,11 @@ yargs(hideBin(process.argv))
                 type:'string',
                 describe:'Model passed to the agent',
             })
-            .option('dir', {
-                type:'string',
-                describe:'Path to the issues directory',
-            })
             .option('spec', {
                 type:'string',
-                describe:'Path to the spec file',
+                describe:
+                    'Feature name ' +
+                    '(resolves .scratch/<name>/)',
             })
             .option('dry-run', {
                 type:'boolean',
@@ -108,7 +106,6 @@ yargs(hideBin(process.argv))
             await runExecute({
                 provider:argv.provider as string,
                 model:argv.model as string|undefined,
-                dir:argv.dir as string|undefined,
                 spec:argv.spec as string|undefined,
                 dryRun:argv.dryRun as boolean|undefined,
                 timeoutSecs:argv.timeoutSecs as
@@ -124,13 +121,12 @@ yargs(hideBin(process.argv))
 async function runExecute (argv:{
     provider:string
     model?:string
-    dir?:string
     spec?:string
     dryRun?:boolean
     timeoutSecs?:number
 }):Promise<void> {
     const { dir, spec } = await resolveIssuesDir(
-        argv.dir, argv.spec
+        argv.spec
     )
 
     if (!existsSync(dir)) {

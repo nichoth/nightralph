@@ -100,39 +100,26 @@ test('findFeatureDirs - ignores non-directory entries',
         }
     })
 
-test('resolveIssuesDir - returns explicit flags directly',
+test('resolveIssuesDir - resolves name to .scratch/',
     async t => {
         const dir = tmp()
         try {
             const result = await resolveIssuesDir(
-                '/my/issues',
-                '/my/spec.md',
+                'my-feature',
                 dir,
             )
-            t.equal(result.dir, '/my/issues',
-                'dir matches the flag value')
-            t.equal(result.spec, '/my/spec.md',
-                'spec matches the flag value')
-        } finally {
-            rmSync(dir, { recursive:true, force:true })
-        }
-    })
-
-test('resolveIssuesDir - no filesystem scanning with flags',
-    async t => {
-        const dir = tmp()
-        try {
-            const flagDir = join(dir, 'explicit-issues')
-            const flagSpec = join(dir, 'explicit-spec.md')
-            const result = await resolveIssuesDir(
-                flagDir,
-                flagSpec,
-                dir,
+            t.equal(
+                result.dir,
+                join(dir, '.scratch', 'my-feature',
+                    'issues'),
+                'dir resolves to .scratch/<name>/issues',
             )
-            t.equal(result.dir, flagDir,
-                'returns dir without scanning')
-            t.equal(result.spec, flagSpec,
-                'returns spec without scanning')
+            t.equal(
+                result.spec,
+                join(dir, '.scratch', 'my-feature',
+                    'spec.md'),
+                'spec resolves to .scratch/<name>/spec.md',
+            )
         } finally {
             rmSync(dir, { recursive:true, force:true })
         }
@@ -148,7 +135,10 @@ const MOCK_ECHO = join(
     process.cwd(), 'test', 'mock-agent-echo-args.js'
 )
 
-function spawnCli (args:string[]):Promise<{
+function spawnCli (
+    args:string[],
+    opts?:{ cwd?:string },
+):Promise<{
     code:number
     stdout:string
     stderr:string
@@ -157,7 +147,7 @@ function spawnCli (args:string[]):Promise<{
         execFile(
             process.execPath,
             [CLI, ...args],
-            { timeout:30_000 },
+            { timeout:30_000, cwd:opts?.cwd },
             (err, stdout, stderr) => {
                 const code = err && 'code' in err ?
                     (err as { code:number }).code :
@@ -189,16 +179,30 @@ function makeTicketBody (opts:{
     return lines.join('\n')
 }
 
+const FEAT = 'test-feat'
+
+function scratchDirs (projectDir:string):{
+    issuesDir:string
+    specPath:string
+    logsDir:string
+} {
+    const base = join(
+        projectDir, '.scratch', FEAT
+    )
+    const issuesDir = join(base, 'issues')
+    const specPath = join(base, 'spec.md')
+    const logsDir = join(base, 'logs')
+    mkdirSync(issuesDir, { recursive:true })
+    writeFileSync(specPath, '# Test spec')
+    return { issuesDir, specPath, logsDir }
+}
+
 test('CLI subprocess - --model flag forwarded to agent',
     async t => {
-        const base = tmp()
+        const projectDir = tmp()
         try {
-            const issuesDir = join(base, 'issues')
-            const logsDir = join(base, 'logs')
-            mkdirSync(issuesDir, { recursive:true })
-
-            const specPath = join(base, 'spec.md')
-            writeFileSync(specPath, '# Test spec')
+            const { issuesDir, logsDir } =
+                scratchDirs(projectDir)
 
             writeFileSync(
                 join(issuesDir, '01-echo.md'),
@@ -209,11 +213,10 @@ test('CLI subprocess - --model flag forwarded to agent',
 
             const { code } = await spawnCli([
                 MOCK_ECHO,
-                '--dir', issuesDir,
-                '--spec', specPath,
+                '--spec', FEAT,
                 '--timeout-secs', '10',
                 '-m', 'test-model',
-            ])
+            ], { cwd:projectDir })
 
             t.equal(code, 0, 'exit code 0')
 
@@ -235,18 +238,16 @@ test('CLI subprocess - --model flag forwarded to agent',
                 'log contains model value',
             )
         } finally {
-            rmSync(base, { recursive:true, force:true })
+            rmSync(projectDir, {
+                recursive:true, force:true,
+            })
         }
     })
 
 test('CLI subprocess - --dry-run output', async t => {
-    const base = tmp()
+    const projectDir = tmp()
     try {
-        const issuesDir = join(base, 'issues')
-        mkdirSync(issuesDir, { recursive:true })
-
-        const specPath = join(base, 'spec.md')
-        writeFileSync(specPath, '# Test spec')
+        const { issuesDir } = scratchDirs(projectDir)
 
         writeFileSync(
             join(issuesDir, '01-alpha.md'),
@@ -262,10 +263,9 @@ test('CLI subprocess - --dry-run output', async t => {
 
         const { code, stdout } = await spawnCli([
             MOCK_AGENT,
-            '--dir', issuesDir,
-            '--spec', specPath,
+            '--spec', FEAT,
             '--dry-run',
-        ])
+        ], { cwd:projectDir })
 
         t.equal(code, 0, 'exit code 0')
 
@@ -299,25 +299,22 @@ test('CLI subprocess - --dry-run output', async t => {
             'ticket 2 NOT modified',
         )
     } finally {
-        rmSync(base, { recursive:true, force:true })
+        rmSync(projectDir, {
+            recursive:true, force:true,
+        })
     }
 })
 
 test('CLI subprocess - no tickets exits gracefully',
     async t => {
-        const base = tmp()
+        const projectDir = tmp()
         try {
-            const issuesDir = join(base, 'issues')
-            mkdirSync(issuesDir, { recursive:true })
-
-            const specPath = join(base, 'spec.md')
-            writeFileSync(specPath, '# Empty spec')
+            scratchDirs(projectDir)
 
             const { code, stdout } = await spawnCli([
                 MOCK_AGENT,
-                '--dir', issuesDir,
-                '--spec', specPath,
-            ])
+                '--spec', FEAT,
+            ], { cwd:projectDir })
 
             t.equal(code, 0, 'exit code 0 (graceful)')
             t.ok(
@@ -325,64 +322,39 @@ test('CLI subprocess - no tickets exits gracefully',
                 'stdout contains no-tickets message',
             )
         } finally {
-            rmSync(base, { recursive:true, force:true })
+            rmSync(projectDir, {
+                recursive:true, force:true,
+            })
         }
     })
 
-test('CLI subprocess - error for missing --dir', async t => {
-    const base = tmp()
-    try {
-        const specPath = join(base, 'spec.md')
-        writeFileSync(specPath, '# Valid spec')
+test('CLI subprocess - error for nonexistent feature',
+    async t => {
+        const projectDir = tmp()
+        try {
+            const { code, stderr } = await spawnCli([
+                MOCK_AGENT,
+                '--spec', 'nonexistent',
+            ], { cwd:projectDir })
 
-        const { code, stderr } = await spawnCli([
-            MOCK_AGENT,
-            '--dir', '/nonexistent/path',
-            '--spec', specPath,
-        ])
-
-        t.ok(code !== 0, 'exit code is non-zero')
-        t.ok(
-            stderr.includes('not found'),
-            'stderr contains not found',
-        )
-    } finally {
-        rmSync(base, { recursive:true, force:true })
-    }
-})
-
-test('CLI subprocess - error for missing --spec', async t => {
-    const base = tmp()
-    try {
-        const issuesDir = join(base, 'issues')
-        mkdirSync(issuesDir, { recursive:true })
-
-        const { code, stderr } = await spawnCli([
-            MOCK_AGENT,
-            '--dir', issuesDir,
-            '--spec', '/nonexistent/spec.md',
-        ])
-
-        t.ok(code !== 0, 'exit code is non-zero')
-        t.ok(
-            stderr.includes('not found'),
-            'stderr contains not found',
-        )
-    } finally {
-        rmSync(base, { recursive:true, force:true })
-    }
-})
+            t.ok(code !== 0, 'exit code is non-zero')
+            t.ok(
+                stderr.includes('not found'),
+                'stderr contains not found',
+            )
+        } finally {
+            rmSync(projectDir, {
+                recursive:true, force:true,
+            })
+        }
+    })
 
 test('CLI subprocess - unknown blocker warning and stripping',
     async t => {
-        const base = tmp()
+        const projectDir = tmp()
         try {
-            const issuesDir = join(base, 'issues')
-            const logsDir = join(base, 'logs')
-            mkdirSync(issuesDir, { recursive:true })
-
-            const specPath = join(base, 'spec.md')
-            writeFileSync(specPath, '# Test spec')
+            const { issuesDir, logsDir } =
+                scratchDirs(projectDir)
 
             writeFileSync(
                 join(issuesDir, '01-task.md'),
@@ -394,10 +366,9 @@ test('CLI subprocess - unknown blocker warning and stripping',
 
             const { code, stdout, stderr } = await spawnCli([
                 MOCK_AGENT,
-                '--dir', issuesDir,
-                '--spec', specPath,
+                '--spec', FEAT,
                 '--timeout-secs', '10',
-            ])
+            ], { cwd:projectDir })
 
             const combined = stdout + stderr
             t.ok(
@@ -424,19 +395,17 @@ test('CLI subprocess - unknown blocker warning and stripping',
                 'log file created',
             )
         } finally {
-            rmSync(base, { recursive:true, force:true })
+            rmSync(projectDir, {
+                recursive:true, force:true,
+            })
         }
     })
 
 test('CLI subprocess - dry-run deadlock detection',
     async t => {
-        const base = tmp()
+        const projectDir = tmp()
         try {
-            const issuesDir = join(base, 'issues')
-            mkdirSync(issuesDir, { recursive:true })
-
-            const specPath = join(base, 'spec.md')
-            writeFileSync(specPath, '# Test spec')
+            const { issuesDir } = scratchDirs(projectDir)
 
             writeFileSync(
                 join(issuesDir, '01-alpha.md'),
@@ -455,10 +424,9 @@ test('CLI subprocess - dry-run deadlock detection',
 
             const { code, stdout } = await spawnCli([
                 MOCK_AGENT,
-                '--dir', issuesDir,
-                '--spec', specPath,
+                '--spec', FEAT,
                 '--dry-run',
-            ])
+            ], { cwd:projectDir })
 
             t.equal(code, 0, 'exit code 0')
             t.ok(
@@ -474,19 +442,17 @@ test('CLI subprocess - dry-run deadlock detection',
                 'deadlock lists second ticket',
             )
         } finally {
-            rmSync(base, { recursive:true, force:true })
+            rmSync(projectDir, {
+                recursive:true, force:true,
+            })
         }
     })
 
 test('CLI subprocess - execute smoke test', async t => {
-    const base = tmp()
+    const projectDir = tmp()
     try {
-        const issuesDir = join(base, 'issues')
-        const logsDir = join(base, 'logs')
-        mkdirSync(issuesDir, { recursive:true })
-
-        const specPath = join(base, 'spec.md')
-        writeFileSync(specPath, '# Test spec\nDo things.')
+        const { issuesDir, logsDir } =
+            scratchDirs(projectDir)
 
         writeFileSync(
             join(issuesDir, '01-first.md'),
@@ -502,10 +468,9 @@ test('CLI subprocess - execute smoke test', async t => {
 
         const { code } = await spawnCli([
             MOCK_AGENT,
-            '--dir', issuesDir,
-            '--spec', specPath,
+            '--spec', FEAT,
             '--timeout-secs', '10',
-        ])
+        ], { cwd:projectDir })
 
         t.equal(code, 0, 'exit code 0')
 
@@ -534,7 +499,9 @@ test('CLI subprocess - execute smoke test', async t => {
             'log file created for ticket 2',
         )
     } finally {
-        rmSync(base, { recursive:true, force:true })
+        rmSync(projectDir, {
+            recursive:true, force:true,
+        })
     }
 })
 
@@ -578,10 +545,9 @@ test('setup-then-execute composition', async t => {
 
         const { code } = await spawnCli([
             MOCK_AGENT,
-            '--dir', issuesDir,
-            '--spec', specPath,
+            '--spec', feature,
             '--timeout-secs', '10',
-        ])
+        ], { cwd:projectDir })
 
         t.equal(code, 0, 'exit code 0')
 

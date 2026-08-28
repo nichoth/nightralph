@@ -33,12 +33,15 @@ export function findFeatureDirs (cwd:string):{
 }
 
 export async function resolveIssuesDir (
-    dirFlag:string|undefined,
-    specFlag:string|undefined,
+    specName:string|undefined,
     cwd:string = process.cwd(),
 ):Promise<{ dir:string; spec:string }> {
-    if (dirFlag && specFlag) {
-        return { dir:dirFlag, spec:specFlag }
+    if (specName) {
+        const featureDir = join(cwd, '.scratch', specName)
+        return {
+            dir:join(featureDir, 'issues'),
+            spec:join(featureDir, 'spec.md'),
+        }
     }
 
     const features = findFeatureDirs(cwd)
@@ -46,7 +49,7 @@ export async function resolveIssuesDir (
     if (features.length === 0) {
         console.error(
             'No .scratch/<feature>/issues/ directories ' +
-            'found.\nProvide --dir and --spec explicitly.'
+            'found.\nProvide --spec <feature-name>.'
         )
         process.exit(2)
     }
@@ -66,8 +69,5 @@ export async function resolveIssuesDir (
         chosen = features.find(f => f.name === name)!
     }
 
-    const dir = dirFlag ?? chosen.dir
-    const spec = specFlag ?? chosen.spec
-
-    return { dir, spec }
+    return { dir:chosen.dir, spec:chosen.spec }
 }

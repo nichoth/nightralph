@@ -41,7 +41,10 @@ Small orchestrator that runs a single-agent session per issue.
 ### CLI (`src/index.ts`)
 - `nightralph setup [--claude]` -- prompts for tracker
   format, then scaffolds skills and docs
-- `nightralph <provider> [options]` -- executes tickets
+- `nightralph <provider> [--spec <name>]` -- executes
+  tickets; `--spec` takes a feature name that resolves
+  to `.scratch/<name>/` (issues dir + spec.md by
+  convention)
 
 ## Agent skills
 

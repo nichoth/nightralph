@@ -110,6 +110,21 @@ npx nightralph claude -m claude-opus-4-6 \
   --spec .scratch/my-feature/spec.md
 ```
 
+#### `--spec` option
+
+The spec is the design document -- it captures the problem, solution,
+user stories, and architectural decisions from a conversation.
+It's the "what and why" artifact produced by the to-spec skill .
+
+
+#### `--dir` option
+
+The issues directory (.scratch/<feature>/issues/) holds individual
+implementation tickets that get executed by agents one at a time.
+Each ticket is a small unit of work with its own status, blockers,
+and lifecycle. 
+
+
 Flags:
 
 | Flag | Required | Default | Description |
@@ -135,3 +150,13 @@ Notes:
   in-place. Failed tickets keep their status and block dependents.
 * Agent logs are written to `<dir>/../logs/<ticket>.log`.
 
+
+## Keep Your Machine Awake
+
+This is expected to run for a long time, like overnight.
+
+### Mac OS
+
+```sh
+caffeinate -i npx nightralph claude -m claude-opus-4-6
+```
