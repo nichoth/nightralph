@@ -2,7 +2,7 @@
   "name": "nightralph",
   "version": "0.0.0",
   "type": "module",
-  "description": "Small orchestrator that runs a single-agent session per issue.",
+  "description": "Orchestrator that runs a single-agent session per issue.",
   "bin": {
     "nightralph": "dist/index.js"
   },
@@ -22,6 +22,10 @@
     "postversion": "git push --follow-tags && npm publish",
     "test": "esbuild test/setup.test.ts test/orchestrator.test.ts test/integration.test.ts --format=esm --bundle --packages=external --outdir=dist/test --sourcemap && node dist/test/setup.test.js && node dist/test/orchestrator.test.js && node dist/test/integration.test.js"
   },
+  "dependencies": {
+    "@inquirer/prompts": "^8.7.0",
+    "yargs": "^18.1.0"
+  },
   "devDependencies": {
     "@substrate-system/tapzero": "^0.10.16",
     "@types/node": "^26.3.0",
@@ -31,9 +35,5 @@
     "newneostandard": "^0.14.3",
     "typescript-eslint": "^8.68.0"
   },
-  "author": "nichoth",
-  "dependencies": {
-    "@inquirer/prompts": "^8.7.0",
-    "yargs": "^18.1.0"
-  }
+  "author": "nichoth"
 }

@@ -49,7 +49,7 @@ They are cloned with some metadata, visible in
 That's how we prevent skill vs API drift.
 
 
-### Create Issues
+## Workflow
 
 First create issues.
 
@@ -58,13 +58,27 @@ This package bundles the skill files with the CLI, to
 there is an `npx` command that will add the required skills to your
 local `./claude/skills/` folder.
 
+### Create Issues
+
+Use the `to-tickets` skill to create issues in local markdown files.
+
 **The expected flow is**
 
 ```
 grill -> to-spec -> to-tickets -> tdd
 ```
 
-`to-tickets` will create issues in local markdown files.
+>
+> [!NOTE]  
+> The `grill -> to-spec` pipeline is recommended to be run in a
+> single context window.
+>
+
+>
+> [!TIP]
+> The `to-tickets` skill bundled here can use any input text, meaning
+> `grill` & `to-spec` skills are not required.
+>
 
 ### Execute Issues
 
