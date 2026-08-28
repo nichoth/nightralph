@@ -21,10 +21,9 @@ so they can't drift as long as you install the skills with this package.
 
 - [Install](#install)
   * [Install Dependency Skills](#install-dependency-skills)
-  * [Create Issues](#create-issues)
-  * [Execute Issues](#execute-issues)
 - [Workflow](#workflow)
-  * [`nightralph` command](#nightralph-command)
+  * [Create Issues](#create-issues)
+  * [Execute Tasks with `nightralph`](#execute-tasks-with-nightralph)
 
 <!-- tocstop -->
 
@@ -74,6 +73,8 @@ Use the `to-tickets` skill to create issues in local markdown files.
 grill -> to-spec -> to-tickets -> tdd
 ```
 
+The `nightralph` CLI does the `tdd` part.
+
 >
 > [!NOTE]  
 > The `grill -> to-spec` pipeline is recommended to be run in a
@@ -84,12 +85,17 @@ grill -> to-spec -> to-tickets -> tdd
 > [!TIP]
 > The `to-tickets` skill bundled here can use any input text
 > describing a feature, meaning `grill` & `to-spec` skills are not required.
+> You could, for example, use
+> [superpowers:writing-plans](https://github.com/obra/superpowers/blob/main/skills/writing-plans/SKILL.md),
+> then follow with `to-tickets`.
 >
 
-### Execute Issues
 
-`to-tickets` produces markdown files at
-`.scratch/<feature>/issues/<NN>-<slug>.md`.
+### Execute Tasks with `nightralph`
+
+After you have the tickets, you can use the `nightralph` loop to execute.
+The `to-tickets` skill produces markdown files at
+`.scratch/<feature>/issues/<NN>-<slug>.md`, with task dependency info.
 
 ```bash
 # Auto-discover .scratch features and run with claude
@@ -129,30 +135,3 @@ Notes:
   in-place. Failed tickets keep their status and block dependents.
 * Agent logs are written to `<dir>/../logs/<ticket>.log`.
 
-
-## Workflow
-
-Need to use several skills, in order:
-
-```
-grill -> to-spec -> to-tickets
-```
-
-At that point you will have a number of tickets, which are markdown files
-in your local repo. This tool handles the last step, implementing the tickets,
-which normally is done with the `tdd` skill. This tool will work in a loop,
-aiming to complete 1 task per session, then restarting (a classic Ralph loop).
-
-### `nightralph` command
-
-After you have the tickets, you can use the `nightralph` loop to execute.
-
-```sh
-npx nightralph claude -m claude-opus-4-6
-```
-
-Or with a different provider:
-
-```sh
-npx nightralph codex -m gpt-5.6-terra
-```
