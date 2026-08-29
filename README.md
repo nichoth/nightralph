@@ -24,6 +24,8 @@ so they can't drift as long as you install the skills with this package.
 - [Workflow](#workflow)
   * [Create Issues](#create-issues)
   * [Execute Tasks with `nightralph`](#execute-tasks-with-nightralph)
+- [Keep Your Machine Awake](#keep-your-machine-awake)
+  * [Mac OS](#mac-os)
 
 <!-- tocstop -->
 
