@@ -19,6 +19,7 @@ import {
     dryRun,
     dryRunIsolated,
     getProviderArgs,
+    formatStreamLine,
     type Ticket,
 } from '../src/orchestrator.js'
 
@@ -1180,13 +1181,17 @@ test('dryRunIsolated handles multiple tickets per wave', t => {
 
 // -- US-003: provider adapter argument construction --
 
-test('getProviderArgs - claude provider adds permission flag',
+test('getProviderArgs - claude provider adds stream flags',
     t => {
         const args = getProviderArgs('claude')
         t.deepEqual(
             args,
-            ['--print', '--dangerously-skip-permissions'],
-            'claude gets --print and skip-permissions flag'
+            [
+                '--print', '--verbose',
+                '--output-format', 'stream-json',
+                '--dangerously-skip-permissions',
+            ],
+            'claude gets stream-json and skip-permissions'
         )
     })
 
@@ -1217,8 +1222,12 @@ test('getProviderArgs - full path with claude basename',
         )
         t.deepEqual(
             args,
-            ['--print', '--dangerously-skip-permissions'],
-            'full path to claude still gets permission flag'
+            [
+                '--print', '--verbose',
+                '--output-format', 'stream-json',
+                '--dangerously-skip-permissions',
+            ],
+            'full path to claude still gets stream flags'
         )
     })
 
@@ -1231,5 +1240,99 @@ test('getProviderArgs - full path with codex basename',
             args,
             ['exec', '--full-auto'],
             'full path to codex still gets sandbox flag'
+        )
+    })
+
+// -- formatStreamLine --
+
+test('formatStreamLine - parses assistant text', t => {
+    const line = JSON.stringify({
+        type:'assistant',
+        message:{
+            content:[{ type:'text', text:'Hello world' }],
+        },
+    })
+    t.equal(
+        formatStreamLine(line),
+        'Hello world',
+        'should extract text from assistant message'
+    )
+})
+
+test('formatStreamLine - skips tool_use blocks', t => {
+    const line = JSON.stringify({
+        type:'assistant',
+        message:{
+            content:[{
+                type:'tool_use',
+                name:'Read',
+                input:{},
+            }],
+        },
+    })
+    t.equal(
+        formatStreamLine(line),
+        null,
+        'should return null for tool_use-only messages'
+    )
+})
+
+test('formatStreamLine - parses result with cost', t => {
+    const line = JSON.stringify({
+        type:'result',
+        subtype:'done',
+        total_cost_usd:0.42,
+    })
+    t.equal(
+        formatStreamLine(line),
+        'done ($0.42)',
+        'should format result with cost'
+    )
+})
+
+test('formatStreamLine - parses result without cost', t => {
+    const line = JSON.stringify({
+        type:'result',
+        subtype:'end_turn',
+    })
+    t.equal(
+        formatStreamLine(line),
+        'end_turn',
+        'should format result without cost'
+    )
+})
+
+test('formatStreamLine - returns null for thinking', t => {
+    const line = JSON.stringify({
+        type:'system',
+        subtype:'thinking_tokens',
+        input_tokens:100,
+    })
+    t.equal(
+        formatStreamLine(line),
+        null,
+        'should skip thinking token events'
+    )
+})
+
+test('formatStreamLine - shows api retries', t => {
+    const line = JSON.stringify({
+        type:'system',
+        subtype:'api_retry',
+        error:'rate limited',
+    })
+    t.equal(
+        formatStreamLine(line),
+        'retry: rate limited',
+        'should show retry errors'
+    )
+})
+
+test('formatStreamLine - returns raw non-JSON lines',
+    t => {
+        t.equal(
+            formatStreamLine('plain text output'),
+            'plain text output',
+            'should pass through non-JSON lines'
         )
     })

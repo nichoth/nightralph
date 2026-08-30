@@ -7,6 +7,7 @@ import {
     readdirSync,
 } from 'node:fs'
 import { join, dirname, basename } from 'node:path'
+import { createInterface } from 'node:readline'
 import {
     getRepoRoot,
     getRepoName,
@@ -142,6 +143,18 @@ export function renderPrompt (
         'You are an autonomous coding agent. ' +
             'Implement the ticket.',
         '',
+        'Time is limited. Follow these rules:',
+        '- Spend at most 2 minutes reading existing ' +
+            'code. Read only the files directly relevant ' +
+            'to the ticket.',
+        '- Do NOT research external APIs or services ' +
+            'via web search. Use the spec and ticket ' +
+            'body as your sole reference for API shapes.',
+        '- Start writing code as soon as you understand ' +
+            'the immediate context. You can read more ' +
+            'files as needed while implementing.',
+        '- Commit your work when finished.',
+        '',
     ].join('\n')
 }
 
@@ -225,13 +238,61 @@ function detectDeadlocks (
 }
 
 const PROVIDER_ARGS:Record<string, string[]> = {
-    claude:['--print', '--dangerously-skip-permissions'],
+    claude:[
+        '--print', '--verbose',
+        '--output-format', 'stream-json',
+        '--dangerously-skip-permissions',
+    ],
     codex:['exec', '--full-auto'],
 }
 
 export function getProviderArgs (cmd:string):string[] {
     const name = basename(cmd)
     return PROVIDER_ARGS[name] ?? []
+}
+
+export function formatStreamLine (
+    line:string
+):string|null {
+    let obj:Record<string, unknown>
+    try {
+        obj = JSON.parse(line) as Record<string, unknown>
+    } catch {
+        return line
+    }
+
+    if (obj.type === 'assistant') {
+        const msg = obj.message as
+            Record<string, unknown>|undefined
+        const content = msg?.content as
+            Array<Record<string, unknown>>|undefined
+        if (!content) return null
+        for (const block of content) {
+            if (block.type === 'text') {
+                return String(block.text)
+            }
+        }
+        return null
+    }
+
+    if (obj.type === 'result') {
+        const sub = obj.subtype as string|undefined ?? 'done'
+        const cost = obj.total_cost_usd as number|undefined
+        const costStr = cost != null ?
+            ` ($${cost.toFixed(2)})` :
+            ''
+        return `${sub}${costStr}`
+    }
+
+    if (obj.type === 'system') {
+        const sub = obj.subtype as string|undefined
+        if (sub === 'api_retry') {
+            const error = obj.error as string|undefined
+            return `retry: ${error ?? 'unknown'}`
+        }
+    }
+
+    return null
 }
 
 export function spawnAgent (opts:{
@@ -241,6 +302,7 @@ export function spawnAgent (opts:{
     timeout:number
     logPath:string
     cwd?:string
+    label?:string
 }):Promise<number> {
     const args:string[] = [
         ...getProviderArgs(opts.agentCmd),
@@ -248,6 +310,11 @@ export function spawnAgent (opts:{
     if (opts.model) {
         args.push('--model', opts.model)
     }
+
+    const isClaude = basename(opts.agentCmd) === 'claude'
+    const prefix = opts.label ?
+        `  [${opts.label}] ` :
+        '  '
 
     const logStream = createWriteStream(
         opts.logPath,
@@ -259,7 +326,24 @@ export function spawnAgent (opts:{
     })
 
     proc.stdout.pipe(logStream)
+
+    const rl = createInterface({ input:proc.stdout })
+    rl.on('line', line => {
+        if (isClaude) {
+            const formatted = formatStreamLine(line)
+            if (formatted !== null) {
+                console.log(`${prefix}${formatted}`)
+            }
+        } else {
+            console.log(`${prefix}${line}`)
+        }
+    })
+
     proc.stderr.pipe(logStream)
+    const rlErr = createInterface({ input:proc.stderr })
+    rlErr.on('line', line => {
+        console.error(`${prefix}${line}`)
+    })
 
     const timeout = setTimeout(() => {
         if (!proc.killed) {
@@ -277,11 +361,15 @@ export function spawnAgent (opts:{
     return new Promise<number>(resolve => {
         proc.on('close', code => {
             clearTimeout(timeout)
+            rl.close()
+            rlErr.close()
             logStream.end()
             resolve(code ?? 1)
         })
         proc.on('error', err => {
             clearTimeout(timeout)
+            rl.close()
+            rlErr.close()
             logStream.end()
             console.error(
                 'Agent process error:',
@@ -411,6 +499,9 @@ async function respawnAndRetryMerge (opts:{
         opts.logsDir,
         opts.ticket.filename.replace(/\.md$/, '.respawn.log')
     )
+    const label = opts.ticket.filename.replace(
+        /\.md$/, ''
+    )
     const exitCode = await spawnAgent({
         prompt,
         agentCmd:opts.agentCmd,
@@ -418,6 +509,7 @@ async function respawnAndRetryMerge (opts:{
         timeout:opts.timeout,
         logPath,
         cwd:opts.worktreePath,
+        label,
     })
 
     if (exitCode !== 0) {
@@ -470,6 +562,9 @@ export async function runWaves (
                     logsDir,
                     t.filename.replace(/\.md$/, '.log')
                 )
+                const label = t.filename.replace(
+                    /\.md$/, ''
+                )
                 console.log(`  Starting ${t.filename}`)
                 const code = await spawnAgent({
                     prompt,
@@ -477,6 +572,7 @@ export async function runWaves (
                     model,
                     timeout,
                     logPath,
+                    label,
                 })
                 return { ticket:t, exitCode:code }
             })
@@ -603,6 +699,9 @@ export async function runWavesIsolated (opts:{
                     opts.logsDir,
                     t.filename.replace(/\.md$/, '.log')
                 )
+                const label = t.filename.replace(
+                    /\.md$/, ''
+                )
                 console.log(`  Starting ${t.filename}`)
                 return spawnAgent({
                     prompt,
@@ -611,6 +710,7 @@ export async function runWavesIsolated (opts:{
                     timeout:opts.timeout,
                     logPath,
                     cwd:worktrees[i].worktreePath,
+                    label,
                 })
             })
         )
