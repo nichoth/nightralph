@@ -8,10 +8,10 @@
 This is a minimal Node-based AI orchestrator. It reads local markdown tickets
 produced by
 [`to-tickets` skill](https://github.com/mattpocock/skills/blob/main/skills/engineering/to-tickets/SKILL.md),
-resolves their dependency graph, and runs agents in parallel as much as possible,
-honoring the ticket dependencies. During setup you can choose
-a GitHub-oriented tracker, which installs skill instructions that use
-`gh` CLI conventions, but the ticket source is always local markdown files.
+resolves their dependency graph, and runs agents in parallel,
+honoring ticket dependencies. During setup you can choose a GitHub issue
+tracker, which installs skill instructions that use `gh` CLI conventions,
+but the ticket source is always local markdown files.
 
 This is inspired by [nightshift](https://github.com/Shaurya-Sethi/nightshift/).
 I made it because I noticed the API in `nightshift` had already drifted
@@ -68,6 +68,12 @@ That's how we prevent skill vs API drift.
 ```
 grill -> to-spec -> to-tickets -> tdd
 ```
+
+>
+> [!NOTE]  
+> The `grill` step can be changed to something else. Output from step 1
+> needs to be a prose description.
+>
 
 First create issues.
 
