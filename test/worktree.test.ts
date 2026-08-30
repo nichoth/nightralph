@@ -16,6 +16,7 @@ import {
     listWorktrees,
     hasNewCommits,
     isDirty,
+    commitDirty,
 } from '../src/worktree.js'
 import type { Ticket } from '../src/orchestrator.js'
 
@@ -26,6 +27,18 @@ function initTempRepo ():string {
         join(tmpdir(), 'nightralph-worktree-test-')
     )
     execSync('git init', { cwd:dir })
+    execSync(
+        'git config user.email test@example.com',
+        { cwd:dir }
+    )
+    execSync(
+        'git config user.name "Test User"',
+        { cwd:dir }
+    )
+    execSync(
+        'git config core.hooksPath /dev/null',
+        { cwd:dir }
+    )
     execSync('git commit --allow-empty -m "init" --no-verify', {
         cwd:dir,
         env:{
@@ -478,5 +491,102 @@ test('isDirty is true when there are uncommitted changes', async t => {
         isDirty(worktreePath),
         true,
         'an untracked file makes the worktree dirty'
+    )
+})
+
+// -- commitDirty --
+
+test('commitDirty commits dirty state and returns true',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+        const ticket = makeTestTicket({
+            num:5, slug:'auto-commit',
+        })
+
+        const { worktreePath, branchName } =
+            await createWorktree({
+                repoRoot,
+                repoName,
+                baseBranch,
+                ticket,
+            })
+
+        writeFileSync(
+            join(worktreePath, 'new-file.txt'),
+            'agent work'
+        )
+
+        const committed = await commitDirty(worktreePath)
+        t.equal(committed, true, 'returns true when dirty')
+        t.equal(
+            isDirty(worktreePath),
+            false,
+            'worktree is clean after commitDirty'
+        )
+        t.equal(
+            hasNewCommits(repoRoot, baseBranch, branchName),
+            true,
+            'branch has new commits after commitDirty'
+        )
+    })
+
+test('commitDirty returns false on a clean worktree',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+        const ticket = makeTestTicket({
+            num:6, slug:'clean-commit',
+        })
+
+        const { worktreePath } = await createWorktree({
+            repoRoot,
+            repoName,
+            baseBranch,
+            ticket,
+        })
+
+        const committed = await commitDirty(worktreePath)
+        t.equal(
+            committed, false,
+            'returns false when nothing to commit'
+        )
+    })
+
+test('commitDirty uses custom message', async t => {
+    const repoRoot = initTempRepo()
+    const repoName = basename(repoRoot)
+    const baseBranch = getDefaultBranch(repoRoot)
+    const ticket = makeTestTicket({
+        num:7, slug:'custom-msg',
+    })
+
+    const { worktreePath } = await createWorktree({
+        repoRoot,
+        repoName,
+        baseBranch,
+        ticket,
+    })
+
+    writeFileSync(
+        join(worktreePath, 'work.txt'),
+        'content'
+    )
+
+    await commitDirty(
+        worktreePath,
+        'nightralph: auto-commit test'
+    )
+
+    const log = execSync(
+        'git log -1 --format=%s',
+        { cwd:worktreePath, encoding:'utf8' }
+    ).trim()
+    t.equal(
+        log,
+        'nightralph: auto-commit test',
+        'commit message matches'
     )
 })

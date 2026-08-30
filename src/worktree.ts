@@ -145,6 +145,33 @@ export function isDirty (cwd:string):boolean {
     return stdout.trim().length > 0
 }
 
+export async function commitDirty (
+    cwd:string,
+    message?:string
+):Promise<boolean> {
+    if (!isDirty(cwd)) return false
+    await execFileAsync(
+        'git',
+        ['add', '-A'],
+        { cwd }
+    )
+    try {
+        await execFileAsync(
+            'git',
+            [
+                'commit', '-m',
+                message ??
+                    'nightralph: auto-commit ' +
+                    'remaining changes',
+            ],
+            { cwd }
+        )
+        return true
+    } catch {
+        return false
+    }
+}
+
 export async function listWorktrees (
     repoRoot:string
 ):Promise<Array<string>> {

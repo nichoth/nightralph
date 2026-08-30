@@ -16,6 +16,7 @@ import {
     removeWorktree,
     hasNewCommits,
     isDirty,
+    commitDirty,
 } from './worktree.js'
 import {
     generateProgress,
@@ -731,37 +732,7 @@ export async function runWavesIsolated (opts:{
             const ticket = activeTickets[i]
             const worktree = worktrees[i]
 
-            if (exitCode === 0 && !hasNewCommits(
-                repoRoot, baseBranch, worktree.branchName
-            )) {
-                console.log(
-                    `  ${ticket.filename}: agent exited 0 ` +
-                    'but made no commits; leaving ticket ' +
-                    'ready-for-agent'
-                )
-            } else if (exitCode === 0 && isDirty(
-                worktree.worktreePath
-            )) {
-                console.log(
-                    `  ${ticket.filename}: agent left ` +
-                    'uncommitted changes in the worktree; ' +
-                    'leaving ticket ready-for-agent'
-                )
-            } else if (exitCode === 0) {
-                console.log(
-                    `  ${ticket.filename}: agent finished, ` +
-                    'awaiting merge'
-                )
-                ticketsByNum.set(ticket.num, ticket)
-                worktreePathsByNum.set(
-                    ticket.num, worktree.worktreePath
-                )
-                successfulBranches.push({
-                    branch:worktree.branchName,
-                    ticketNum:ticket.num,
-                    worktreePath:worktree.worktreePath,
-                })
-            } else {
+            if (exitCode !== 0) {
                 console.log(
                     `  ${ticket.filename}: ` +
                     `agent exited ${exitCode}`
@@ -787,7 +758,47 @@ export async function runWavesIsolated (opts:{
                         formatErrorMessage(err)
                     )
                 }
+                continue
             }
+
+            if (isDirty(worktree.worktreePath)) {
+                const committed = await commitDirty(
+                    worktree.worktreePath,
+                    'nightralph: auto-commit ' +
+                    `${ticket.filename} remaining changes`
+                )
+                if (committed) {
+                    console.log(
+                        `  ${ticket.filename}: ` +
+                        'auto-committed remaining changes'
+                    )
+                }
+            }
+
+            if (!hasNewCommits(
+                repoRoot, baseBranch, worktree.branchName
+            )) {
+                console.log(
+                    `  ${ticket.filename}: agent exited 0 ` +
+                    'but made no changes; leaving ticket ' +
+                    'ready-for-agent'
+                )
+                continue
+            }
+
+            console.log(
+                `  ${ticket.filename}: agent finished, ` +
+                'awaiting merge'
+            )
+            ticketsByNum.set(ticket.num, ticket)
+            worktreePathsByNum.set(
+                ticket.num, worktree.worktreePath
+            )
+            successfulBranches.push({
+                branch:worktree.branchName,
+                ticketNum:ticket.num,
+                worktreePath:worktree.worktreePath,
+            })
         }
 
         if (successfulBranches.length > 0) {

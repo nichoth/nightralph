@@ -734,7 +734,7 @@ async t => {
 })
 
 test('runWavesIsolated - agent leaves uncommitted changes, ' +
-    'ticket stays ready-for-agent and worktree is preserved',
+    'auto-committed and merged successfully',
 async t => {
     const projectDir = initTempGitRepo()
     try {
@@ -766,9 +766,9 @@ async t => {
 
             t.equal(
                 tickets[0].status,
-                'ready-for-agent',
-                'ticket with uncommitted changes stays ' +
-                'ready-for-agent'
+                'done',
+                'ticket with auto-committed changes ' +
+                'should be done'
             )
 
             const repoName = projectDir.split('/').pop()
@@ -776,15 +776,19 @@ async t => {
                 projectDir, '..',
                 `${repoName}.01-dirty`
             )
-            t.ok(
+            t.equal(
                 existsSync(worktreePath),
-                'worktree preserved when agent left it dirty'
+                false,
+                'worktree removed after successful merge'
             )
+
+            const logOutput = execSync(
+                'git log --oneline',
+                { cwd:projectDir }
+            ).toString()
             t.ok(
-                existsSync(
-                    join(worktreePath, 'uncommitted-change.txt')
-                ),
-                'uncommitted file is still present'
+                logOutput.includes('auto-commit'),
+                'git log contains auto-commit message'
             )
         } finally {
             process.chdir(originalCwd)
