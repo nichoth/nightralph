@@ -133,14 +133,14 @@ Flags:
 |------|----------|---------|-------------|
 | `<provider>` | yes | -- | Agent CLI to spawn (e.g. `claude`, `codex`) |
 | `-m`, `--model` | no | -- | Model flag passed to the agent |
-| `--spec` | no | auto | Feature name (resolves `.scratch/<name>/`) |
+| `--spec <name>` | no | auto | Feature name (resolves `.scratch/<name>/`) |
 | `--dry-run` | no | -- | Show wave order and prompt without running |
 | `-X` | no | -- | Stop on merge conflict instead of re-spawning |
 | `--timeout` | no | `300` | Kill agent after N seconds |
 
 Notes:
 
-* When `--spec` is omitted, the CLI looks for
+* When `--spec <name>` is omitted, the CLI looks for
   `.scratch/<feature>/issues/` directories. If multiple features exist,
   **it prompts you to pick one** with an interactive selector.
 * Tickets are selected by `**Status:** ready-for-agent` in the file body.
