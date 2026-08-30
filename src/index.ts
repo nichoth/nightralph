@@ -103,7 +103,7 @@ yargs(hideBin(process.argv))
             .option('timeout', {
                 type:'number',
                 describe:'Kill agent after N seconds',
-                default:300,
+                default:900,
             })
             .option('X', {
                 type:'boolean',

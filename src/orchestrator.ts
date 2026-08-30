@@ -143,6 +143,18 @@ export function renderPrompt (
         'You are an autonomous coding agent. ' +
             'Implement the ticket.',
         '',
+        'Time is limited. Follow these rules:',
+        '- Spend at most 2 minutes reading existing ' +
+            'code. Read only the files directly relevant ' +
+            'to the ticket.',
+        '- Do NOT research external APIs or services ' +
+            'via web search. Use the spec and ticket ' +
+            'body as your sole reference for API shapes.',
+        '- Start writing code as soon as you understand ' +
+            'the immediate context. You can read more ' +
+            'files as needed while implementing.',
+        '- Commit your work when finished.',
+        '',
     ].join('\n')
 }
 
