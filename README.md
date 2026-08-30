@@ -14,7 +14,7 @@ a GitHub-oriented tracker, which installs skill instructions that use
 `gh` CLI conventions, but the ticket source is always local markdown files.
 
 This is inspired by [nightshift](https://github.com/Shaurya-Sethi/nightshift/).
-I made it because I noticed that the API in `nightshift` had already drifted
+I made it because I noticed the API in `nightshift` had already drifted
 from the skill definitions. This module bundles its skill dependencies,
 so they can't drift as long as you install the skills with this package.
 (See [the section on the `setup` command](#install-dependency-skills).)
@@ -43,6 +43,10 @@ npm i -S nightralph
 
 ### Install Dependency Skills
 
+```sh
+npx nightralph setup
+```
+
 Use the `setup` subcommand in this package to add the required
 [Pocock skills](https://github.com/mattpocock/skills) to your repo.
 This command will copy some files in this package to a specific directory
@@ -50,11 +54,6 @@ in your repo. The upstream
 [`grill-with-docs`](https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md)
 skill is exposed as `/grill`, along with its sub-skills `grilling`
 and `domain-modeling`.
-
-
-```sh
-npx nightralph setup
-```
 
 The Pocock skills are bundled with this git repo, at `./skills`.
 They are cloned with some metadata, visible in
