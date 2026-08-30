@@ -1,0 +1,98 @@
+{
+  "project": "nightralph",
+  "branchName": "ralph/merge-conflict-handling",
+  "description": "Fix merge-conflict handling bugs: deferred markDone, respawn strategy, conflicted flag, worktree cleanup, failure recording",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Set conflicted flag after rebase-then-merge failure",
+      "description": "As a developer, I need mergeWave to always set conflicted:true when a branch fails to merge so that consumers can reliably detect the failure.",
+      "acceptanceCriteria": [
+        "In mergeWave (src/merge.ts), when rebaseBranch succeeds but mergeBranch returns false, set mergingResult.conflicted = true",
+        "The stop strategy correctly triggers stoppedAt in this rebase-ok-merge-fail case",
+        "The respawn strategy skips the branch and continues in this case",
+        "New test: rebase succeeds, merge fails -- result has conflicted:true and merged:false",
+        "New test: rebase succeeds, merge fails with stop strategy -- stoppedAt is set",
+        "Existing merge tests still pass",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Lines 177-182 of src/merge.ts -- after successful rebase, mergeBranch result is assigned to merged but conflicted stays false. Also need to add strategy handling (stop/continue) in this branch."
+    },
+    {
+      "id": "US-002",
+      "title": "Record failed tickets in progress.md",
+      "description": "As a user, I want progress.md to show which tickets failed and their exit codes so I can see the full picture without checking log files.",
+      "acceptanceCriteria": [
+        "Add a function or modify checkTicket in src/progress.ts to record failures with done:false and an exit code",
+        "renderProgress shows failed tickets with unchecked checkbox and exit code metadata",
+        "In runWavesIsolated (src/orchestrator.ts), call the failure-recording function when an agent exits non-zero",
+        "commitProgress is called after recording the failure",
+        "New test: checkTicket with done:false records exit code and keeps done as false",
+        "New test: renderProgress shows unchecked box with exit code for failed ticket",
+        "Existing progress tests still pass",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "checkTicket currently hardcodes done:true. Either add a new function (e.g. failTicket) or add a done parameter to checkTicket."
+    },
+    {
+      "id": "US-003",
+      "title": "Defer markDone until after merge",
+      "description": "As a user, I want tickets to stay ready-for-agent until their branch is successfully merged so that failed merges don't silently drop my work or unblock dependents prematurely.",
+      "acceptanceCriteria": [
+        "In runWavesIsolated, markDone is not called until mergeWave confirms the branch merged successfully",
+        "checkTicket in progress.md is not called for a ticket whose merge failed",
+        "If an agent exits 0 but its merge conflicts, the ticket retains status ready-for-agent on disk",
+        "Dependents of an unmerged ticket are not unblocked in subsequent waves",
+        "New test: agent exits 0, merge conflicts -- ticket stays ready-for-agent",
+        "Existing tests for the happy path (agent succeeds, merge clean) still pass",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Currently markDone is called at line 533 of src/orchestrator.ts before the merge at line 562. Move markDone and checkTicket calls to after mergeWave, keyed on each branch's merge result."
+    },
+    {
+      "id": "US-004",
+      "title": "Clean up worktrees after successful merge",
+      "description": "As a user, I want worktrees for successfully merged tickets removed automatically so I don't accumulate sibling directories after a large run.",
+      "acceptanceCriteria": [
+        "After a ticket's branch is successfully merged in runWavesIsolated, its worktree is removed via removeWorktree",
+        "Worktrees for failed or conflicted tickets are left intact for manual inspection",
+        "If worktree removal fails (e.g. directory already gone), the error is logged but does not stop the run",
+        "New test: after a successful wave, merged worktrees no longer exist on disk",
+        "New test: after a failed ticket, its worktree still exists",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "removeWorktree already exists in src/worktree.ts. Needs to be imported in orchestrator.ts and called after mergeWave for each successfully merged branch."
+    },
+    {
+      "id": "US-005",
+      "title": "Implement respawn on merge conflict",
+      "description": "As a user, I want the orchestrator to re-run the agent in the same worktree when a merge conflicts so the agent can resolve the conflict, matching the documented behavior.",
+      "acceptanceCriteria": [
+        "When mergeWave reports a branch as conflicted and strategy is respawn, runWavesIsolated re-runs spawnAgent in that ticket's existing worktree",
+        "Before re-running, the worktree is updated to reflect the current base branch (merge or rebase from base so the agent sees the latest code)",
+        "If the re-spawned agent exits 0, merge is retried",
+        "If the re-spawned agent fails or retry merge still conflicts, ticket stays ready-for-agent and is reported",
+        "Respawn is attempted at most once per ticket per wave to avoid infinite loops",
+        "New test: two-branch wave where second branch conflicts, agent is re-spawned and succeeds on retry",
+        "New test: respawn agent fails -- ticket stays ready-for-agent",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Depends on US-001 (correct conflicted flag) and US-003 (deferred markDone). The respawn loop runs after mergeWave, iterating conflicted results and re-spawning once each."
+    }
+  ]
+}

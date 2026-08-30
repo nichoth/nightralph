@@ -9,16 +9,20 @@ import { setup, checkGhAuth, type TrackerKind } from './setup.js'
 import {
     scanTickets,
     dryRun,
+    dryRunIsolated,
     runWaves,
+    runWavesIsolated,
 } from './orchestrator.js'
 import {
     findFeatureDirs,
     resolveIssuesDir,
+    getScriptDir,
 } from './resolve.js'
+import { getRepoRoot, getRepoName } from './worktree.js'
 
 export { findFeatureDirs, resolveIssuesDir }
 
-const scriptDir = dirname(process.argv[1])
+const scriptDir = getScriptDir(import.meta.url)
 
 yargs(hideBin(process.argv))
     .scriptName('nightralph')
@@ -88,8 +92,7 @@ yargs(hideBin(process.argv))
             })
             .option('spec', {
                 type:'string',
-                describe:
-                    'Feature name ' +
+                describe:'Feature name ' +
                     '(resolves .scratch/<name>/)',
             })
             .option('dry-run', {
@@ -101,6 +104,12 @@ yargs(hideBin(process.argv))
                 type:'number',
                 describe:'Kill agent after N seconds',
                 default:300,
+            })
+            .option('X', {
+                type:'boolean',
+                describe:'Stop on merge conflict instead of ' +
+                    're-spawning',
+                default:false,
             }),
         async argv => {
             await runExecute({
@@ -110,6 +119,8 @@ yargs(hideBin(process.argv))
                 dryRun:argv.dryRun as boolean|undefined,
                 timeout:argv.timeout as
                     number|undefined,
+                stopOnConflict:argv.X as
+                    boolean|undefined,
             })
         }
     )
@@ -118,12 +129,34 @@ yargs(hideBin(process.argv))
     .help()
     .parse()
 
+function isGitRepo ():boolean {
+    try {
+        getRepoRoot()
+        return true
+    } catch {
+        return false
+    }
+}
+
+function extractFeatureName (spec:string):string {
+    const parts = spec.split(
+        /[\\/]/
+    )
+    const scratchIndex = parts.indexOf('.scratch')
+    if (scratchIndex >= 0 && scratchIndex < parts.length - 1) {
+        return parts[scratchIndex + 1]
+    }
+    return parts[parts.length - 2] ??
+        parts[parts.length - 1] ?? 'feature'
+}
+
 async function runExecute (argv:{
     provider:string
     model?:string
     spec?:string
     dryRun?:boolean
     timeout?:number
+    stopOnConflict?:boolean
 }):Promise<void> {
     const { dir, spec } = await resolveIssuesDir(
         argv.spec
@@ -165,16 +198,55 @@ async function runExecute (argv:{
         )
     }
 
+    const logsDir = join(dirname(dir), 'logs')
+    const timeout = argv.timeout ?? 300
+    const featureName = extractFeatureName(spec)
+    const conflictStrategy = argv.stopOnConflict ?
+        'stop' :
+        'respawn'
+    const progressPath = join(
+        dirname(dir), 'progress.md'
+    )
+
     if (argv.dryRun) {
-        dryRun(tickets, specBody)
+        if (isGitRepo()) {
+            const repoName = getRepoName()
+            dryRunIsolated({
+                tickets,
+                specBody,
+                repoName,
+                conflictStrategy,
+                progressPath,
+            })
+        } else {
+            dryRun(tickets, specBody)
+        }
         return
     }
 
-    const logsDir = join(dirname(dir), 'logs')
-    const timeout = argv.timeout ?? 300
-    await runWaves(
-        tickets, specBody,
-        argv.provider, argv.model ?? null, timeout,
-        logsDir,
-    )
+    let result:{ allDone:boolean }
+
+    if (isGitRepo()) {
+        result = await runWavesIsolated({
+            tickets,
+            specBody,
+            agentCmd:argv.provider,
+            model:argv.model ?? null,
+            timeout,
+            logsDir,
+            featureName,
+            conflictStrategy,
+        })
+    } else {
+        result = await runWaves(
+            tickets, specBody,
+            argv.provider, argv.model ?? null,
+            timeout,
+            logsDir,
+        )
+    }
+
+    if (!result.allDone) {
+        process.exit(1)
+    }
 }

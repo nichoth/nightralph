@@ -1,6 +1,11 @@
 import { existsSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { select } from '@inquirer/prompts'
+
+export function getScriptDir (metaUrl:string):string {
+    return dirname(fileURLToPath(metaUrl))
+}
 
 export function findFeatureDirs (cwd:string):{
     name:string;

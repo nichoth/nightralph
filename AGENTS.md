@@ -1,11 +1,11 @@
 # nightralph
 
-Last verified: 2026-08-27
+Last verified: 2026-08-28
 
 Small orchestrator that runs a single-agent session per issue.
 
 ## Tech Stack
-- TypeScript, Node >= 18, ESM
+- TypeScript, Node >= 24, ESM
 - CLI: yargs + @inquirer/prompts
 - Testing: @substrate-system/tapzero
 
@@ -18,6 +18,9 @@ Small orchestrator that runs a single-agent session per issue.
 - `src/index.ts` -- CLI entry point (yargs commands)
 - `src/setup.ts` -- project scaffolding module
 - `src/orchestrator.ts` -- ticket scanning and wave execution
+- `src/worktree.ts` -- git worktree management
+- `src/progress.ts` -- run progress tracking
+- `src/merge.ts` -- branch merging after wave completion
 - `src/skills/` -- bundled skill definitions
 - `src/docs-templates/` -- doc templates copied to target projects
 
@@ -45,6 +48,69 @@ Small orchestrator that runs a single-agent session per issue.
   tickets; `--spec` takes a feature name that resolves
   to `.scratch/<name>/` (issues dir + spec.md by
   convention)
+- `-X` flag -- stop on merge conflict instead of
+  re-spawning the agent (sets conflict strategy to
+  `'stop'`)
+- `--dry-run` -- shows wave order without running;
+  auto-detects git repo and shows worktree/branch
+  layout when inside one
+- **Git auto-detection**: when run inside a git repo,
+  the CLI uses isolated worktree execution
+  (`runWavesIsolated`) instead of in-place
+  (`runWaves`)
+
+### orchestrator (`src/orchestrator.ts`)
+- **Exposes**: `Ticket`, `scanTickets(dir)`,
+  `findReadyTickets(tickets)`, `markDone(ticket)`,
+  `renderPrompt(specBody, ticket)`,
+  `spawnAgent(opts)`, `dryRun(tickets, specBody)`,
+  `dryRunIsolated(opts)`, `runWaves(...)`,
+  `runWavesIsolated(opts)`
+- **spawnAgent(opts)**: accepts optional `cwd` to run
+  the agent process in a specific directory (used for
+  worktree isolation)
+- **runWavesIsolated(opts)**: creates a worktree per
+  ticket, runs agents in parallel per wave, merges
+  branches back, tracks progress, and commits progress
+  updates
+- **dryRunIsolated(opts)**: prints simulated wave order
+  with worktree paths and branch names
+
+### worktree module (`src/worktree.ts`)
+- **Exposes**: `getRepoRoot()`, `getRepoName()`,
+  `getCurrentBranch()`, `createWorktree(opts)`,
+  `removeWorktree(path)`, `listWorktrees(repoRoot)`
+- **createWorktree**: creates a git worktree in a
+  sibling directory named
+  `<repo>.<num>-<slug>` on branch
+  `<repo>/<num>-<slug>`
+- **Guarantees**: all functions are synchronous except
+  `createWorktree`, `removeWorktree`, and
+  `listWorktrees`
+
+### progress module (`src/progress.ts`)
+- **Exposes**: `TicketProgress`, `ProgressData`,
+  `generateProgress(feature, tickets)`,
+  `renderProgress(data)`, `checkTicket(data, num, result)`,
+  `writeProgress(path, data)`,
+  `commitProgress(repoRoot, path, message)`
+- **Guarantees**: `renderProgress` produces a markdown
+  checklist; `commitProgress` stages and commits the
+  progress file
+
+### merge module (`src/merge.ts`)
+- **Exposes**: `MergeConflictStrategy`, `MergeResult`,
+  `WaveMergeResult`, `mergeBranch(repoRoot, branch)`,
+  `rebaseBranch(repoRoot, branch, onto)`,
+  `mergeWave(opts)`
+- **MergeConflictStrategy**: `'respawn'|'stop'`
+- **mergeWave**: merges the first branch directly,
+  rebases subsequent branches onto the base before
+  merging; respects strategy to either skip conflicted
+  branches or stop entirely
+- **Guarantees**: on conflict, `mergeBranch` aborts
+  the merge and returns false; `rebaseBranch` aborts
+  and checks out the base branch on failure
 
 ## Agent skills
 

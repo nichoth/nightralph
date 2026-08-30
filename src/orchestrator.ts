@@ -6,7 +6,31 @@ import {
     writeFileSync,
     readdirSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname, basename } from 'node:path'
+import {
+    getRepoRoot,
+    getRepoName,
+    getCurrentBranch,
+    createWorktree,
+    removeWorktree,
+    hasNewCommits,
+    isDirty,
+} from './worktree.js'
+import {
+    generateProgress,
+    readProgress,
+    mergeProgress,
+    writeProgress,
+    commitProgress,
+    checkTicket,
+    type ProgressData,
+} from './progress.js'
+import {
+    mergeBranch,
+    mergeWave,
+    updateWorktreeFromBase,
+    type MergeConflictStrategy,
+} from './merge.js'
 
 export type Ticket = {
     num:number
@@ -83,7 +107,7 @@ export function findReadyTickets (
 ):Ticket[] {
     const doneNums = new Set(
         tickets
-            .filter(t => t.status !== 'ready-for-agent')
+            .filter(t => t.status === 'done')
             .map(t => t.num)
     )
     return tickets.filter(t => {
@@ -121,14 +145,106 @@ export function renderPrompt (
     ].join('\n')
 }
 
+function listTickets (tickets:ReadonlyArray<Ticket>):void {
+    console.log('\nTickets:')
+    for (const t of tickets) {
+        const blockerStr = t.blockers.length > 0 ?
+            `blocked by [${t.blockers.join(', ')}]` :
+            'no blockers'
+        console.log(
+            `  ${t.filename} ` +
+            `(${t.status}) ${blockerStr}`
+        )
+    }
+}
+
+function * simulateWaves (
+    tickets:ReadonlyArray<Ticket>
+):Generator<{ wave:number; ready:Array<Ticket> }> {
+    const sim = new Map(
+        tickets.map(t => [t.num, t.status])
+    )
+    let wave = 1
+    while (true) {
+        const doneNums = new Set(
+            [...sim.entries()]
+                .filter(([, s]) => s === 'done')
+                .map(([n]) => n)
+        )
+        const ready = [...tickets].filter(t => {
+            if (sim.get(t.num) !== 'ready-for-agent') {
+                return false
+            }
+            return t.blockers.every(
+                b => doneNums.has(b)
+            )
+        })
+        if (ready.length === 0) break
+        yield { wave, ready }
+        for (const t of ready) {
+            sim.set(t.num, 'done')
+        }
+        wave++
+    }
+}
+
+function detectDeadlocks (
+    tickets:ReadonlyArray<Ticket>
+):Array<Ticket> {
+    const doneNums = new Set<number>()
+    const ready = new Set<number>()
+
+    for (const t of tickets) {
+        if (t.status === 'ready-for-agent') {
+            ready.add(t.num)
+        } else if (t.status === 'done') {
+            doneNums.add(t.num)
+        }
+    }
+
+    let changed = true
+    while (changed) {
+        changed = false
+        for (const num of ready) {
+            const ticket = tickets.find(t =>
+                t.num === num
+            )!
+            if (ticket.blockers.every(
+                b => doneNums.has(b)
+            )) {
+                doneNums.add(num)
+                ready.delete(num)
+                changed = true
+            }
+        }
+    }
+
+    return [...ready].map(num =>
+        tickets.find(t => t.num === num)!
+    )
+}
+
+const PROVIDER_ARGS:Record<string, string[]> = {
+    claude:['--print', '--dangerously-skip-permissions'],
+    codex:['exec', '--full-auto'],
+}
+
+export function getProviderArgs (cmd:string):string[] {
+    const name = basename(cmd)
+    return PROVIDER_ARGS[name] ?? []
+}
+
 export function spawnAgent (opts:{
     prompt:string
     agentCmd:string
     model:string|null
     timeout:number
     logPath:string
+    cwd?:string
 }):Promise<number> {
-    const args:string[] = []
+    const args:string[] = [
+        ...getProviderArgs(opts.agentCmd),
+    ]
     if (opts.model) {
         args.push('--model', opts.model)
     }
@@ -139,6 +255,7 @@ export function spawnAgent (opts:{
     )
     const proc = spawn(opts.agentCmd, args, {
         stdio:['pipe', 'pipe', 'pipe'],
+        cwd:opts.cwd,
     })
 
     proc.stdout.pipe(logStream)
@@ -176,53 +293,20 @@ export function spawnAgent (opts:{
 }
 
 export function dryRun (
-    tickets:Ticket[],
+    tickets:Array<Ticket>,
     specBody:string
 ):void {
-    console.log('\nTickets:')
-    for (const t of tickets) {
-        const blockerStr = t.blockers.length > 0 ?
-            `blocked by [${t.blockers.join(', ')}]` :
-            'no blockers'
-        console.log(
-            `  ${t.filename} ` +
-            `(${t.status}) ${blockerStr}`
-        )
-    }
+    listTickets(tickets)
 
     console.log('\nSimulated wave order:')
-    const sim = new Map(
-        tickets.map(t => [t.num, t.status])
-    )
-    let wave = 1
-    while (true) {
-        const doneNums = new Set(
-            [...sim.entries()]
-                .filter(([, s]) => s !== 'ready-for-agent')
-                .map(([n]) => n)
-        )
-        const ready = tickets.filter(t => {
-            if (sim.get(t.num) !== 'ready-for-agent') {
-                return false
-            }
-            return t.blockers.every(
-                b => doneNums.has(b)
-            )
-        })
-        if (ready.length === 0) break
+    for (const { wave, ready } of simulateWaves(tickets)) {
         console.log(
             `  Wave ${wave}: ` +
             ready.map(t => t.filename).join(', ')
         )
-        for (const t of ready) {
-            sim.set(t.num, 'done')
-        }
-        wave++
     }
 
-    const stuck = tickets.filter(
-        t => sim.get(t.num) === 'ready-for-agent'
-    )
+    const stuck = detectDeadlocks(tickets)
     if (stuck.length > 0) {
         console.log(
             '\nDeadlocked tickets: ' +
@@ -242,6 +326,120 @@ export function dryRun (
     }
 }
 
+export function dryRunIsolated (opts:{
+    tickets:Array<Ticket>
+    specBody:string
+    repoName:string
+    conflictStrategy:MergeConflictStrategy
+    progressPath:string
+}):void {
+    listTickets(opts.tickets)
+
+    console.log('\nSimulated wave order:')
+    for (const { wave, ready } of simulateWaves(
+        opts.tickets
+    )) {
+        console.log(
+            `  Wave ${wave}: ` +
+            ready.map(t => t.filename).join(', ')
+        )
+        for (const t of ready) {
+            const num = String(t.num).padStart(2, '0')
+            const branchName =
+                `${opts.repoName}/${num}-${t.slug}`
+            const worktreePath =
+                `../${opts.repoName}.${num}-${t.slug}`
+            console.log(`    worktree: ${worktreePath}`)
+            console.log(`    branch:   ${branchName}`)
+        }
+    }
+
+    const stuck = detectDeadlocks(opts.tickets)
+    if (stuck.length > 0) {
+        console.log(
+            '\nDeadlocked tickets: ' +
+            stuck.map(t => t.filename).join(', ')
+        )
+    }
+
+    const firstReady = findReadyTickets(opts.tickets)
+    if (firstReady.length > 0) {
+        console.log(
+            '\nPrompt for first ready ticket ' +
+            `(${firstReady[0].filename}):\n`
+        )
+        console.log(
+            renderPrompt(opts.specBody, firstReady[0])
+        )
+    }
+
+    const strategyDesc =
+        opts.conflictStrategy === 'respawn' ?
+            'respawn (re-run agent on conflict)' :
+            'stop (stop merging on conflict)'
+    console.log(
+        `\nMerge strategy: ${strategyDesc}`
+    )
+    console.log(`Progress file: ${opts.progressPath}`)
+}
+
+// Re-runs the agent in a ticket's existing worktree
+// after a merge conflict, then retries the merge once.
+// Called at most once per ticket per wave.
+async function respawnAndRetryMerge (opts:{
+    repoRoot:string
+    baseBranch:string
+    branch:string
+    ticket:Ticket
+    worktreePath:string
+    specBody:string
+    agentCmd:string
+    model:string|null
+    timeout:number
+    logsDir:string
+}):Promise<boolean> {
+    await updateWorktreeFromBase(
+        opts.worktreePath, opts.baseBranch
+    )
+
+    console.log(
+        `  ${opts.ticket.filename}: respawning agent ` +
+        'to resolve merge conflict'
+    )
+    const prompt = renderPrompt(opts.specBody, opts.ticket)
+    const logPath = join(
+        opts.logsDir,
+        opts.ticket.filename.replace(/\.md$/, '.respawn.log')
+    )
+    const exitCode = await spawnAgent({
+        prompt,
+        agentCmd:opts.agentCmd,
+        model:opts.model,
+        timeout:opts.timeout,
+        logPath,
+        cwd:opts.worktreePath,
+    })
+
+    if (exitCode !== 0) {
+        console.log(
+            `  ${opts.ticket.filename}: respawned agent ` +
+            `exited ${exitCode}`
+        )
+        return false
+    }
+
+    const merged = await mergeBranch(
+        opts.repoRoot, opts.branch
+    )
+    if (!merged) {
+        console.log(
+            `  ${opts.ticket.filename}: merge still ` +
+            'conflicted after respawn'
+        )
+    }
+    return merged
+}
+
 export async function runWaves (
     tickets:Ticket[],
     specBody:string,
@@ -249,7 +447,7 @@ export async function runWaves (
     model:string|null,
     timeout:number,
     logsDir:string,
-):Promise<void> {
+):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
     let totalCompleted = 0
@@ -288,19 +486,20 @@ export async function runWaves (
         for (const r of results) {
             if (r.status === 'rejected') continue
             const { ticket, exitCode } = r.value
-            if (exitCode === 0) {
-                markDone(ticket)
-                waveCompleted++
-                totalCompleted++
-                console.log(
-                    `  ${ticket.filename}: done`
-                )
-            } else {
+            if (exitCode !== 0) {
                 console.log(
                     `  ${ticket.filename}: ` +
                     `agent exited ${exitCode}`
                 )
+                continue
             }
+
+            markDone(ticket)
+            waveCompleted++
+            totalCompleted++
+            console.log(
+                `  ${ticket.filename}: done`
+            )
         }
 
         if (waveCompleted === 0) {
@@ -321,4 +520,325 @@ export async function runWaves (
             `, ${remaining.length} remaining` :
             '')
     )
+
+    return { allDone:remaining.length === 0 }
+}
+
+export async function runWavesIsolated (opts:{
+    tickets:Array<Ticket>
+    specBody:string
+    agentCmd:string
+    model:string|null
+    timeout:number
+    logsDir:string
+    featureName:string
+    conflictStrategy:MergeConflictStrategy
+}):Promise<{ allDone:boolean }> {
+    mkdirSync(opts.logsDir, { recursive:true })
+
+    const repoRoot = getRepoRoot()
+    const repoName = getRepoName()
+    const baseBranch = getCurrentBranch()
+
+    const progressPath = join(
+        dirname(opts.logsDir), 'progress.md'
+    )
+    const progress:ProgressData = mergeProgress(
+        generateProgress(opts.featureName, opts.tickets),
+        readProgress(progressPath)
+    )
+    writeProgress(progressPath, progress)
+    await commitProgress(
+        repoRoot,
+        progressPath,
+        `nightralph: start ${opts.featureName}`
+    )
+
+    let totalCompleted = 0
+    let waveNum = 0
+
+    while (true) {
+        const ready = findReadyTickets(opts.tickets)
+        if (ready.length === 0) break
+
+        waveNum++
+        console.log(
+            `\nWave ${waveNum}: ` +
+            ready.map(t => t.filename).join(', ')
+        )
+
+        const worktreeSettled = await Promise.allSettled(
+            ready.map(t => createWorktree({
+                repoRoot,
+                repoName,
+                baseBranch,
+                ticket:t,
+            }))
+        )
+
+        const activeTickets:Array<Ticket> = []
+        const worktrees:Array<{
+            worktreePath:string
+            branchName:string
+        }> = []
+
+        for (let i = 0; i < worktreeSettled.length; i++) {
+            const settled = worktreeSettled[i]
+            const ticket = ready[i]
+            if (settled.status === 'rejected') {
+                console.log(
+                    `  ${ticket.filename}: failed to create ` +
+                    `worktree: ${formatErrorMessage(settled.reason)}`
+                )
+                continue
+            }
+            activeTickets.push(ticket)
+            worktrees.push(settled.value)
+        }
+
+        const results = await Promise.allSettled(
+            activeTickets.map((t, i) => {
+                const prompt = renderPrompt(opts.specBody, t)
+                const logPath = join(
+                    opts.logsDir,
+                    t.filename.replace(/\.md$/, '.log')
+                )
+                console.log(`  Starting ${t.filename}`)
+                return spawnAgent({
+                    prompt,
+                    agentCmd:opts.agentCmd,
+                    model:opts.model,
+                    timeout:opts.timeout,
+                    logPath,
+                    cwd:worktrees[i].worktreePath,
+                })
+            })
+        )
+
+        let waveCompleted = 0
+        const successfulBranches:Array<{
+            branch:string
+            ticketNum:number
+            worktreePath:string
+        }> = []
+        const ticketsByNum = new Map<number, Ticket>()
+        const worktreePathsByNum = new Map<number, string>()
+
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i]
+            if (r.status === 'rejected') continue
+            const exitCode = r.value
+            const ticket = activeTickets[i]
+            const worktree = worktrees[i]
+
+            if (exitCode === 0 && !hasNewCommits(
+                repoRoot, baseBranch, worktree.branchName
+            )) {
+                console.log(
+                    `  ${ticket.filename}: agent exited 0 ` +
+                    'but made no commits; leaving ticket ' +
+                    'ready-for-agent'
+                )
+            } else if (exitCode === 0 && isDirty(
+                worktree.worktreePath
+            )) {
+                console.log(
+                    `  ${ticket.filename}: agent left ` +
+                    'uncommitted changes in the worktree; ' +
+                    'leaving ticket ready-for-agent'
+                )
+            } else if (exitCode === 0) {
+                console.log(
+                    `  ${ticket.filename}: agent finished, ` +
+                    'awaiting merge'
+                )
+                ticketsByNum.set(ticket.num, ticket)
+                worktreePathsByNum.set(
+                    ticket.num, worktree.worktreePath
+                )
+                successfulBranches.push({
+                    branch:worktree.branchName,
+                    ticketNum:ticket.num,
+                    worktreePath:worktree.worktreePath,
+                })
+            } else {
+                console.log(
+                    `  ${ticket.filename}: ` +
+                    `agent exited ${exitCode}`
+                )
+                checkTicket(progress, ticket.num, {
+                    branch:worktree.branchName,
+                    exitCode,
+                    done:false,
+                })
+                writeProgress(progressPath, progress)
+                await commitProgress(
+                    repoRoot,
+                    progressPath,
+                    `nightralph: ${ticket.filename} failed`
+                )
+
+                try {
+                    await removeWorktree(worktree.worktreePath)
+                } catch (err) {
+                    console.error(
+                        '  Failed to remove worktree ' +
+                        `${worktree.worktreePath}: ` +
+                        formatErrorMessage(err)
+                    )
+                }
+            }
+        }
+
+        if (successfulBranches.length > 0) {
+            const mergeResult = await mergeWave({
+                repoRoot,
+                baseBranch,
+                branches:successfulBranches,
+                strategy:opts.conflictStrategy,
+            })
+
+            for (const branchResult of mergeResult.merged) {
+                const ticket = ticketsByNum.get(
+                    branchResult.ticketNum
+                )
+                if (!ticket) continue
+
+                if (branchResult.merged) {
+                    markDone(ticket)
+                    waveCompleted++
+                    totalCompleted++
+                    console.log(
+                        `  ${ticket.filename}: done`
+                    )
+                    checkTicket(progress, ticket.num, {
+                        branch:branchResult.branch,
+                        exitCode:0,
+                    })
+                    writeProgress(progressPath, progress)
+                    await commitProgress(
+                        repoRoot,
+                        progressPath,
+                        `nightralph: ${ticket.filename} done`
+                    )
+
+                    const worktreePath = worktreePathsByNum.get(
+                        ticket.num
+                    )
+                    if (worktreePath) {
+                        try {
+                            await removeWorktree(worktreePath)
+                        } catch (err) {
+                            console.error(
+                                '  Failed to remove worktree ' +
+                                `${worktreePath}: ` +
+                                formatErrorMessage(err)
+                            )
+                        }
+                    }
+                } else {
+                    const worktreePath = worktreePathsByNum.get(
+                        ticket.num
+                    )
+                    const recovered =
+                        opts.conflictStrategy === 'respawn' &&
+                        worktreePath ?
+                            await respawnAndRetryMerge({
+                                repoRoot,
+                                baseBranch,
+                                branch:branchResult.branch,
+                                ticket,
+                                worktreePath,
+                                specBody:opts.specBody,
+                                agentCmd:opts.agentCmd,
+                                model:opts.model,
+                                timeout:opts.timeout,
+                                logsDir:opts.logsDir,
+                            }) :
+                            false
+
+                    if (recovered) {
+                        markDone(ticket)
+                        waveCompleted++
+                        totalCompleted++
+                        console.log(
+                            `  ${ticket.filename}: done ` +
+                            '(resolved via respawn)'
+                        )
+                        checkTicket(progress, ticket.num, {
+                            branch:branchResult.branch,
+                            exitCode:0,
+                        })
+                        writeProgress(progressPath, progress)
+                        await commitProgress(
+                            repoRoot,
+                            progressPath,
+                            `nightralph: ${ticket.filename} ` +
+                            'done (respawn)'
+                        )
+
+                        if (worktreePath) {
+                            try {
+                                await removeWorktree(worktreePath)
+                            } catch (err) {
+                                console.error(
+                                    '  Failed to remove worktree ' +
+                                    `${worktreePath}: ` +
+                                    formatErrorMessage(err)
+                                )
+                            }
+                        }
+                    } else {
+                        console.log(
+                            `  ${ticket.filename}: merge failed, ` +
+                            'staying ready-for-agent'
+                        )
+                    }
+                }
+            }
+
+            if (mergeResult.stoppedAt) {
+                console.log(
+                    '\nMerge stopped at ' +
+                    `${mergeResult.stoppedAt.branch}`
+                )
+
+                for (const sb of successfulBranches) {
+                    const ticket = ticketsByNum.get(sb.ticketNum)
+                    if (ticket && ticket.status === 'done') continue
+                    try {
+                        await removeWorktree(sb.worktreePath)
+                    } catch (err) {
+                        console.error(
+                            '  Failed to remove worktree ' +
+                            `${sb.worktreePath}: ` +
+                            formatErrorMessage(err)
+                        )
+                    }
+                }
+
+                break
+            }
+        }
+
+        if (waveCompleted === 0) {
+            console.log(
+                '\nNo tickets completed this wave. ' +
+                'Stopping.'
+            )
+            break
+        }
+    }
+
+    const remaining = opts.tickets.filter(
+        t => t.status === 'ready-for-agent'
+    )
+    console.log(
+        `\nFinished: ${totalCompleted} completed` +
+        (remaining.length > 0 ?
+            `, ${remaining.length} remaining` :
+            '')
+    )
+
+    return { allDone:remaining.length === 0 }
 }

@@ -368,6 +368,122 @@ test('setup creates AGENTS.md with GitHub Issues text', t => {
     )
 })
 
+test('setup creates AGENTS.md with managed markers when no file exists', t => {
+    const {
+        projectDir, bundledSkillsDir, docsTemplatesDir,
+    } = makeTempProject()
+
+    setup({
+        bundledSkillsDir,
+        docsTemplatesDir,
+        projectDir,
+        tracker:'local',
+    })
+
+    const content = readFileSync(
+        join(projectDir, 'AGENTS.md'), 'utf8'
+    )
+    t.ok(
+        content.includes('<!-- nightralph:start -->'),
+        'should contain start marker'
+    )
+    t.ok(
+        content.includes('<!-- nightralph:end -->'),
+        'should contain end marker'
+    )
+    t.ok(
+        content.includes('Agent skills'),
+        'should contain managed content'
+    )
+})
+
+test('setup appends managed section to existing AGENTS.md without markers', t => {
+    const {
+        projectDir, bundledSkillsDir, docsTemplatesDir,
+    } = makeTempProject()
+
+    const agentsPath = join(projectDir, 'AGENTS.md')
+    writeFileSync(agentsPath, '# My Project\n\nCustom instructions.\n')
+
+    setup({
+        bundledSkillsDir,
+        docsTemplatesDir,
+        projectDir,
+        tracker:'local',
+    })
+
+    const content = readFileSync(agentsPath, 'utf8')
+    t.ok(
+        content.includes('# My Project'),
+        'should preserve existing content'
+    )
+    t.ok(
+        content.includes('Custom instructions.'),
+        'should preserve existing instructions'
+    )
+    t.ok(
+        content.includes('<!-- nightralph:start -->'),
+        'should append start marker'
+    )
+    t.ok(
+        content.includes('<!-- nightralph:end -->'),
+        'should append end marker'
+    )
+    t.ok(
+        content.includes('Agent skills'),
+        'should include managed content'
+    )
+})
+
+test('setup replaces only managed section in existing AGENTS.md', t => {
+    const {
+        projectDir, bundledSkillsDir, docsTemplatesDir,
+    } = makeTempProject()
+
+    const agentsPath = join(projectDir, 'AGENTS.md')
+    writeFileSync(agentsPath, [
+        '# My Project',
+        '',
+        'Custom instructions.',
+        '',
+        '<!-- nightralph:start -->',
+        'old managed content',
+        '<!-- nightralph:end -->',
+        '',
+        'More custom content.',
+        '',
+    ].join('\n'))
+
+    setup({
+        bundledSkillsDir,
+        docsTemplatesDir,
+        projectDir,
+        tracker:'local',
+    })
+
+    const content = readFileSync(agentsPath, 'utf8')
+    t.ok(
+        content.includes('# My Project'),
+        'should preserve content before markers'
+    )
+    t.ok(
+        content.includes('Custom instructions.'),
+        'should preserve instructions before markers'
+    )
+    t.ok(
+        content.includes('More custom content.'),
+        'should preserve content after markers'
+    )
+    t.ok(
+        !content.includes('old managed content'),
+        'should remove old managed content'
+    )
+    t.ok(
+        content.includes('Agent skills'),
+        'should insert new managed content'
+    )
+})
+
 test(
     'tracker template overwrites when switching trackers',
     t => {

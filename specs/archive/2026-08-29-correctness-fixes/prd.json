@@ -1,0 +1,118 @@
+{
+  "project": "nightralph",
+  "branchName": "ralph/correctness-fixes",
+  "description": "Correctness fixes: asset resolution, commit verification, provider adapters, isolated progress commits, exit codes, README accuracy, AGENTS.md preservation",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix asset resolution for npm-installed CLI",
+      "description": "As a user installing nightralph via npm, I want the setup command to find its bundled skills and templates so that setup works without running from a source checkout.",
+      "acceptanceCriteria": [
+        "scriptDir in src/index.ts is derived from import.meta.url via fileURLToPath instead of process.argv[1]",
+        "setup locates skills/ and docs-templates/ relative to the compiled module, not the bin symlink",
+        "Existing tests still pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Line 24 of src/index.ts: `const scriptDir = dirname(process.argv[1])`. Replace with `dirname(fileURLToPath(import.meta.url))` using fileURLToPath from node:url."
+    },
+    {
+      "id": "US-002",
+      "title": "Verify agent commits before marking done",
+      "description": "As an operator, I want the orchestrator to verify that an agent actually committed changes before merging and marking a ticket done, so that work is never silently lost.",
+      "acceptanceCriteria": [
+        "After an agent exits 0, the orchestrator checks whether the worktree branch has new commits relative to the base branch using git rev-list --count",
+        "If no new commits exist, the ticket is NOT marked done and the worktree is NOT cleaned up",
+        "If the worktree has uncommitted changes (dirty via git status --porcelain), the ticket is NOT marked done and the uncommitted state is reported to the console",
+        "The in-place execution path (runWaves) checks for commits on the current branch before calling markDone",
+        "Tests cover the no-commit and dirty-worktree scenarios",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Add helper functions hasNewCommits(repoRoot, base, branch) and isDirty(cwd) in src/worktree.ts. Use them in both runWavesIsolated and runWaves before markDone."
+    },
+    {
+      "id": "US-003",
+      "title": "Add non-interactive provider adapters",
+      "description": "As a user running nightralph claude or nightralph codex, I want the CLI to invoke the correct non-interactive command so that agents run without hanging on interactive prompts.",
+      "acceptanceCriteria": [
+        "claude provider spawns with --print flag prepended to args",
+        "codex provider spawns with exec subcommand prepended to args",
+        "Unknown providers are passed through as-is (current behavior)",
+        "--model flag is still forwarded correctly for all providers",
+        "Tests cover command construction for claude, codex, and an unknown provider",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "In spawnAgent (src/orchestrator.ts line 223), add a provider-aware adapter before building the args array. A simple switch or map keyed on the command basename is enough."
+    },
+    {
+      "id": "US-004",
+      "title": "Isolate progress commits",
+      "description": "As a user with staged changes in my repo, I want progress commits to contain only the progress file so that my staged work is not swept into an automated commit.",
+      "acceptanceCriteria": [
+        "commitProgress in src/progress.ts uses git commit -- <progressPath> so only the named path is committed from the index",
+        "Existing staged files in the repo are untouched by the progress commit",
+        "Tests verify that a pre-staged file is not included in the progress commit",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Line 114 of src/progress.ts: change ['commit', '-m', message] to ['commit', '-m', message, '--', progressPath] so only the progress file is committed."
+    },
+    {
+      "id": "US-005",
+      "title": "Return nonzero exit code for incomplete runs",
+      "description": "As a CI pipeline or monitoring script, I want nightralph to exit with a nonzero status when any ticket fails or remains incomplete so that I can detect failed runs.",
+      "acceptanceCriteria": [
+        "runWaves and runWavesIsolated return a result object indicating whether all ready tickets completed successfully",
+        "The CLI calls process.exit(1) when any ready ticket failed, was not merged, or remains ready-for-agent",
+        "Successful runs (all tickets done) exit 0",
+        "Dry runs always exit 0",
+        "Tests verify exit behavior for both success and failure cases",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "runWaves currently returns void. Change to return { allDone:boolean }. In the CLI handler in src/index.ts, check the result and call process.exit(1) when !allDone."
+    },
+    {
+      "id": "US-006",
+      "title": "Patch README inaccuracies",
+      "description": "As a user reading the README, I want the documentation to match current behavior so that I can follow it without hitting surprises.",
+      "acceptanceCriteria": [
+        "The opening paragraph describes local markdown tickets only and notes that choosing GitHub during setup installs GitHub-oriented skill instructions (not a remote issue source)",
+        "Path references use .agents/skills/ instead of ./claude/skills/ or ./agents.skills/",
+        "The flags table includes the -X flag",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Documentation-only change. Read current README.md and fix the three specific inaccuracies identified in the audit."
+    },
+    {
+      "id": "US-007",
+      "title": "Preserve existing AGENTS.md during setup",
+      "description": "As a user running setup in a project that already has an AGENTS.md, I want my existing instructions preserved so that setup does not silently destroy project-specific content.",
+      "acceptanceCriteria": [
+        "Setup writes its content inside managed-section markers (<!-- nightralph:start --> / <!-- nightralph:end -->)",
+        "If AGENTS.md exists and contains managed markers, only the managed section is replaced",
+        "If AGENTS.md exists without markers, the managed section is appended and existing content is preserved",
+        "If no AGENTS.md exists, the file is created with the managed section (current content wrapped in markers)",
+        "Tests cover all three cases: no file, file without markers, file with markers",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Modify the AGENTS.md writing logic in src/setup.ts. Add a helper like writeManagedSection(filePath, content, startMarker, endMarker)."
+    }
+  ]
+}

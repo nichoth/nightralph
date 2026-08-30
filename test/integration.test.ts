@@ -1,22 +1,37 @@
 import { test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync,
-    readFileSync, existsSync, rmSync,
+    readFileSync, existsSync, rmSync, chmodSync,
+    symlinkSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { execFile } from 'node:child_process'
+import { execFile, execSync } from 'node:child_process'
 import {
     findFeatureDirs,
     resolveIssuesDir,
+    getScriptDir,
 } from '../src/resolve.js'
 import { setup, SKILL_DIRS } from '../src/setup.js'
+import {
+    runWavesIsolated,
+    scanTickets,
+    spawnAgent,
+} from '../src/orchestrator.js'
 
 function tmp ():string {
     return mkdtempSync(
         join(tmpdir(), 'nightralph-int-test-')
     )
 }
+
+test('getScriptDir - derives dir from a file:// module URL', t => {
+    const result = getScriptDir(
+        'file:///opt/nightralph/dist/index.js'
+    )
+    t.equal(result, '/opt/nightralph/dist',
+        'strips the filename, keeping the containing dir')
+})
 
 test('findFeatureDirs - no .scratch dir', t => {
     const dir = tmp()
@@ -134,6 +149,9 @@ const MOCK_AGENT = join(
 const MOCK_ECHO = join(
     process.cwd(), 'test', 'mock-agent-echo-args.js'
 )
+const MOCK_AGENT_FAIL = join(
+    process.cwd(), 'test', 'mock-agent-fail.js'
+)
 
 function spawnCli (
     args:string[],
@@ -214,7 +232,7 @@ test('CLI subprocess - --model flag forwarded to agent',
             const { code } = await spawnCli([
                 MOCK_ECHO,
                 '--spec', FEAT,
-                '--timeout-secs', '10',
+                '--timeout', '10',
                 '-m', 'test-model',
             ], { cwd:projectDir })
 
@@ -367,7 +385,7 @@ test('CLI subprocess - unknown blocker warning and stripping',
             const { code, stdout, stderr } = await spawnCli([
                 MOCK_AGENT,
                 '--spec', FEAT,
-                '--timeout-secs', '10',
+                '--timeout', '10',
             ], { cwd:projectDir })
 
             const combined = stdout + stderr
@@ -469,7 +487,7 @@ test('CLI subprocess - execute smoke test', async t => {
         const { code } = await spawnCli([
             MOCK_AGENT,
             '--spec', FEAT,
-            '--timeout-secs', '10',
+            '--timeout', '10',
         ], { cwd:projectDir })
 
         t.equal(code, 0, 'exit code 0')
@@ -502,6 +520,1201 @@ test('CLI subprocess - execute smoke test', async t => {
         rmSync(projectDir, {
             recursive:true, force:true,
         })
+    }
+})
+
+// -- runWavesIsolated integration tests --
+
+const MOCK_PASS = join(
+    process.cwd(), 'test', 'mock-agent-pass.js'
+)
+const MOCK_NOOP = join(
+    process.cwd(), 'test', 'mock-agent-noop.js'
+)
+const MOCK_DIRTY = join(
+    process.cwd(), 'test', 'mock-agent-dirty.js'
+)
+const MOCK_FAIL = join(
+    process.cwd(), 'test', 'mock-agent-fail.js'
+)
+
+function initTempGitRepo ():string {
+    const dir = tmp()
+    execSync('git init', { cwd:dir })
+    execSync(
+        'git config user.email test@example.com',
+        { cwd:dir }
+    )
+    execSync(
+        'git config user.name "Test User"',
+        { cwd:dir }
+    )
+    execSync(
+        'git config core.hooksPath /dev/null',
+        { cwd:dir }
+    )
+    execSync(
+        'git commit --allow-empty -m "init" --no-verify',
+        {
+            cwd:dir,
+            env:{
+                ...process.env,
+                GIT_COMMITTER_NAME:'Test',
+                GIT_COMMITTER_EMAIL:'test@example.com',
+                GIT_AUTHOR_NAME:'Test',
+                GIT_AUTHOR_EMAIL:'test@example.com',
+            },
+        }
+    )
+    return dir
+}
+
+test('runWavesIsolated - two independent tickets ' +
+    'run in parallel worktrees', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-second.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+
+        // Change to project directory for git operations
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                tickets[0].status,
+                'done',
+                'ticket 1 should be done'
+            )
+            t.equal(
+                tickets[1].status,
+                'done',
+                'ticket 2 should be done'
+            )
+
+            t.ok(
+                existsSync(join(logsDir, '01-first.log')),
+                'log file for ticket 1 created'
+            )
+            t.ok(
+                existsSync(join(logsDir, '02-second.log')),
+                'log file for ticket 2 created'
+            )
+
+            const progressPath = join(
+                projectDir, 'progress.md'
+            )
+            t.ok(
+                existsSync(progressPath),
+                'progress.md should be created'
+            )
+
+            const progressContent = readFileSync(
+                progressPath, 'utf8'
+            )
+            t.ok(
+                progressContent.includes('[x] 01-first.md'),
+                'progress should show ticket 1 as done'
+            )
+            t.ok(
+                progressContent.includes('[x] 02-second.md'),
+                'progress should show ticket 2 as done'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - agent exits 0 but makes no commits, ' +
+    'ticket stays ready-for-agent and worktree is preserved',
+async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-noop.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_NOOP,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-noop',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'ticket without commits stays ready-for-agent'
+            )
+
+            const repoName = projectDir.split('/').pop()
+            const worktreePath = join(
+                projectDir, '..',
+                `${repoName}.01-noop`
+            )
+            t.ok(
+                existsSync(worktreePath),
+                'worktree preserved when agent made no commits'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - agent leaves uncommitted changes, ' +
+    'ticket stays ready-for-agent and worktree is preserved',
+async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-dirty.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_DIRTY,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-dirty',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'ticket with uncommitted changes stays ' +
+                'ready-for-agent'
+            )
+
+            const repoName = projectDir.split('/').pop()
+            const worktreePath = join(
+                projectDir, '..',
+                `${repoName}.01-dirty`
+            )
+            t.ok(
+                existsSync(worktreePath),
+                'worktree preserved when agent left it dirty'
+            )
+            t.ok(
+                existsSync(
+                    join(worktreePath, 'uncommitted-change.txt')
+                ),
+                'uncommitted file is still present'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - worktrees removed after successful merge',
+    async t => {
+        const projectDir = initTempGitRepo()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            const logsDir = join(projectDir, '.logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-first.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            writeFileSync(
+                join(issuesDir, '02-second.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+
+            const tickets = scanTickets(issuesDir)
+
+            const originalCwd = process.cwd()
+            process.chdir(projectDir)
+
+            try {
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:MOCK_PASS,
+                    model:null,
+                    timeout:10,
+                    logsDir,
+                    featureName:'test-feature-cleanup',
+                    conflictStrategy:'respawn',
+                })
+
+                t.equal(
+                    tickets[0].status,
+                    'done',
+                    'ticket 1 should be done'
+                )
+                t.equal(
+                    tickets[1].status,
+                    'done',
+                    'ticket 2 should be done'
+                )
+
+                const repoName = projectDir.split('/').pop()
+                const worktreePath1 = join(
+                    projectDir, '..', `${repoName}.01-first`
+                )
+                const worktreePath2 = join(
+                    projectDir, '..', `${repoName}.02-second`
+                )
+                t.equal(
+                    existsSync(worktreePath1),
+                    false,
+                    'worktree 1 removed after successful merge'
+                )
+                t.equal(
+                    existsSync(worktreePath2),
+                    false,
+                    'worktree 2 removed after successful merge'
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+        } finally {
+            try {
+                execSync(
+                    'git worktree list --porcelain',
+                    { cwd:projectDir }
+                ).toString()
+                    .split('\n')
+                    .filter(l => l.startsWith('worktree '))
+                    .map(l => l.substring('worktree '.length))
+                    .filter(p => p !== projectDir)
+                    .forEach(p => rmSync(p, {
+                        recursive:true, force:true
+                    }))
+            } catch {
+            }
+            rmSync(projectDir, { recursive:true, force:true })
+        }
+    })
+
+test('runWavesIsolated - two-wave scenario with dependency',
+    async t => {
+        const projectDir = initTempGitRepo()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            const logsDir = join(projectDir, '.logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-base.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            writeFileSync(
+                join(issuesDir, '02-depends-on-1.md'),
+                makeTicketBody({
+                    status:'ready-for-agent',
+                    blockers:[1],
+                })
+            )
+
+            const tickets = scanTickets(issuesDir)
+
+            const originalCwd = process.cwd()
+            process.chdir(projectDir)
+
+            try {
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:MOCK_PASS,
+                    model:null,
+                    timeout:10,
+                    logsDir,
+                    featureName:'test-feature-waves',
+                    conflictStrategy:'respawn',
+                })
+
+                t.equal(
+                    tickets[0].status,
+                    'done',
+                    'ticket 1 done'
+                )
+                t.equal(
+                    tickets[1].status,
+                    'done',
+                    'ticket 2 done'
+                )
+
+                // Verify log files exist for both
+                t.ok(
+                    existsSync(join(logsDir, '01-base.log')),
+                    'log file for ticket 1'
+                )
+                t.ok(
+                    existsSync(join(logsDir, '02-depends-on-1.log')),
+                    'log file for ticket 2'
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+        } finally {
+            try {
+                execSync(
+                    'git worktree list --porcelain',
+                    { cwd:projectDir }
+                ).toString()
+                    .split('\n')
+                    .filter(l => l.startsWith('worktree '))
+                    .map(l => l.substring('worktree '.length))
+                    .filter(p => p !== projectDir)
+                    .forEach(p => rmSync(p, {
+                        recursive:true, force:true
+                    }))
+            } catch {
+            }
+            rmSync(projectDir, { recursive:true, force:true })
+        }
+    })
+
+test('runWavesIsolated - progress.md committed after each ticket',
+    async t => {
+        const projectDir = initTempGitRepo()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            const logsDir = join(projectDir, '.logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-ticket-a.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            writeFileSync(
+                join(issuesDir, '02-ticket-b.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+
+            const tickets = scanTickets(issuesDir)
+
+            const originalCwd = process.cwd()
+            process.chdir(projectDir)
+
+            try {
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:MOCK_PASS,
+                    model:null,
+                    timeout:10,
+                    logsDir,
+                    featureName:'test-feature-progress',
+                    conflictStrategy:'respawn',
+                })
+
+                // Check git log for progress commits
+                const logOutput = execSync(
+                    'git log --oneline',
+                    { cwd:projectDir }
+                ).toString()
+
+                t.ok(
+                    logOutput.includes('nightralph: start'),
+                    'should have initial progress commit'
+                )
+                t.ok(
+                    logOutput.includes('01-ticket-a.md done'),
+                    'should have commit for ticket a done'
+                )
+                t.ok(
+                    logOutput.includes('02-ticket-b.md done'),
+                    'should have commit for ticket b done'
+                )
+
+                // Verify progress.md content
+                const progressPath = join(
+                    projectDir, 'progress.md'
+                )
+                const content = readFileSync(
+                    progressPath, 'utf8'
+                )
+                t.ok(
+                    content.includes('[x] 01-ticket-a.md'),
+                    'progress shows a done'
+                )
+                t.ok(
+                    content.includes('[x] 02-ticket-b.md'),
+                    'progress shows b done'
+                )
+                t.ok(
+                    content.includes('branch:'),
+                    'progress includes branch info'
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+        } finally {
+            try {
+                execSync(
+                    'git worktree list --porcelain',
+                    { cwd:projectDir }
+                ).toString()
+                    .split('\n')
+                    .filter(l => l.startsWith('worktree '))
+                    .map(l => l.substring('worktree '.length))
+                    .filter(p => p !== projectDir)
+                    .forEach(p => rmSync(p, {
+                        recursive:true, force:true
+                    }))
+            } catch {
+            }
+            rmSync(projectDir, { recursive:true, force:true })
+        }
+    })
+
+test('runWavesIsolated - failed ticket worktree is cleaned up',
+    async t => {
+        const projectDir = initTempGitRepo()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            const logsDir = join(projectDir, '.logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-will-fail.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+
+            const tickets = scanTickets(issuesDir)
+
+            const originalCwd = process.cwd()
+            process.chdir(projectDir)
+
+            try {
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:MOCK_FAIL,
+                    model:null,
+                    timeout:10,
+                    logsDir,
+                    featureName:'test-feature-fail',
+                    conflictStrategy:'respawn',
+                })
+
+                t.equal(
+                    tickets[0].status,
+                    'ready-for-agent',
+                    'failed ticket keeps ready status'
+                )
+
+                // Verify worktree is cleaned up after failure
+                const repoName = projectDir
+                    .split('/').pop()
+                const worktreePath = join(
+                    projectDir, '..',
+                    `${repoName}.01-will-fail`
+                )
+                t.equal(
+                    existsSync(worktreePath),
+                    false,
+                    'worktree should be removed after failure'
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+        } finally {
+            try {
+                execSync(
+                    'git worktree list --porcelain',
+                    { cwd:projectDir }
+                ).toString()
+                    .split('\n')
+                    .filter(l => l.startsWith('worktree '))
+                    .map(l => l.substring('worktree '.length))
+                    .filter(p => p !== projectDir)
+                    .forEach(p => rmSync(p, {
+                        recursive:true, force:true
+                    }))
+            } catch {
+            }
+            rmSync(projectDir, { recursive:true, force:true })
+        }
+    })
+
+test('runWavesIsolated - re-run after a prior failed run does not ' +
+    'crash when the branch already exists', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-retry.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        const repoName = projectDir.split('/').pop()
+
+        // Simulate a branch left over from a prior failed run,
+        // with no worktree currently attached to it.
+        execSync(
+            `git branch ${repoName}/01-retry`,
+            { cwd:projectDir }
+        )
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-retry',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                result.allDone,
+                true,
+                'run completes instead of crashing on the ' +
+                'pre-existing branch'
+            )
+            t.equal(
+                tickets[0].status,
+                'done',
+                'ticket completes on the re-run'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated returns allDone:false when agent fails',
+    async t => {
+        const projectDir = initTempGitRepo()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            const logsDir = join(projectDir, '.logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-fail.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+
+            const tickets = scanTickets(issuesDir)
+
+            const originalCwd = process.cwd()
+            process.chdir(projectDir)
+
+            try {
+                const result = await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:MOCK_FAIL,
+                    model:null,
+                    timeout:10,
+                    logsDir,
+                    featureName:'test-fail-result',
+                    conflictStrategy:'respawn',
+                })
+                t.equal(
+                    result.allDone, false,
+                    'allDone is false when agent fails'
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+        } finally {
+            try {
+                execSync(
+                    'git worktree list --porcelain',
+                    { cwd:projectDir }
+                ).toString()
+                    .split('\n')
+                    .filter(l => l.startsWith('worktree '))
+                    .map(l => l.substring(
+                        'worktree '.length
+                    ))
+                    .filter(p => p !== projectDir)
+                    .forEach(p => rmSync(p, {
+                        recursive:true, force:true,
+                    }))
+            } catch {
+            }
+            rmSync(projectDir, {
+                recursive:true, force:true,
+            })
+        }
+    })
+
+test('runWavesIsolated - conflictStrategy stop halts on first failure',
+    async t => {
+        const projectDir = initTempGitRepo()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            const logsDir = join(projectDir, '.logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-first.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            writeFileSync(
+                join(issuesDir, '02-second.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+
+            const tickets = scanTickets(issuesDir)
+
+            const originalCwd = process.cwd()
+            process.chdir(projectDir)
+
+            try {
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:MOCK_FAIL,
+                    model:null,
+                    timeout:10,
+                    logsDir,
+                    featureName:'test-feature-stop',
+                    conflictStrategy:'stop',
+                })
+
+                t.equal(
+                    tickets[0].status,
+                    'ready-for-agent',
+                    'first ticket fails and stays ready'
+                )
+                t.equal(
+                    tickets[1].status,
+                    'ready-for-agent',
+                    'second ticket not attempted when stop strategy'
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+        } finally {
+            try {
+                execSync(
+                    'git worktree list --porcelain',
+                    { cwd:projectDir }
+                ).toString()
+                    .split('\n')
+                    .filter(l => l.startsWith('worktree '))
+                    .map(l => l.substring('worktree '.length))
+                    .filter(p => p !== projectDir)
+                    .forEach(p => rmSync(p, {
+                        recursive:true, force:true
+                    }))
+            } catch {
+            }
+            rmSync(projectDir, { recursive:true, force:true })
+        }
+    })
+
+test('runWavesIsolated - conflictStrategy stop cleans up ' +
+    'worktrees for un-merged branches', async t => {
+    const projectDir = initTempGitRepo()
+    const repoName = projectDir.split('/').pop()
+    const failBranch = `${repoName}/01-first`
+    const fakeGit = installMergeFailingGit(failBranch)
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-second.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-stop-cleanup',
+                conflictStrategy:'stop',
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'ticket whose merge failed stays ready'
+            )
+            t.equal(
+                tickets[1].status,
+                'ready-for-agent',
+                'ticket after the stop point stays ready'
+            )
+
+            const worktreePath1 = join(
+                projectDir, '..',
+                `${repoName}.01-first`
+            )
+            const worktreePath2 = join(
+                projectDir, '..',
+                `${repoName}.02-second`
+            )
+            t.equal(
+                existsSync(worktreePath1),
+                false,
+                'worktree 1 removed after merge stopped'
+            )
+            t.equal(
+                existsSync(worktreePath2),
+                false,
+                'worktree 2 removed for un-attempted branch'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        fakeGit.restore()
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+function installMergeFailingGit (failBranch:string):{
+    restore:() => void
+} {
+    const realGit = execSync('command -v git')
+        .toString().trim()
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-fake-git-')
+    )
+    writeFileSync(
+        join(binDir, 'git'),
+        '#!/bin/sh\n' +
+        'if [ "$1" = "merge" ] && [ "$2" = "' +
+            failBranch + '" ]; then\n' +
+        '  exit 1\n' +
+        'fi\n' +
+        'exec "' + realGit + '" "$@"\n'
+    )
+    chmodSync(join(binDir, 'git'), 0o755)
+
+    const originalPath = process.env.PATH
+    process.env.PATH = binDir + ':' + originalPath
+
+    return {
+        restore:() => {
+            process.env.PATH = originalPath
+        },
+    }
+}
+
+test('runWavesIsolated - agent succeeds but merge conflicts, ' +
+    'ticket stays ready-for-agent', async t => {
+    const projectDir = initTempGitRepo()
+    const repoName = projectDir.split('/').pop()
+    const failBranch = `${repoName}/01-conflict`
+    const fakeGit = installMergeFailingGit(failBranch)
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-conflict.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-conflict',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'agent-succeeded but merge-conflicted ticket ' +
+                'stays ready-for-agent'
+            )
+
+            const worktreePath = join(
+                projectDir, '..',
+                `${repoName}.01-conflict`
+            )
+            t.ok(
+                existsSync(worktreePath),
+                'worktree should still exist after merge conflict'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        fakeGit.restore()
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+// -- US-005: respawn on merge conflict --
+
+const MOCK_ONCE = join(
+    process.cwd(), 'test', 'mock-agent-once.js'
+)
+
+// Installs a fake `git` on PATH whose `git merge
+// <failBranch>` fails the first time it is called and
+// succeeds on every subsequent call, simulating a
+// conflict that the respawned agent resolves.
+function installMergeFailOnceGit (failBranch:string):{
+    restore:() => void
+} {
+    const realGit = execSync('command -v git')
+        .toString().trim()
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-fake-git-once-')
+    )
+    const counterFile = join(binDir, 'calls')
+    writeFileSync(
+        join(binDir, 'git'),
+        '#!/bin/sh\n' +
+        'COUNTER="' + counterFile + '"\n' +
+        'if [ "$1" = "merge" ] && [ "$2" = "' +
+            failBranch + '" ]; then\n' +
+        '  if [ ! -f "$COUNTER" ]; then\n' +
+        '    echo called > "$COUNTER"\n' +
+        '    exit 1\n' +
+        '  fi\n' +
+        'fi\n' +
+        'exec "' + realGit + '" "$@"\n'
+    )
+    chmodSync(join(binDir, 'git'), 0o755)
+
+    const originalPath = process.env.PATH
+    process.env.PATH = binDir + ':' + originalPath
+
+    return {
+        restore:() => {
+            process.env.PATH = originalPath
+        },
+    }
+}
+
+test('runWavesIsolated - two-branch wave, second branch ' +
+    'conflicts, agent respawned and succeeds on retry',
+async t => {
+    const projectDir = initTempGitRepo()
+    const repoName = projectDir.split('/').pop()
+    const failBranch = `${repoName}/02-second`
+    const fakeGit = installMergeFailOnceGit(failBranch)
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-second.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-respawn',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                tickets[0].status,
+                'done',
+                'ticket 1 should be done'
+            )
+            t.equal(
+                tickets[1].status,
+                'done',
+                'ticket 2 should be done after respawn retry'
+            )
+
+            const repoNameLocal = repoName
+            const worktreePath2 = join(
+                projectDir, '..',
+                `${repoNameLocal}.02-second`
+            )
+            t.equal(
+                existsSync(worktreePath2),
+                false,
+                'worktree 2 removed after respawn success'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        fakeGit.restore()
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - respawned agent fails, ' +
+    'ticket stays ready-for-agent', async t => {
+    const projectDir = initTempGitRepo()
+    const repoName = projectDir.split('/').pop()
+    const failBranch = `${repoName}/01-conflict`
+    const fakeGit = installMergeFailingGit(failBranch)
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-conflict.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_ONCE,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-respawn-fail',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'ticket stays ready-for-agent when the ' +
+                'respawned agent fails'
+            )
+
+            const worktreePath = join(
+                projectDir, '..',
+                `${repoName}.01-conflict`
+            )
+            t.ok(
+                existsSync(worktreePath),
+                'worktree should still exist after ' +
+                'respawn failure'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        fakeGit.restore()
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
     }
 })
 
@@ -546,7 +1759,7 @@ test('setup-then-execute composition', async t => {
         const { code } = await spawnCli([
             MOCK_AGENT,
             '--spec', feature,
-            '--timeout-secs', '10',
+            '--timeout', '10',
         ], { cwd:projectDir })
 
         t.equal(code, 0, 'exit code 0')
@@ -600,3 +1813,174 @@ test('setup-then-execute composition', async t => {
         rmSync(projectDir, { recursive:true, force:true })
     }
 })
+
+// -- US-003: provider adapter integration --
+
+test('spawnAgent - claude provider prepends --print ' +
+    'to spawned process args', async t => {
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-test-')
+    )
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-log-')
+    )
+    try {
+        symlinkSync(MOCK_ECHO, join(binDir, 'claude'))
+        chmodSync(join(binDir, 'claude'), 0o755)
+
+        const logPath = join(logDir, 'claude.log')
+        const exitCode = await spawnAgent({
+            prompt:'test prompt',
+            agentCmd:join(binDir, 'claude'),
+            model:'test-model',
+            timeout:10,
+            logPath,
+        })
+
+        t.equal(exitCode, 0, 'agent exits 0')
+
+        const log = readFileSync(logPath, 'utf8')
+        const args = JSON.parse(log.trim())
+        t.ok(
+            args.includes('--print'),
+            'spawned process received --print'
+        )
+        t.ok(
+            args.includes('--model') &&
+            args.includes('test-model'),
+            '--model still forwarded after --print'
+        )
+    } finally {
+        rmSync(binDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('spawnAgent - codex provider prepends exec ' +
+    'to spawned process args', async t => {
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-test-')
+    )
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-log-')
+    )
+    try {
+        symlinkSync(MOCK_ECHO, join(binDir, 'codex'))
+        chmodSync(join(binDir, 'codex'), 0o755)
+
+        const logPath = join(logDir, 'codex.log')
+        const exitCode = await spawnAgent({
+            prompt:'test prompt',
+            agentCmd:join(binDir, 'codex'),
+            model:null,
+            timeout:10,
+            logPath,
+        })
+
+        t.equal(exitCode, 0, 'agent exits 0')
+
+        const log = readFileSync(logPath, 'utf8')
+        const args = JSON.parse(log.trim())
+        t.ok(
+            args.includes('exec'),
+            'spawned process received exec'
+        )
+    } finally {
+        rmSync(binDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('spawnAgent - unknown provider passes through ' +
+    'with no extra args', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-log-')
+    )
+    try {
+        const logPath = join(logDir, 'unknown.log')
+        const exitCode = await spawnAgent({
+            prompt:'test prompt',
+            agentCmd:MOCK_ECHO,
+            model:'m1',
+            timeout:10,
+            logPath,
+        })
+
+        t.equal(exitCode, 0, 'agent exits 0')
+
+        const log = readFileSync(logPath, 'utf8')
+        const args:string[] = JSON.parse(log.trim())
+        t.ok(
+            !args.includes('--print') &&
+            !args.includes('exec'),
+            'no provider-specific args injected'
+        )
+        t.ok(
+            args.includes('--model') &&
+            args.includes('m1'),
+            '--model still forwarded for unknown provider'
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+// -- exit code tests --
+
+test('CLI subprocess exits 1 when agent fails',
+    async t => {
+        const projectDir = tmp()
+        try {
+            const { issuesDir } = scratchDirs(projectDir)
+
+            writeFileSync(
+                join(issuesDir, '01-fail.md'),
+                makeTicketBody({
+                    status:'ready-for-agent',
+                }),
+            )
+
+            const { code } = await spawnCli([
+                MOCK_AGENT_FAIL,
+                '--spec', FEAT,
+                '--timeout', '10',
+            ], { cwd:projectDir })
+
+            t.ok(
+                code !== 0,
+                'exit code is nonzero when agent fails'
+            )
+        } finally {
+            rmSync(projectDir, {
+                recursive:true, force:true,
+            })
+        }
+    })
+
+test('CLI subprocess exits 0 when all tickets complete',
+    async t => {
+        const projectDir = tmp()
+        try {
+            const { issuesDir } = scratchDirs(projectDir)
+
+            writeFileSync(
+                join(issuesDir, '01-pass.md'),
+                makeTicketBody({
+                    status:'ready-for-agent',
+                }),
+            )
+
+            const { code } = await spawnCli([
+                MOCK_AGENT,
+                '--spec', FEAT,
+                '--timeout', '10',
+            ], { cwd:projectDir })
+
+            t.equal(code, 0,
+                'exit code 0 when all tickets done')
+        } finally {
+            rmSync(projectDir, {
+                recursive:true, force:true,
+            })
+        }
+    })

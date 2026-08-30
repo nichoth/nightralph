@@ -188,3 +188,729 @@ All 174 tests pass (setup: 66, orchestrator: 54, integration: 54).
 Lint clean.
 
 All 10 user stories now have passes: true. PRD complete.
+
+## 2026-08-29 - US-001: Set conflicted flag after rebase-then-merge failure
+
+Completed. src/merge.ts mergeWave's i>0 branch previously only set
+mergingResult.merged from mergeBranch's result after a successful
+rebase, leaving conflicted:false even when the merge itself failed.
+Mirrored the i===0 branch's handling: after mergeBranch runs,
+conflicted is set to !mergeSuccess, and on failure the strategy is
+respected (stop sets stoppedAt and breaks, respawn/continue skips
+via continue) -- same as the rebase-failure branch above it.
+
+Gotcha: a rebase that succeeds always leaves the branch as a
+fast-forward descendant of the base, so mergeBranch immediately
+afterward is always a fast-forward and cannot fail via real content
+conflicts or commit hooks (fast-forward merges create no commit, so
+hooks never fire). To exercise this path in a real-git integration
+test, added installMergeFailingGit() in test/merge.test.ts: it
+prepends a fake `git` shell script to PATH that fails only
+`git merge <specific-branch>` and passes every other git invocation
+through to the real binary via an absolute path captured before PATH
+is modified. This lets rebaseBranch complete normally while forcing
+the subsequent mergeBranch call to fail deterministically, without
+mocking any internal JS.
+
+Added 2 new tests to test/merge.test.ts (5 assertions): one verifies
+conflicted:true/merged:false with strategy:respawn (continues past
+the failure), one verifies strategy:stop sets stoppedAt with
+conflicted:true. Verified both tests fail against the pre-fix code
+(4 failing assertions) and pass after the fix.
+
+All 287 tests pass (setup: 66, orchestrator: 72, worktree: 12,
+progress: 28, merge: 38, integration: 71).
+Lint clean.
+
+## 2026-08-29 - US-002: Record failed tickets in progress.md
+
+Completed. checkTicket in src/progress.ts previously hardcoded
+done:true; added an optional `done` field to its result parameter
+(defaulting to true when omitted) so callers can record a failure
+(done:false) while still setting branch, exitCode, and completedAt.
+renderProgress's metadata block previously only rendered under
+`ticket.done` -- changed the guard to `ticket.done ||
+ticket.exitCode !== null` so a failed ticket (done:false, exitCode
+set) still shows its exit code under an unchecked checkbox, while a
+never-attempted ticket (done:false, exitCode:null) renders no
+metadata, matching the existing "no metadata for unchecked items"
+test.
+
+In runWavesIsolated (src/orchestrator.ts), the non-zero exit branch
+of the per-ticket result loop now calls checkTicket with
+done:false and the agent's exit code, then writeProgress and
+commitProgress (mirroring the success branch's pattern), so a
+failure is recorded and committed to progress.md immediately rather
+than only appearing in console output and the log file.
+
+Added 2 new tests to test/progress.test.ts (5 assertions): one
+verifies checkTicket(..., {done:false}) keeps done:false while
+still recording branch/exitCode; one verifies renderProgress shows
+an unchecked checkbox with the exit code metadata line for a failed
+ticket. Verified both tests fail against the pre-fix code (2 failing
+assertions) and pass after the fix.
+
+All 292 tests pass (setup: 66, orchestrator: 72, worktree: 12,
+progress: 33, merge: 38, integration: 71).
+Lint clean.
+
+## 2026-08-29 - US-003: Defer markDone until after merge
+
+Completed. In runWavesIsolated (src/orchestrator.ts), the exitCode===0
+branch previously called markDone/checkTicket/writeProgress/
+commitProgress immediately after the agent finished, before mergeWave
+ran. Moved that bookkeeping to after mergeWave: agent success now only
+logs "awaiting merge" and records the ticket in a ticketsByNum map plus
+successfulBranches. After mergeWave returns, its `merged` array (one
+MergeResult per attempted branch) is walked and markDone/checkTicket
+are called only for branches where `merged:true`; branches that failed
+to merge (or were never attempted because a 'stop' strategy broke the
+loop early) are left untouched on disk, so the ticket's status stays
+ready-for-agent and findReadyTickets won't unblock its dependents in a
+later wave. waveCompleted/totalCompleted increments moved to the
+merge-confirmed branch too, so a wave where every agent succeeded but
+every merge failed is correctly treated as "no tickets completed" and
+stops the run.
+
+Gotcha (real bug uncovered, not just a test artifact): gating ticket
+status on mergeWave's actual result exposed a pre-existing bug in
+rebaseBranch (src/merge.ts) that silently broke every real multi-branch
+wave. rebaseBranch did `git checkout <branch>` in the main repoRoot
+before rebasing, but for waves with 2+ successful tickets each ticket's
+branch is still checked out in its own worktree (worktree cleanup is
+US-004, not done yet) -- git refuses to check out a branch that's
+already checked out in another worktree ("fatal: 'x' is already used by
+worktree at ..."), so the rebase always failed and the branch was always
+marked conflicted. Previously this was invisible because markDone ran
+regardless of merge outcome. Fixed by adding an optional worktreePath
+param to rebaseBranch/mergeWave's branch entries: when present, the
+rebase runs with cwd=worktreePath (git rebase onto, no checkout needed
+since the branch is already checked out there) instead of checking the
+branch out in repoRoot. mergeBranch doesn't need this since `git merge
+<branch>` never requires checking the branch itself out. orchestrator.ts
+now threads worktree.worktreePath through successfulBranches into
+mergeWave. This is a minimal, backward-compatible change (worktreePath
+optional, old callers/tests unaffected) required to make the "existing
+happy path tests still pass" acceptance criterion true once markDone is
+correctly gated on merge success -- without it, the existing
+"two independent tickets" and "two-wave scenario" integration tests
+would fail because the second ticket's real merge would always fail.
+
+Added 1 new integration test to test/integration.test.ts: installs a
+fake `git` on PATH (same technique as test/merge.test.ts's
+installMergeFailingGit) that fails `git merge <branch>` for one
+specific ticket branch, runs a single ticket through runWavesIsolated
+with a passing mock agent, and asserts the ticket's status stays
+ready-for-agent and its worktree is left intact. Verified it fails (1
+failing assertion) against the pre-fix orchestrator.ts/merge.ts and
+passes after the fix.
+
+All 294 tests pass (setup: 66, orchestrator: 72, worktree: 12,
+progress: 33, merge: 38, integration: 73).
+Lint clean.
+
+## 2026-08-29 - US-004: Clean up worktrees after successful merge
+
+Completed. Added a `worktreePathsByNum` map alongside the existing
+`ticketsByNum` map in runWavesIsolated (src/orchestrator.ts), populated
+at the same point each agent's success is recorded, so the worktree
+path survives into the post-mergeWave loop. In the `branchResult.merged
+=== true` branch (after markDone/checkTicket/writeProgress/
+commitProgress), the ticket's worktree is now removed via the existing
+`removeWorktree` (src/worktree.ts), wrapped in try/catch so a removal
+failure (e.g. directory already gone) is logged with
+`formatErrorMessage` and does not stop the run. Branches that fail to
+merge (conflicted or stopped) are left in the `else` branch untouched,
+so their worktrees remain on disk for manual inspection -- this was
+already implicitly covered by the existing "failed ticket leaves
+worktree intact" and "agent succeeds but merge conflicts" integration
+tests, both of which still pass unchanged.
+
+Added 1 new integration test to test/integration.test.ts: runs two
+independent tickets through runWavesIsolated with a passing mock agent
+and asserts both tickets' worktree directories no longer exist on disk
+after the run completes. Verified it fails (2 failing assertions)
+against the pre-fix orchestrator.ts and passes after the fix.
+
+Gotcha: tapzero's Test type has no `notOk` method (only `ok`, `equal`,
+`deepEqual`) despite it reading naturally for this assertion -- used
+`t.equal(existsSync(...), false, ...)` instead.
+
+All 298 tests pass (setup: 66, orchestrator: 72, worktree: 12,
+progress: 33, merge: 38, integration: 77).
+Lint clean.
+
+## 2026-08-29 - US-005: Implement respawn on merge conflict
+
+Completed. Added `updateWorktreeFromBase` to src/merge.ts: runs
+`git merge <baseBranch> --no-edit` inside a ticket's worktree, and
+deliberately does NOT abort on failure -- conflict markers are left
+in place (MERGE_HEAD still set) so the respawned agent can resolve
+and commit them, matching the "update the worktree to reflect the
+current base" acceptance criterion.
+
+In src/orchestrator.ts, added `respawnAndRetryMerge` (module-private
+helper) and wired it into runWavesIsolated's post-mergeWave loop: for
+any branchResult with merged:false, when conflictStrategy is
+'respawn' and a worktreePath is known, it now (1) merges baseBranch
+into the worktree via updateWorktreeFromBase, (2) re-spawns the same
+agentCmd in that worktree with a fresh `.respawn.log`, and (3) if the
+respawned agent exits 0, retries with a direct `mergeBranch` (not a
+second rebase -- the worktree's branch already contains base's
+history via the merge in step 1, so a rebase would be redundant and
+risk a second conflict path). If the respawn succeeds, the ticket is
+marked done, progress is checked/committed, and its worktree is
+removed via the existing US-004 cleanup path; if the respawned agent
+exits non-zero or the retried merge still conflicts, the ticket is
+left ready-for-agent and reported, same as the no-respawn case. This
+naturally caps respawn at one attempt per ticket per wave since it
+runs once inline in the per-branch loop, with no retry loop around
+it.
+
+Added 2 new integration tests to test/integration.test.ts:
+- "two-branch wave, second branch conflicts, agent respawned and
+  succeeds on retry": a new `installMergeFailOnceGit` fake-git helper
+  (sibling to the existing installMergeFailingGit) fails `git merge
+  <branch>` only on its first invocation for a given branch, then
+  passes through to real git -- simulating a conflict that clears up
+  after the agent "fixes" it. Two independent tickets run in one
+  wave; ticket 1 merges cleanly (i===0 path), ticket 2's merge fails
+  once (i>0 rebase+merge path), respawn re-runs the (always-passing)
+  mock agent and the retried merge succeeds. Both tickets end up
+  done and both worktrees are removed.
+- "respawned agent fails, ticket stays ready-for-agent": uses a new
+  stateful mock agent (test/mock-agent-once.js) that exits 0 the
+  first time it's invoked in a given cwd and exits 1 on every
+  subsequent invocation (tracked via a marker file written into the
+  worktree), paired with the existing always-fails
+  installMergeFailingGit. The initial agent run succeeds, the merge
+  conflicts, respawn re-runs the same mock agent a second time in
+  the same worktree -- now exiting 1 -- so the ticket stays
+  ready-for-agent and its worktree is left intact.
+
+Gotcha: a file created with the Write tool does not inherit the
+executable bit, so test/mock-agent-once.js initially failed to spawn
+(EACCes) and was silently caught by spawnAgent's `proc.on('error', ...)`
+handler, which resolves exit code 1 -- the "respawned agent fails"
+test passed for the wrong reason (the *initial* spawn failed, so
+respawn was never exercised) until `chmod +x` was applied. Always
+chmod +x new mock-agent-*.js fixtures and check the log output shows
+the respawn path actually running, not just that the assertion passed.
+
+Also confirmed (via a throwaway repro script) that before this fix,
+a wave with one ticket merging cleanly and a second ticket's merge
+staying conflicted (no respawn) would loop into a *second* wave that
+tries to `git worktree add -b <branch>` the same branch/path again,
+crashing with "a branch named ... already exists" -- because
+respawn now resolves (or definitively fails) a conflicted ticket
+within the *same* wave it occurred in, that duplicate-worktree crash
+path is no longer reachable for the respawn strategy.
+
+All 303 tests pass (setup: 66, orchestrator: 72, worktree: 12,
+progress: 33, merge: 38, integration: 82).
+Lint clean.
+
+## 2026-08-29 - US-001: Fix asset resolution for npm-installed CLI
+
+Completed. `process.argv[1]` breaks when nightralph is installed via
+npm and invoked through the generated bin symlink in
+node_modules/.bin/ -- depending on the platform/npm version, argv[1]
+can resolve to the symlink path itself rather than the real
+dist/index.js location, so `dirname(process.argv[1])` no longer
+points at the directory containing the bundled skills/ and
+docs-templates/ dirs. `import.meta.url` always reflects the actual
+module's own location regardless of how it was invoked, so it's the
+correct source of truth for asset-relative paths.
+
+Rather than inlining `dirname(fileURLToPath(import.meta.url))`
+directly in src/index.ts (which self-invokes yargs().parse() on
+import and can't be unit tested per the US-001-from-original-PRD
+gotcha already on record above), added a small pure helper
+`getScriptDir(metaUrl:string):string` to src/resolve.ts -- the module
+already holds testable CLI-adjacent logic extracted for the same
+reason. index.ts now does
+`const scriptDir = getScriptDir(import.meta.url)`.
+
+Added 1 new test to test/integration.test.ts (1 assertion):
+verifies getScriptDir('file:///opt/nightralph/dist/index.js')
+returns '/opt/nightralph/dist'. Verified it fails against the
+pre-fix resolve.ts (function did not exist) and passes after the fix.
+
+All 304 tests pass (setup: 66, orchestrator: 72, worktree: 12,
+progress: 33, merge: 38, integration: 83).
+Lint clean.
+
+## 2026-08-29 - US-002: Verify agent commits before marking done
+
+Verified that all acceptance criteria were already implemented across
+prior sessions. The core behavior was built incrementally: hasNewCommits
+and isDirty helpers in src/worktree.ts, used in runWavesIsolated
+(lines 624-639 of src/orchestrator.ts) for both no-commit and dirty
+checks per-ticket worktree, and in runWaves (lines 498-507) for
+no-commit checks on the shared in-place branch. Tests existed in
+orchestrator.test.ts for runWaves (no-commit and dirty scenarios)
+and in integration.test.ts for runWavesIsolated (no-commit and dirty
+scenarios).
+
+Added 1 new integration test to test/integration.test.ts (1 assertion):
+runs runWaves directly in a temp git repo with mock-agent-noop.js and
+asserts the ticket stays ready-for-agent when the agent exits 0 but
+makes no commits. This strengthens coverage of AC4 (in-place path
+commit verification) with a direct-call test in a git repo context,
+complementing the existing orchestrator.test.ts test that covers the
+same scenario.
+
+Gotcha: attempted to add an isDirty check to runWaves for the case
+where an agent commits but also leaves dirty files. This caused 12
+test regressions because in the in-place path, test fixture files
+(ticket markdown, issues directory) are always untracked in the temp
+git repo, making isDirty return true even for correctly-behaving agents.
+The isDirty check is only meaningful in the isolated worktree path
+(runWavesIsolated) where each ticket gets a clean dedicated worktree
+with no extraneous files. For the in-place path, hasNewCommits is the
+appropriate guard.
+
+All 316 tests pass (setup: 66, orchestrator: 74, worktree: 16,
+progress: 33, merge: 38, integration: 89).
+Lint clean.
+
+## 2026-08-29 - US-003: Add non-interactive provider adapters
+
+Completed. Added `getProviderArgs(cmd)` to src/orchestrator.ts: a pure
+function that returns provider-specific CLI args based on the command
+basename. `claude` gets `['--print']` prepended, `codex` gets `['exec']`
+prepended, and unknown providers get `[]` (pass-through). Wired into
+`spawnAgent` so the provider args are prepended before `--model`.
+
+Implementation uses a `PROVIDER_ARGS` lookup map keyed by basename
+(extracted via `path.basename`), keeping the adapter extensible without
+a switch statement. The `--model` flag is appended after provider args,
+so it's forwarded correctly for all providers.
+
+Added 5 unit tests to test/orchestrator.test.ts:
+- claude provider prepends --print
+- codex provider prepends exec
+- unknown provider returns empty
+- full path with claude basename still gets --print
+- full path with codex basename still gets exec
+
+Added 3 integration tests to test/integration.test.ts:
+- spawnAgent with a symlinked "claude" binary verifies --print appears
+  in the spawned process's argv and --model is still forwarded
+- spawnAgent with a symlinked "codex" binary verifies exec appears
+- spawnAgent with the mock-agent-echo-args (unknown provider) verifies
+  no provider-specific args are injected and --model still works
+
+All 329 tests pass (setup: 66, orchestrator: 79, worktree: 16,
+progress: 33, merge: 38, integration: 97).
+Lint clean.
+
+## 2026-08-29 - US-004: Isolate progress commits
+
+Completed. commitProgress in src/progress.ts previously ran
+`git commit -m <message>` which committed everything in the index,
+including files the user had already staged. Changed the commit args
+to `['commit', '-m', message, '--', progressPath]` so only the
+named progress file is committed from the index, leaving any
+pre-staged files untouched.
+
+Added 1 new test to test/progress.test.ts (3 assertions): stages
+an unrelated file (other.txt) in a temp git repo before calling
+commitProgress, then verifies the progress commit contains only
+progress.md, does not contain other.txt, and that other.txt remains
+staged afterward. Verified the test fails (2 failing assertions)
+against the pre-fix code and passes after the fix.
+
+All 332 tests pass (setup: 66, orchestrator: 79, worktree: 16,
+progress: 36, merge: 38, integration: 97).
+Lint clean.
+
+## 2026-08-29 - US-005: Return nonzero exit code for incomplete runs
+
+Completed. Changed `runWaves` and `runWavesIsolated` in
+src/orchestrator.ts from `Promise<void>` to
+`Promise<{ allDone:boolean }>`. Both functions now return
+`{ allDone: remaining.length === 0 }` after printing the final
+summary, where `remaining` is tickets still in ready-for-agent
+status. In src/index.ts, `runExecute` captures the result and
+calls `process.exit(1)` when `!result.allDone`. Dry runs return
+before reaching this check, so they always exit 0.
+
+Added 2 unit tests to test/orchestrator.test.ts:
+- runWaves returns allDone:true when all tickets complete
+- runWaves returns allDone:false when agent fails
+
+Added 1 integration test to test/integration.test.ts:
+- runWavesIsolated returns allDone:false when agent fails
+
+Added 2 subprocess CLI tests to test/integration.test.ts:
+- CLI exits 1 when agent fails (nonzero exit code)
+- CLI exits 0 when all tickets complete
+
+All 337 tests pass (setup: 66, orchestrator: 81, worktree: 16,
+progress: 36, merge: 38, integration: 100).
+Lint clean.
+
+## 2026-08-29 - US-006: Patch README inaccuracies
+
+Documentation-only change. Fixed three inaccuracies in README.md:
+
+1. Opening paragraph: removed "or remote Github issues" and added
+   a note that choosing GitHub during setup installs GitHub-oriented
+   skill instructions (the ticket source is always local markdown).
+2. Path references: changed `./claude/skills/` and `./agents.skills/`
+   to `.agents/skills/` to match setup.ts behavior.
+3. Flags table: added the `-X` flag row (stop on merge conflict
+   instead of re-spawning).
+
+No code changes, no new tests. Typecheck and lint clean.
+
+## 2026-08-29 - US-007: Preserve existing AGENTS.md during setup
+
+Completed. Added `writeManagedSection(filePath, content)` helper to
+src/setup.ts that wraps nightralph's generated AGENTS.md content in
+`<!-- nightralph:start -->` / `<!-- nightralph:end -->` markers.
+Three behaviors:
+
+1. No AGENTS.md exists: creates the file with just the managed block.
+2. AGENTS.md exists without markers: appends the managed block,
+   preserving all existing content above it.
+3. AGENTS.md exists with markers: replaces only the content between
+   the markers, preserving everything before and after.
+
+Changed the `setup()` function's AGENTS.md writing from a bare
+`writeFileSync` to `writeManagedSection`, so existing project-specific
+instructions are never silently destroyed.
+
+Added 3 new tests to test/setup.test.ts (13 assertions): one per
+case above. Verified all three fail against the pre-fix code (which
+used a plain writeFileSync overwrite) and pass after the fix.
+
+All 350 tests pass (setup: 79, orchestrator: 81, worktree: 16,
+progress: 36, merge: 38, integration: 100).
+Lint clean.
+
+## 2026-08-29 - US-001: Treat only explicit done status as complete for blocker resolution
+
+Completed. Three functions in src/orchestrator.ts shared inverted
+blocker-resolution logic that treated any non-"ready-for-agent" status
+(including '', 'claimed', 'resolved') as done:
+
+1. findReadyTickets (doneNums filter): changed
+   `t.status !== 'ready-for-agent'` to `t.status === 'done'`.
+2. simulateWaves (doneNums filter inside the wave loop): changed
+   `s !== 'ready-for-agent'` to `s === 'done'`.
+3. detectDeadlocks (initial doneNums/ready split): changed the `else`
+   branch (which dumped every non-ready status into doneNums) to an
+   explicit `else if (t.status === 'done')`, so statuses that are
+   neither 'ready-for-agent' nor 'done' are excluded from both sets
+   instead of being silently counted as done.
+
+Added 5 new tests to test/orchestrator.test.ts:
+- findReadyTickets does not unblock on empty status
+- findReadyTickets does not unblock on claimed status
+- findReadyTickets does not unblock on resolved status
+- findReadyTickets unblocks on done status (control case)
+- dryRun does not treat claimed status as done in waves
+  (exercises simulateWaves, which is not exported, via dryRun's
+  console.log output)
+- dryRun reports deadlock when blocker is claimed, not done
+  (exercises detectDeadlocks the same way)
+
+Verified all 5 fail against the pre-fix code (3 explicit "not ok"
+lines plus 2 that fail silently -- dryRun's internal console.log
+mock swallows the "ok"/"not ok" diagnostic line for any assertion
+made before the mock is restored, matching the existing
+dryRunIsolated test pattern in this file, but the pass/fail count
+still reflects the true result) and pass after the fix.
+
+All 357 tests pass (setup: 79, orchestrator: 88, worktree: 16,
+progress: 36, merge: 38, integration: 100).
+Lint clean.
+
+## 2026-08-29 - US-002: Handle existing branches when re-creating worktrees
+
+Completed. `createWorktree` in src/worktree.ts previously called
+`git worktree add -b <branch>` unconditionally, which fails with a
+non-zero exit if a branch or worktree from a prior failed run already
+occupies that name/path.
+
+Changes:
+1. worktree.ts: `createWorktree` now, before `git worktree add`:
+   - if the target worktree path already exists on disk, runs
+     `git worktree remove --force <path>` to clear it (best-effort;
+     failure falls through so `worktree add` can surface a clear
+     error instead of masking a real problem)
+   - runs `git worktree prune` to clear stale metadata for worktrees
+     whose directories are already gone
+   - checks `git show-ref --verify --quiet refs/heads/<branch>` and,
+     if the branch still exists, deletes it with `git branch -D`
+   This makes re-running the orchestrator after a failed ticket safe:
+   the same branch/worktree name can be recreated instead of crashing.
+2. orchestrator.ts (`runWavesIsolated`): worktree creation for a wave
+   now uses `Promise.allSettled` instead of `Promise.all`. A ticket
+   whose worktree creation still fails (e.g. path genuinely
+   unusable) is logged and excluded from that wave's agent run
+   instead of rejecting the whole `Promise.all` and crashing the
+   process; the remaining tickets in the wave still proceed. Renamed
+   the per-wave ticket list used after this point to `activeTickets`
+   to make clear it excludes worktree-creation failures.
+
+Added tests:
+- test/worktree.test.ts: two new cases -- re-creating a worktree when
+  a branch of the same name already exists (no worktree attached),
+  and re-creating at the same path when a worktree from a prior
+  invocation is still present. Verified both fail against the
+  pre-fix `createWorktree` (git errors with "branch already exists")
+  and pass after the fix.
+- test/integration.test.ts: new `runWavesIsolated` test that seeds a
+  leftover branch (simulating a prior failed run) before invoking
+  the orchestrator, and asserts the run completes (`allDone: true`)
+  and the ticket reaches `done` instead of the process crashing.
+
+Gotcha: `git worktree remove` must be run with `cwd` inside the repo
+(not necessarily the target worktree itself), so it can be invoked
+from `repoRoot` even when the target path's own `.git` file may be
+missing or stale.
+
+All 363 tests pass (setup: 79, orchestrator: 88, worktree: 20,
+progress: 36, merge: 38, integration: 102).
+Lint clean.
+
+## 2026-08-29 - US-003: Handle gitignored progress path in commitProgress
+
+Completed. `commitProgress` in src/progress.ts called `git add
+<progressPath>` without `--force`, which fails with a non-zero exit
+when the progress path (e.g. under `.scratch/`) is covered by a
+`.gitignore` rule -- a common setup since `.scratch/` is a natural
+gitignore candidate for a local issue tracker.
+
+Change: added `--force` to the `git add` invocation in
+`commitProgress`, so gitignored progress paths are staged regardless.
+
+Added a test to test/progress.test.ts: initializes a temp repo,
+gitignores `.scratch/`, writes a progress file under that dir, and
+asserts `commitProgress` does not throw and produces a commit.
+Verified it fails against the pre-fix code (git add exits non-zero
+with an "ignored by .gitignore" error) and passes after adding
+`--force`.
+
+All 365 tests pass (setup: 79, orchestrator: 88, worktree: 20,
+progress: 38, merge: 38, integration: 102).
+Lint clean.
+
+## 2026-08-29 - US-004: Add permission flags to provider argument maps
+
+Completed. `PROVIDER_ARGS` in src/orchestrator.ts mapped `claude` to
+`['--print']` and `codex` to `['exec']` with no permission flags, so
+spawned agents ran without write access and could not implement
+tickets non-interactively.
+
+Change: added `--dangerously-skip-permissions` to the claude args and
+`--full-auto` to the codex args, so both providers get filesystem
+write access without an interactive prompt.
+
+Updated test/orchestrator.test.ts (`getProviderArgs` cases, US-003
+section covering provider argument construction) to assert the new
+flags for both providers and for full-path basenames. Verified they
+fail against the pre-fix args and pass after the change.
+
+Updated README.md "Notes" section under Execute Tasks to document the
+default flags applied per provider.
+
+All 365 tests pass (setup: 79, orchestrator: 88, worktree: 20,
+progress: 38, merge: 38, integration: 102).
+Lint clean.
+
+## 2026-08-29 - US-005: Clean up worktrees for failed and skipped tickets
+
+Completed. In `runWavesIsolated` (src/orchestrator.ts), worktrees
+were only removed on the successful-merge path (line ~722) and the
+recovered-via-respawn path (line ~773). Two other paths left
+worktrees behind as accumulating sibling directories:
+
+1. When a spawned agent exits non-zero (the `exitCode !== 0` branch
+   that logs "agent exited N" and calls `checkTicket`/
+   `commitProgress`), the worktree was never removed.
+2. When `mergeWave` returns `stoppedAt` (conflict strategy `'stop'`),
+   the loop broke immediately -- the branch that caused the stop
+   never had its worktree removed, and any branches later in
+   `successfulBranches` that `mergeWave` never even reached (the
+   `for` loop in mergeWave breaks before processing them, so they
+   never appear in `mergeResult.merged`) were also left behind.
+
+Change: added a `try { await removeWorktree(...) } catch` block
+(mirroring the existing pattern used on the success/recovered paths)
+after the failed-agent block, and after the `stoppedAt` branch --
+iterating over `successfulBranches` and removing the worktree for
+any ticket whose `ticket.status` is not `'done'` (i.e. was not
+already cleaned up by the per-branch merged/recovered handling
+earlier in the loop). Removal errors are caught and logged via
+`console.error`, not thrown, so a stale/already-removed worktree
+does not crash the run.
+
+Updated tests in test/integration.test.ts:
+- Renamed and flipped the assertion in "failed ticket leaves worktree
+  intact" (now "failed ticket worktree is cleaned up") to expect the
+  worktree is gone after a non-zero exit. Verified it failed against
+  the pre-fix code and passes after the change.
+- Added a new test, "conflictStrategy stop cleans up worktrees for
+  un-merged branches": two tickets both succeed, a fake `git` makes
+  the first branch's merge fail, `conflictStrategy: 'stop'` triggers
+  `stoppedAt` on the first branch, and the second branch is never
+  attempted by `mergeWave`. Asserts both worktrees are removed.
+  Verified it failed against the pre-fix code (both worktrees left
+  on disk) and passes after the change.
+
+Gotcha: `ticket.status === 'done'` (mutated in place by `markDone`)
+is a reliable signal for "this ticket's worktree was already cleaned
+up earlier in this iteration of the loop" -- avoids double-removal
+attempts (which would otherwise just log a harmless but noisy error)
+for tickets that were merged or recovered via respawn before the
+`stoppedAt` check runs.
+
+All 369 tests pass (setup: 79, orchestrator: 88, worktree: 20,
+progress: 38, merge: 38, integration: 106).
+Lint clean.
+
+## 2026-08-29 - US-006: Preserve progress file when resuming a partial run
+
+Completed. `runWavesIsolated` in src/orchestrator.ts always called
+`generateProgress` and overwrote `progress.md` with a fresh,
+all-unchecked object, so resuming after a partial run (e.g. after a
+crash or a manual re-invocation) discarded the record of tickets
+that had already completed in the prior run.
+
+Change: added two exports to src/progress.ts:
+- `readProgress(progressPath)`: parses an existing progress.md
+  (the format produced by `renderProgress`) back into a
+  `ProgressData` object, or returns `null` if the file does not
+  exist. Ticket identity is keyed by filename (parsed with a local
+  `TICKET_FILENAME_RE`, not imported from orchestrator.ts, to avoid
+  a circular module dependency between progress.ts and
+  orchestrator.ts).
+- `mergeProgress(fresh, existing)`: given a freshly generated
+  `ProgressData` and an `existing` one (or `null`), returns a new
+  `ProgressData` whose tickets are the fresh set, except tickets
+  that were `done: true` in `existing` are replaced wholesale with
+  the existing (completed) record, carrying forward `branch`,
+  `exitCode`, and `completedAt`. Returns `fresh` unchanged when
+  `existing` is `null`.
+
+`runWavesIsolated` now calls
+`mergeProgress(generateProgress(...), readProgress(progressPath))`
+before the initial `writeProgress`, so a pre-existing progress.md's
+completed tickets survive a resumed run; when no file exists yet,
+behavior is unchanged (identical to calling `generateProgress` alone).
+
+Added tests to test/progress.test.ts: `readProgress` returns null
+for a missing file and correctly round-trips a written progress
+file (feature, startedAt, done/not-done tickets, branch/exit/
+completed metadata); `mergeProgress` carries forward a completed
+ticket's metadata while leaving not-done tickets as the fresh
+(unchecked) version, and returns the fresh object unchanged when
+there's no prior data.
+
+All 382 tests pass (setup: 79, orchestrator: 88, worktree: 20,
+progress: 51, merge: 38, integration: 106).
+Lint clean.
+
+## 2026-08-29 - US-007: Remove unreachable hasNewCommits check in runWaves
+
+Completed. `runWaves` in src/orchestrator.ts is only invoked from
+src/index.ts when `!isGitRepo()` (the git-repo case dispatches to
+`runWavesIsolated` instead), so `getRepoRoot()` inside `runWaves`
+always throws and `repoRoot` is always `null`. The
+`if (repoRoot && baseSha && !hasNewCommits(...))` guard, and the
+`baseSha` git rev-parse call feeding it, could therefore never
+execute in real CLI usage.
+
+Removed: the `repoRoot` try/catch assignment, the `baseSha`
+`execFileSync` call, and the `hasNewCommits` guard block (which
+skipped `markDone` and logged "made no commits"). The unused
+`execFileSync` import was also dropped (still used nowhere else in
+the file; `getRepoRoot`/`hasNewCommits` remain used by
+`runWavesIsolated`).
+
+Ambiguity resolved: two existing tests (one in
+test/orchestrator.test.ts, one in test/integration.test.ts) called
+`runWaves` directly with `process.chdir()` into a temp git repo,
+which artificially made `repoRoot` non-null and exercised the
+now-removed guard -- something that can never happen through the
+real CLI entry point (index.ts routes any git-repo cwd to
+`runWavesIsolated`). Per the task's framing of this guard as truly
+unreachable dead code, removed both tests (and their now-unused
+`MOCK_NOOP`/`MOCK_DIRTY` fixtures in orchestrator.test.ts) rather
+than adapting them, since they tested a code path the PRD explicitly
+asked to delete. The no-commit/dirty-worktree guarantees are still
+covered for the real (isolated) execution path by
+`runWavesIsolated`'s own `hasNewCommits`/`isDirty` checks and their
+existing tests in integration.test.ts.
+
+Also removed the now-unused `runWaves` import from
+test/integration.test.ts (flagged by lint after the test deletion).
+
+All 366 tests pass (setup: 79, orchestrator: 86, worktree: 20,
+progress: 38, merge: 38, integration: 105).
+Lint clean.
+
+## 2026-08-29 - US-008: Fix cosmetic issues: completedAt stamp and npm package contents
+
+Completed. Two independent cosmetic fixes:
+
+1. `checkTicket` in src/progress.ts unconditionally set
+   `ticket.completedAt = new Date().toISOString()` even when
+   `result.done` was `false`, so a failed ticket's progress record
+   showed a completion timestamp despite never completing. Guarded
+   the stamp behind `if (ticket.done)` (evaluated after `ticket.done`
+   is assigned from `result.done ?? true`), so `completedAt` is only
+   set when the ticket is actually marked done.
+
+2. package.json had no `files` field, so `npm publish`/`npm pack`
+   would include the entire `dist/` tree, including `dist/test/`
+   (bundled test files with sourcemaps) in the published package.
+   Added `"files": ["dist/**", "!dist/test"]`.
+
+Added a test to test/progress.test.ts (in the existing
+"checkTicket with done:false records exit code and keeps done as
+false" test) asserting `data.tickets[0].completedAt` is `undefined`
+after a `done:false` call; confirmed it failed before the fix and
+passes after.
+
+Verified `npm pack --dry-run` output no longer lists any
+`dist/test/` files.
+
+All 380 tests pass (setup: 79, orchestrator: 86, worktree: 20,
+progress: 52, merge: 38, integration: 105).
+Lint clean.
+
+## 2026-08-29 - US-009: Fix doc inconsistencies in AGENTS.md and README
+
+Completed. Doc-only fixes, no code changes:
+
+1. AGENTS.md's tech-stack line said "Node >= 18", but
+   package.json's `engines.node` is `>=24` (and README's provider
+   flag docs already assumed the >=24-era behavior from US-004).
+   Changed the line to "Node >= 24" to match.
+
+2. README's "On success" bullet only mentioned agent exit 0, but
+   the actual success gate in `runWavesIsolated`
+   (src/orchestrator.ts ~line 634-663) requires all three: exit 0,
+   `hasNewCommits` true (new commits on the worktree branch vs
+   base), and `!isDirty` (clean worktree). If exit is 0 but either
+   check fails, the ticket is left `ready-for-agent` for retry
+   rather than marked `done`. Rewrote the bullet to describe all
+   three conditions and the retry-on-partial-success behavior.
+
+3. README's provider-flags acceptance criterion was already
+   satisfied by US-004's changes (README.md ~line 149-153 already
+   documents `--print --dangerously-skip-permissions` for claude
+   and `exec --full-auto` for codex) -- no change needed there.
+
+No new tests: this is a documentation-only change with no testable
+behavior. Verified via `npm run build` (typecheck), `npm run lint`,
+and the full suite.
+
+All 380 tests pass (setup: 79, orchestrator: 86, worktree: 20,
+progress: 52, merge: 38, integration: 105).
+Lint clean.

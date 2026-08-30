@@ -5,6 +5,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { execSync } from 'node:child_process'
 import {
     parseTicketFilename,
     parseStatus,
@@ -14,6 +15,10 @@ import {
     markDone,
     renderPrompt,
     runWaves,
+    spawnAgent,
+    dryRun,
+    dryRunIsolated,
+    getProviderArgs,
     type Ticket,
 } from '../src/orchestrator.js'
 
@@ -23,6 +28,33 @@ function tmp ():string {
     return mkdtempSync(
         join(tmpdir(), 'nightralph-orch-test-')
     )
+}
+
+function initTempGitRepo ():string {
+    const dir = tmp()
+    execSync('git init', { cwd:dir })
+    execSync(
+        'git config user.email test@example.com',
+        { cwd:dir }
+    )
+    execSync(
+        'git config user.name "Test User"',
+        { cwd:dir }
+    )
+    execSync(
+        'git commit --allow-empty -m "init" --no-verify',
+        {
+            cwd:dir,
+            env:{
+                ...process.env,
+                GIT_COMMITTER_NAME:'Test',
+                GIT_COMMITTER_EMAIL:'test@example.com',
+                GIT_AUTHOR_NAME:'Test',
+                GIT_AUTHOR_EMAIL:'test@example.com',
+            },
+        }
+    )
+    return dir
 }
 
 function makeTicketBody (opts:{
@@ -305,6 +337,189 @@ test('findReadyTickets returns nothing when all blocked', t => {
     t.equal(ready.length, 0, 'circular dep deadlock')
 })
 
+test(
+    'findReadyTickets does not unblock on empty status',
+    t => {
+        const tickets:Ticket[] = [
+            makeTicket({
+                num:1,
+                filename:'01-a.md',
+                status:'',
+                blockers:[],
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-b.md',
+                status:'ready-for-agent',
+                blockers:[1],
+            }),
+        ]
+
+        const ready = findReadyTickets(tickets)
+        t.equal(
+            ready.length,
+            0,
+            'blocker with empty status is not done'
+        )
+    }
+)
+
+test(
+    'findReadyTickets does not unblock on claimed status',
+    t => {
+        const tickets:Ticket[] = [
+            makeTicket({
+                num:1,
+                filename:'01-a.md',
+                status:'claimed',
+                blockers:[],
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-b.md',
+                status:'ready-for-agent',
+                blockers:[1],
+            }),
+        ]
+
+        const ready = findReadyTickets(tickets)
+        t.equal(
+            ready.length,
+            0,
+            'blocker with claimed status is not done'
+        )
+    }
+)
+
+test(
+    'findReadyTickets does not unblock on resolved status',
+    t => {
+        const tickets:Ticket[] = [
+            makeTicket({
+                num:1,
+                filename:'01-a.md',
+                status:'resolved',
+                blockers:[],
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-b.md',
+                status:'ready-for-agent',
+                blockers:[1],
+            }),
+        ]
+
+        const ready = findReadyTickets(tickets)
+        t.equal(
+            ready.length,
+            0,
+            'blocker with resolved status is not done'
+        )
+    }
+)
+
+test('findReadyTickets unblocks on done status', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            status:'done',
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+    ]
+
+    const ready = findReadyTickets(tickets)
+    t.equal(ready.length, 1, 'blocker with done status unblocks')
+    t.equal(ready[0].num, 2, 'ticket 2 is ready')
+})
+
+// -- simulateWaves / detectDeadlocks (via dryRun) --
+
+test(
+    'dryRun does not treat claimed status as done in waves',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-a.md',
+                status:'claimed',
+                blockers:[],
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-b.md',
+                status:'ready-for-agent',
+                blockers:[1],
+            }),
+        ]
+
+        const output:Array<string> = []
+        const originalLog = console.log
+        console.log = function (msg:unknown) {
+            output.push(String(msg))
+        }
+
+        try {
+            dryRun(tickets, 'spec body')
+            const fullOutput = output.join('\n')
+            t.ok(
+                !fullOutput.includes(
+                    'Wave 1: 02-b.md'
+                ),
+                'ticket 2 does not appear as ready ' +
+                    'while its blocker is only claimed'
+            )
+        } finally {
+            console.log = originalLog
+        }
+    }
+)
+
+test(
+    'dryRun reports deadlock when blocker is claimed, ' +
+        'not done',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-a.md',
+                status:'claimed',
+                blockers:[],
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-b.md',
+                status:'ready-for-agent',
+                blockers:[1],
+            }),
+        ]
+
+        const output:Array<string> = []
+        const originalLog = console.log
+        console.log = function (msg:unknown) {
+            output.push(String(msg))
+        }
+
+        try {
+            dryRun(tickets, 'spec body')
+            const fullOutput = output.join('\n')
+            t.ok(
+                fullOutput.includes('Deadlocked tickets:') &&
+                    fullOutput.includes('02-b.md'),
+                'ticket 2 is reported as deadlocked'
+            )
+        } finally {
+            console.log = originalLog
+        }
+    }
+)
+
 // -- markDone --
 
 test('markDone updates file and ticket object', t => {
@@ -361,6 +576,42 @@ test('renderPrompt includes spec and ticket', t => {
     )
 })
 
+// -- spawnAgent --
+
+test('spawnAgent with cwd option runs in that directory',
+    async t => {
+        const base = tmp()
+        const cwd = tmp()
+        const logPath = join(base, 'test.log')
+
+        const MOCK_CWD = join(
+            process.cwd(), 'test', 'mock-agent-create-file.js'
+        )
+
+        const code = await spawnAgent({
+            prompt:'test',
+            agentCmd:MOCK_CWD,
+            model:null,
+            timeout:10,
+            logPath,
+            cwd,
+        })
+
+        t.equal(code, 0, 'should exit successfully')
+        t.ok(
+            existsSync(logPath),
+            'log file should be created'
+        )
+        const logContent = readFileSync(
+            logPath, 'utf8'
+        )
+        t.ok(
+            logContent.includes(cwd),
+            'log should contain the cwd'
+        )
+    }
+)
+
 // -- runWaves (integration) --
 
 const MOCK_PASS = join(
@@ -369,9 +620,8 @@ const MOCK_PASS = join(
 const MOCK_FAIL = join(
     process.cwd(), 'test', 'mock-agent-fail.js'
 )
-
 test('runWaves completes unblocked tickets', async t => {
-    const base = tmp()
+    const base = initTempGitRepo()
     const issuesDir = join(base, 'issues')
     const logsDir = join(base, 'logs')
     mkdirSync(issuesDir)
@@ -391,10 +641,16 @@ test('runWaves completes unblocked tickets', async t => {
 
     const tickets = scanTickets(issuesDir)
 
-    await runWaves(
-        tickets, 'test spec',
-        MOCK_PASS, null, 10, logsDir,
-    )
+    const originalCwd = process.cwd()
+    process.chdir(base)
+    try {
+        await runWaves(
+            tickets, 'test spec',
+            MOCK_PASS, null, 10, logsDir,
+        )
+    } finally {
+        process.chdir(originalCwd)
+    }
 
     t.equal(
         tickets[0].status, 'done',
@@ -415,7 +671,7 @@ test('runWaves completes unblocked tickets', async t => {
 })
 
 test('runWaves respects dependency order', async t => {
-    const base = tmp()
+    const base = initTempGitRepo()
     const issuesDir = join(base, 'issues')
     const logsDir = join(base, 'logs')
     mkdirSync(issuesDir)
@@ -443,10 +699,16 @@ test('runWaves respects dependency order', async t => {
 
     const tickets = scanTickets(issuesDir)
 
-    await runWaves(
-        tickets, 'test spec',
-        MOCK_PASS, null, 10, logsDir,
-    )
+    const originalCwd = process.cwd()
+    process.chdir(base)
+    try {
+        await runWaves(
+            tickets, 'test spec',
+            MOCK_PASS, null, 10, logsDir,
+        )
+    } finally {
+        process.chdir(originalCwd)
+    }
 
     for (const ticket of tickets) {
         t.equal(
@@ -458,7 +720,7 @@ test('runWaves respects dependency order', async t => {
 })
 
 test('runWaves stops dependents when agent fails', async t => {
-    const base = tmp()
+    const base = initTempGitRepo()
     const issuesDir = join(base, 'issues')
     const logsDir = join(base, 'logs')
     mkdirSync(issuesDir)
@@ -479,10 +741,16 @@ test('runWaves stops dependents when agent fails', async t => {
 
     const tickets = scanTickets(issuesDir)
 
-    await runWaves(
-        tickets, 'test spec',
-        MOCK_FAIL, null, 10, logsDir,
-    )
+    const originalCwd = process.cwd()
+    process.chdir(base)
+    try {
+        await runWaves(
+            tickets, 'test spec',
+            MOCK_FAIL, null, 10, logsDir,
+        )
+    } finally {
+        process.chdir(originalCwd)
+    }
 
     t.equal(
         tickets[0].status,
@@ -497,7 +765,7 @@ test('runWaves stops dependents when agent fails', async t => {
 })
 
 test('runWaves writes log files', async t => {
-    const base = tmp()
+    const base = initTempGitRepo()
     const issuesDir = join(base, 'issues')
     const logsDir = join(base, 'logs')
     mkdirSync(issuesDir)
@@ -511,10 +779,16 @@ test('runWaves writes log files', async t => {
 
     const tickets = scanTickets(issuesDir)
 
-    await runWaves(
-        tickets, 'test spec',
-        MOCK_PASS, null, 10, logsDir,
-    )
+    const originalCwd = process.cwd()
+    process.chdir(base)
+    try {
+        await runWaves(
+            tickets, 'test spec',
+            MOCK_PASS, null, 10, logsDir,
+        )
+    } finally {
+        process.chdir(originalCwd)
+    }
 
     t.ok(
         existsSync(join(logsDir, '01-task.log')),
@@ -523,7 +797,7 @@ test('runWaves writes log files', async t => {
 })
 
 test('runWaves skips already-done tickets', async t => {
-    const base = tmp()
+    const base = initTempGitRepo()
     const issuesDir = join(base, 'issues')
     const logsDir = join(base, 'logs')
     mkdirSync(issuesDir)
@@ -542,10 +816,16 @@ test('runWaves skips already-done tickets', async t => {
 
     const tickets = scanTickets(issuesDir)
 
-    await runWaves(
-        tickets, 'test spec',
-        MOCK_PASS, null, 10, logsDir,
-    )
+    const originalCwd = process.cwd()
+    process.chdir(base)
+    try {
+        await runWaves(
+            tickets, 'test spec',
+            MOCK_PASS, null, 10, logsDir,
+        )
+    } finally {
+        process.chdir(originalCwd)
+    }
 
     t.equal(
         tickets[0].status,
@@ -564,7 +844,7 @@ test('runWaves skips already-done tickets', async t => {
 })
 
 test('runWaves handles parallel independent tickets', async t => {
-    const base = tmp()
+    const base = initTempGitRepo()
     const issuesDir = join(base, 'issues')
     const logsDir = join(base, 'logs')
     mkdirSync(issuesDir)
@@ -591,10 +871,16 @@ test('runWaves handles parallel independent tickets', async t => {
 
     const tickets = scanTickets(issuesDir)
 
-    await runWaves(
-        tickets, 'test spec',
-        MOCK_PASS, null, 10, logsDir,
-    )
+    const originalCwd = process.cwd()
+    process.chdir(base)
+    try {
+        await runWaves(
+            tickets, 'test spec',
+            MOCK_PASS, null, 10, logsDir,
+        )
+    } finally {
+        process.chdir(originalCwd)
+    }
 
     for (const ticket of tickets) {
         t.equal(
@@ -607,3 +893,343 @@ test('runWaves handles parallel independent tickets', async t => {
     const logs = readdirSync(logsDir)
     t.equal(logs.length, 4, 'all four logs written')
 })
+
+// -- runWaves return value --
+
+test('runWaves returns allDone:true when all tickets ' +
+    'complete', async t => {
+    const base = initTempGitRepo()
+    const issuesDir = join(base, 'issues')
+    const logsDir = join(base, 'logs')
+    mkdirSync(issuesDir)
+
+    writeFileSync(
+        join(issuesDir, '01-pass.md'),
+        makeTicketBody({ status:'ready-for-agent' })
+    )
+
+    const tickets = scanTickets(issuesDir)
+
+    const originalCwd = process.cwd()
+    process.chdir(base)
+    try {
+        const result = await runWaves(
+            tickets, 'test spec',
+            MOCK_PASS, null, 10, logsDir,
+        )
+        t.equal(
+            result.allDone, true,
+            'allDone is true when all tickets complete'
+        )
+    } finally {
+        process.chdir(originalCwd)
+    }
+})
+
+test('runWaves returns allDone:false when agent fails',
+    async t => {
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-fail.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+
+        const originalCwd = process.cwd()
+        process.chdir(base)
+        try {
+            const result = await runWaves(
+                tickets, 'test spec',
+                MOCK_FAIL, null, 10, logsDir,
+            )
+            t.equal(
+                result.allDone, false,
+                'allDone is false when agent fails'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    })
+
+// -- dryRunIsolated --
+
+test('dryRunIsolated basic test', t => {
+    const tickets:Array<Ticket> = [
+        makeTicket({
+            num:1,
+            filename:'01-test.md',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+    ]
+
+    const output:Array<string> = []
+    const originalLog = console.log
+    console.log = function (msg:unknown) {
+        output.push(String(msg))
+    }
+
+    try {
+        dryRunIsolated({
+            tickets,
+            specBody:'test spec body',
+            repoName:'myapp',
+            conflictStrategy:'respawn',
+            progressPath:'.scratch/feature/progress.md',
+        })
+        t.ok(true, 'function executed without error')
+    } finally {
+        console.log = originalLog
+    }
+})
+
+test('dryRunIsolated shows worktree paths and branches',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-add-auth.md',
+                status:'ready-for-agent',
+                blockers:[],
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-add-api.md',
+                status:'ready-for-agent',
+                blockers:[1],
+            }),
+        ]
+
+        const output:Array<string> = []
+        const originalLog = console.log
+        console.log = function (msg:unknown) {
+            output.push(String(msg))
+        }
+
+        try {
+            dryRunIsolated({
+                tickets,
+                specBody:'test spec body',
+                repoName:'myapp',
+                conflictStrategy:'respawn',
+                progressPath:'.scratch/my-feature/progress.md',
+            })
+
+            const fullOutput = output.join('\n')
+
+            t.ok(
+                fullOutput.includes('01-add-auth.md'),
+                'includes ticket filename'
+            )
+            t.ok(
+                fullOutput.includes('../myapp.01-add-auth'),
+                'includes worktree path'
+            )
+            t.ok(
+                fullOutput.includes('myapp/01-add-auth'),
+                'includes branch name'
+            )
+            t.ok(
+                fullOutput.includes(
+                    'respawn (re-run agent on conflict)'
+                ),
+                'includes merge strategy with description'
+            )
+            t.ok(
+                fullOutput.includes(
+                    '.scratch/my-feature/progress.md'
+                ),
+                'includes progress file path'
+            )
+            t.ok(
+                fullOutput.includes('test spec body'),
+                'includes prompt preview'
+            )
+        } finally {
+            console.log = originalLog
+        }
+    }
+)
+
+test('dryRunIsolated respects wave dependencies', t => {
+    const tickets:Array<Ticket> = [
+        makeTicket({
+            num:1,
+            filename:'01-base.md',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-depends-on-1.md',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-depends-on-2.md',
+            status:'ready-for-agent',
+            blockers:[2],
+        }),
+    ]
+
+    const output:Array<string> = []
+    const originalLog = console.log
+    console.log = function (msg:unknown) {
+        output.push(String(msg))
+    }
+
+    try {
+        dryRunIsolated({
+            tickets,
+            specBody:'test spec body',
+            repoName:'myapp',
+            conflictStrategy:'stop',
+            progressPath:'.scratch/feature/progress.md',
+        })
+
+        const fullOutput = output.join('\n')
+
+        t.ok(
+            fullOutput.includes('Wave 1:'),
+            'has wave 1'
+        )
+        t.ok(
+            fullOutput.includes('Wave 2:'),
+            'has wave 2'
+        )
+        t.ok(
+            fullOutput.includes('Wave 3:'),
+            'has wave 3'
+        )
+        t.ok(
+            fullOutput.includes(
+                'stop (stop merging on conflict)'
+            ),
+            'includes stop strategy description'
+        )
+    } finally {
+        console.log = originalLog
+    }
+})
+
+test('dryRunIsolated handles multiple tickets per wave', t => {
+    const tickets:Array<Ticket> = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-c.md',
+            status:'ready-for-agent',
+            blockers:[1, 2],
+        }),
+    ]
+
+    const output:Array<string> = []
+    const originalLog = console.log
+    console.log = function (msg:unknown) {
+        output.push(String(msg))
+    }
+
+    try {
+        dryRunIsolated({
+            tickets,
+            specBody:'test spec body',
+            repoName:'myapp',
+            conflictStrategy:'respawn',
+            progressPath:'.scratch/f/progress.md',
+        })
+
+        const fullOutput = output.join('\n')
+
+        t.ok(
+            fullOutput.includes('01-a.md, 02-b.md'),
+            'wave 1 has both parallel tickets'
+        )
+        t.ok(
+            fullOutput.includes('../myapp.01-a'),
+            'wave 1 includes first worktree'
+        )
+        t.ok(
+            fullOutput.includes('../myapp.02-b'),
+            'wave 1 includes second worktree'
+        )
+        t.ok(
+            fullOutput.includes('03-c.md'),
+            'wave 2 has dependent'
+        )
+    } finally {
+        console.log = originalLog
+    }
+})
+
+// -- US-003: provider adapter argument construction --
+
+test('getProviderArgs - claude provider adds permission flag',
+    t => {
+        const args = getProviderArgs('claude')
+        t.deepEqual(
+            args,
+            ['--print', '--dangerously-skip-permissions'],
+            'claude gets --print and skip-permissions flag'
+        )
+    })
+
+test('getProviderArgs - codex provider adds sandbox flag',
+    t => {
+        const args = getProviderArgs('codex')
+        t.deepEqual(
+            args,
+            ['exec', '--full-auto'],
+            'codex gets exec and full-auto flag'
+        )
+    })
+
+test('getProviderArgs - unknown provider returns empty',
+    t => {
+        const args = getProviderArgs('my-custom-agent')
+        t.deepEqual(
+            args,
+            [],
+            'unknown provider gets no extra args'
+        )
+    })
+
+test('getProviderArgs - full path with claude basename',
+    t => {
+        const args = getProviderArgs(
+            '/usr/local/bin/claude'
+        )
+        t.deepEqual(
+            args,
+            ['--print', '--dangerously-skip-permissions'],
+            'full path to claude still gets permission flag'
+        )
+    })
+
+test('getProviderArgs - full path with codex basename',
+    t => {
+        const args = getProviderArgs(
+            '/opt/codex/bin/codex'
+        )
+        t.deepEqual(
+            args,
+            ['exec', '--full-auto'],
+            'full path to codex still gets sandbox flag'
+        )
+    })

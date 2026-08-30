@@ -1,172 +1,149 @@
 {
   "project": "nightralph",
-  "branchName": "ralph/integration-test-coverage",
-  "description": "Integration tests for the CLI layer, validating subprocess execution, argument forwarding, dry-run output, edge cases, and setup-to-execute composition",
+  "branchName": "ralph/audit-fixes",
+  "description": "Fix verified bugs and practical issues from the AUDIT.md review",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Unit tests for findFeatureDirs",
-      "description": "As a developer, I want direct tests for findFeatureDirs so that feature directory discovery is validated independently.",
+      "title": "Treat only explicit done status as complete for blocker resolution",
+      "description": "As an operator, I want blocker resolution to require an explicit done status so that tickets with missing, claimed, or in-progress statuses are not treated as completed.",
       "acceptanceCriteria": [
-        "Create test/integration.test.ts with findFeatureDirs tests",
-        "Test: returns empty array when .scratch/ does not exist",
-        "Test: returns empty array when .scratch/ has directories without issues/ subdirs",
-        "Test: returns entries with correct name, dir, and spec paths for valid feature dirs",
-        "Test: ignores non-directory entries in .scratch/",
-        "Each test creates and cleans up its own temp directory",
+        "findReadyTickets builds doneNums from tickets with status === 'done' instead of status !== 'ready-for-agent'",
+        "simulateWaves uses the same done-only logic for its doneNums set",
+        "detectDeadlocks uses the same done-only logic for its initial doneNums set",
+        "A ticket with status '' (no Status line) does not unblock dependents",
+        "A ticket with status 'claimed' or 'resolved' does not unblock dependents",
+        "A ticket with status 'done' still unblocks dependents",
+        "Tests cover empty-status, claimed, resolved, and done scenarios",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "findFeatureDirs is already exported from src/index.ts -- import it directly"
+      "notes": "Three functions in orchestrator.ts share the same inverted logic: findReadyTickets (line 106), simulateWaves (line 169), detectDeadlocks (line 196). All must change from !== 'ready-for-agent' to === 'done'."
     },
     {
       "id": "US-002",
-      "title": "Unit tests for resolveIssuesDir with explicit flags",
-      "description": "As a developer, I want to verify that when both --dir and --spec are provided, resolveIssuesDir returns them directly without scanning .scratch/.",
+      "title": "Handle existing branches when re-creating worktrees",
+      "description": "As an operator re-running after a failed ticket, I want createWorktree to handle pre-existing branches so that the CLI does not crash.",
       "acceptanceCriteria": [
-        "Add resolveIssuesDir tests to test/integration.test.ts",
-        "Test: returns { dir, spec } exactly as given when both flags are provided",
-        "No filesystem scanning occurs (the temp dir has no .scratch/)",
+        "createWorktree detects an existing branch and deletes it (git branch -D) before creating the worktree, or reuses the existing worktree if it is still present",
+        "If a worktree already exists at the target path, it is removed (git worktree remove) before re-creating",
+        "runWavesIsolated wraps worktree creation so a single ticket failure is reported per-ticket instead of crashing the entire Promise.all",
+        "Tests cover the re-run scenario where a branch from a prior failed run already exists",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "resolveIssuesDir is already exported from src/index.ts"
+      "notes": "worktree.ts line 50: git worktree add -b fails when the branch exists. Check for existing branch/worktree first, or catch the error and clean up."
     },
     {
       "id": "US-003",
-      "title": "Subprocess CLI smoke test for execute",
-      "description": "As a developer, I want a test that spawns node dist/index.js <provider> as a child process so that I know the yargs wiring, argument parsing, and file resolution work end-to-end.",
+      "title": "Handle gitignored progress path in commitProgress",
+      "description": "As an operator with .scratch/ in .gitignore, I want the CLI to handle progress commits gracefully instead of crashing.",
       "acceptanceCriteria": [
-        "Test spawns the built CLI with --dir, --spec, and --timeout-secs pointing at a temp directory with ticket files",
-        "Uses the existing mock-agent-pass.js as the provider argument",
-        "Asserts exit code 0",
-        "Asserts ticket files on disk are updated to **Status:** done",
-        "Asserts log files are created in the expected location",
+        "commitProgress uses git add --force so that gitignored paths are still staged",
+        "Alternatively, runWavesIsolated catches commitProgress errors and logs a warning instead of crashing",
+        "A run with .scratch/ in .gitignore completes without throwing",
+        "Tests cover the gitignored-path scenario",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Use short --timeout-secs (e.g. 10) to avoid hanging"
+      "notes": "progress.ts line 108: git add <path> fails on gitignored paths. Either use git add --force or wrap calls in try/catch with a warning."
     },
     {
       "id": "US-004",
-      "title": "Create mock-agent-echo-args and test --model flag",
-      "description": "As a developer, I want to verify that --model (or -m) is passed through to the spawned agent process so that running npx nightralph claude -m claude-sonnet-4-6 actually forwards the model argument.",
+      "title": "Add permission flags to provider argument maps",
+      "description": "As a user running nightralph claude, I want the spawned agent to have write permissions so that tickets can actually be implemented.",
       "acceptanceCriteria": [
-        "Create test/mock-agent-echo-args.js that writes process.argv to stdout, then exits 0",
-        "Test spawns the CLI with -m test-model using this mock agent",
-        "Asserts the log file contains --model and test-model in the captured argv",
+        "claude provider args include a permission flag that allows file writes (e.g. --dangerously-skip-permissions)",
+        "codex provider args include a sandbox flag that allows workspace writes (e.g. --full-auto)",
+        "The README documents the default flags applied for each provider",
+        "Tests verify the updated argument lists for both providers",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
       "passes": true,
-      "notes": ""
+      "notes": "orchestrator.ts lines 225-228: PROVIDER_ARGS maps claude to ['--print'] and codex to ['exec'] with no permission flags. Add appropriate flags for non-interactive file-writing operation."
     },
     {
       "id": "US-005",
-      "title": "Subprocess CLI test for --dry-run",
-      "description": "As a developer, I want a test that runs the CLI with --dry-run so that I know the dry-run path works through yargs and produces the expected output.",
+      "title": "Clean up worktrees for failed and skipped tickets",
+      "description": "As an operator, I want worktrees to be cleaned up after failed or skipped tickets so that they do not accumulate as sibling directories.",
       "acceptanceCriteria": [
-        "Test spawns the built CLI with --dry-run, --dir, and --spec",
-        "Captures stdout",
-        "Asserts output contains Wave 1: with the expected ticket filenames",
-        "Asserts output contains AGENT INSTRUCTIONS (prompt preview)",
-        "Asserts ticket files on disk are NOT modified",
+        "After a ticket's agent exits non-zero, its worktree is removed",
+        "After mergeWave stops (stoppedAt), remaining worktrees for un-merged branches are removed",
+        "Worktree removal errors are caught and logged, not thrown",
+        "Tests verify cleanup occurs on failure and stop scenarios",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
       "passes": true,
-      "notes": ""
+      "notes": "orchestrator.ts: worktrees are only removed on merged (line 722) and recovered (line 773) paths. Add cleanup after the failed-agent block (line 683) and after the stoppedAt break (line 799)."
     },
     {
       "id": "US-006",
-      "title": "CLI exits gracefully when no tickets found",
-      "description": "As a developer, I want to verify the CLI handles the empty-directory edge case gracefully.",
+      "title": "Preserve progress file when resuming a partial run",
+      "description": "As an operator resuming after a partial run, I want the progress file to reflect prior ticket completions so that history is not lost.",
       "acceptanceCriteria": [
-        "Test points --dir at an empty directory with a valid --spec",
-        "Asserts stdout contains No ticket files found",
-        "Asserts exit code 0 (graceful, not a crash)",
+        "runWavesIsolated reads an existing progress.md before calling generateProgress",
+        "If the file exists, completed tickets (done: true) in the existing data are carried forward into the new progress object",
+        "If no progress file exists, behavior is unchanged (fresh generation)",
+        "Tests cover resume with a pre-existing progress file",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 6,
       "passes": true,
-      "notes": ""
+      "notes": "orchestrator.ts line 570: generateProgress always creates fresh all-unchecked data. Add a readProgress helper in progress.ts that parses an existing file and merges completed state."
     },
     {
       "id": "US-007",
-      "title": "CLI exits with error for missing dir/spec",
-      "description": "As a developer, I want the CLI to fail clearly when --dir or --spec point to nonexistent paths.",
+      "title": "Remove unreachable hasNewCommits check in runWaves",
+      "description": "As a maintainer, I want dead code removed so that the non-isolated execution path is correct and readable.",
       "acceptanceCriteria": [
-        "Test passes --dir /nonexistent/path with a valid --spec",
-        "Asserts exit code is non-zero",
-        "Asserts stderr contains not found",
-        "Test passes valid --dir with --spec /nonexistent/spec.md",
-        "Asserts exit code is non-zero",
-        "Asserts stderr contains not found",
+        "The hasNewCommits guard in runWaves (the non-isolated path) is removed or replaced with logic that works outside a git repo",
+        "The baseSha variable and its git rev-parse call are removed if no longer used",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 7,
       "passes": true,
-      "notes": ""
+      "notes": "orchestrator.ts lines 471-476 and 510-519: runWaves only runs outside a git repo, so repoRoot is always null, making the hasNewCommits check unreachable. Remove the dead branch."
     },
     {
       "id": "US-008",
-      "title": "Unknown blocker warning and stripping",
-      "description": "As a developer, I want to verify that runExecute warns about blockers referencing nonexistent ticket numbers and strips them so execution proceeds.",
+      "title": "Fix cosmetic issues: completedAt stamp and npm package contents",
+      "description": "As a maintainer, I want checkTicket to not stamp completedAt on failed tickets and test files excluded from the npm package.",
       "acceptanceCriteria": [
-        "Test creates a ticket with **Blocked by:** 99 where ticket 99 does not exist",
-        "Spawns the CLI as a subprocess",
-        "Asserts stderr/stdout contains a warning mentioning blocker 99",
-        "Asserts the ticket still completes (blocker was stripped)",
+        "checkTicket only sets completedAt when the ticket is marked done (result.done is true or defaults to true)",
+        "package.json includes a files field that excludes dist/test/ from the published package",
+        "npm pack --dry-run does not list any dist/test/ files",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 8,
       "passes": true,
-      "notes": ""
+      "notes": "progress.ts line 90: completedAt is set unconditionally. Guard with if (result.done !== false). package.json: add a files field like [\"dist/**\", \"!dist/test\"]."
     },
     {
       "id": "US-009",
-      "title": "Dry-run deadlock detection",
-      "description": "As a developer, I want the dry-run to report deadlocked tickets (circular dependencies) so users can fix their ticket graph before running real agents.",
+      "title": "Fix doc inconsistencies in AGENTS.md and README",
+      "description": "As a user reading the docs, I want AGENTS.md and README to match the actual code behavior.",
       "acceptanceCriteria": [
-        "Test creates two tickets that block each other (1 blocks 2, 2 blocks 1)",
-        "Spawns the CLI with --dry-run",
-        "Asserts output contains Deadlocked tickets with both filenames",
-        "Typecheck passes",
-        "Tests pass"
+        "AGENTS.md says Node >= 24 instead of Node >= 18",
+        "README explains that success requires exit 0, new commits, and a clean worktree (not just exit 0)",
+        "README provider examples mention the permission flags applied by default",
+        "Typecheck passes"
       ],
       "priority": 9,
       "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-010",
-      "title": "Setup-then-execute composition test",
-      "description": "As a developer, I want a test that runs setup, then creates issue files in the expected .scratch/ layout, then runs execute -- proving the two commands compose correctly.",
-      "acceptanceCriteria": [
-        "Test calls setup() with tracker:'local' in a temp project dir",
-        "Creates .scratch/<feature>/issues/ with 2 ticket files and a spec.md",
-        "Spawns the CLI as a subprocess pointing at that project dir (using the mock agent)",
-        "Asserts tickets are marked done",
-        "Asserts logs are written to .scratch/<feature>/logs/",
-        "Asserts docs/agents/issue-tracker.md exists (from setup)",
-        "Asserts .agents/skills/ directories exist (from setup)",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": "Most complex test -- calls setup() as a library function, then spawns CLI for execute"
+      "notes": "AGENTS.md line 'Node >= 18' should match package.json engines '>=24'. README success description needs the full set of checks. Update after US-004 lands so flag docs are accurate."
     }
   ]
 }

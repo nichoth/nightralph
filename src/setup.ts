@@ -20,6 +20,40 @@ export const DOC_TEMPLATES = [
     'domain.md',
 ] as const
 
+const START_MARKER = '<!-- nightralph:start -->'
+const END_MARKER = '<!-- nightralph:end -->'
+
+export function writeManagedSection (
+    filePath:string,
+    content:string,
+):void {
+    const block = [
+        START_MARKER,
+        content,
+        END_MARKER,
+    ].join('\n')
+
+    if (!existsSync(filePath)) {
+        writeFileSync(filePath, block + '\n')
+        return
+    }
+
+    const existing = readFileSync(filePath, 'utf8')
+    const startIdx = existing.indexOf(START_MARKER)
+    const endIdx = existing.indexOf(END_MARKER)
+
+    if (startIdx !== -1 && endIdx !== -1) {
+        const before = existing.slice(0, startIdx)
+        const after = existing.slice(
+            endIdx + END_MARKER.length
+        )
+        writeFileSync(filePath, before + block + after)
+    } else {
+        const sep = existing.endsWith('\n') ? '\n' : '\n\n'
+        writeFileSync(filePath, existing + sep + block + '\n')
+    }
+}
+
 export function checkGhAuth ():boolean {
     try {
         execSync('gh auth status', { stdio:'ignore' })
@@ -130,7 +164,7 @@ export function setup (opts:SetupOpts):void {
         'Issues are tracked as local markdown files under ' +
         '`.scratch/`.'
 
-    const agentsMd = [
+    const managedContent = [
         '## Agent skills',
         '',
         '### Issue tracker',
@@ -145,10 +179,10 @@ export function setup (opts:SetupOpts):void {
         '### Domain docs',
         '',
         'Single-context layout. See `docs/agents/domain.md`.',
-        '',
     ].join('\n')
 
-    writeFileSync(join(projectDir, 'AGENTS.md'), agentsMd)
+    const agentsPath = join(projectDir, 'AGENTS.md')
+    writeManagedSection(agentsPath, managedContent)
     console.log('\n  AGENTS.md (updated)')
 
     console.log(

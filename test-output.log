@@ -1,0 +1,815 @@
+
+> nightralph@0.0.2 test
+> esbuild test/setup.test.ts test/orchestrator.test.ts test/worktree.test.ts test/progress.test.ts test/merge.test.ts test/integration.test.ts --format=esm --bundle --packages=external --outdir=dist/test --sourcemap && node dist/test/setup.test.js && node dist/test/orchestrator.test.js && node dist/test/worktree.test.js && node dist/test/progress.test.js && node dist/test/merge.test.js && node dist/test/integration.test.js
+
+
+  dist/test/integration.test.js       42.4kb
+  dist/test/merge.test.js             18.5kb
+  dist/test/orchestrator.test.js      18.2kb
+  dist/test/setup.test.js             12.5kb
+  dist/test/progress.test.js           8.1kb
+  dist/test/worktree.test.js           8.1kb
+  dist/test/integration.test.js.map   90.3kb
+  dist/test/orchestrator.test.js.map  52.2kb
+  dist/test/merge.test.js.map         38.1kb
+  dist/test/setup.test.js.map         22.9kb
+  dist/test/progress.test.js.map      16.3kb
+  dist/test/worktree.test.js.map      15.9kb
+
+⚡ Done in 30ms
+TAP version 13
+# setup copies skills to .agents/skills
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 1 grill/ should exist in .agents/skills
+ok 2 grill/SKILL.md should be copied
+ok 3 grilling/ should exist in .agents/skills
+ok 4 grilling/SKILL.md should be copied
+ok 5 domain-modeling/ should exist in .agents/skills
+ok 6 domain-modeling/SKILL.md should be copied
+ok 7 to-spec/ should exist in .agents/skills
+ok 8 to-spec/SKILL.md should be copied
+ok 9 to-tickets/ should exist in .agents/skills
+ok 10 to-tickets/SKILL.md should be copied
+ok 11 tdd/ should exist in .agents/skills
+ok 12 tdd/SKILL.md should be copied
+# setup does NOT create .claude/skills by default
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 13 .claude/skills should not exist without --claude
+# setup --claude creates symlinks in .claude/skills
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+Created symlinks in .claude/skills/
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 14 grill/ should exist in .agents/skills
+ok 15 grill/ should exist in .claude/skills
+ok 16 .claude/skills/grill should be a symlink
+ok 17 symlink should point to ../../.agents/skills/grill
+ok 18 grilling/ should exist in .agents/skills
+ok 19 grilling/ should exist in .claude/skills
+ok 20 .claude/skills/grilling should be a symlink
+ok 21 symlink should point to ../../.agents/skills/grilling
+ok 22 domain-modeling/ should exist in .agents/skills
+ok 23 domain-modeling/ should exist in .claude/skills
+ok 24 .claude/skills/domain-modeling should be a symlink
+ok 25 symlink should point to ../../.agents/skills/domain-modeling
+ok 26 to-spec/ should exist in .agents/skills
+ok 27 to-spec/ should exist in .claude/skills
+ok 28 .claude/skills/to-spec should be a symlink
+ok 29 symlink should point to ../../.agents/skills/to-spec
+ok 30 to-tickets/ should exist in .agents/skills
+ok 31 to-tickets/ should exist in .claude/skills
+ok 32 .claude/skills/to-tickets should be a symlink
+ok 33 symlink should point to ../../.agents/skills/to-tickets
+ok 34 tdd/ should exist in .agents/skills
+ok 35 tdd/ should exist in .claude/skills
+ok 36 .claude/skills/tdd should be a symlink
+ok 37 symlink should point to ../../.agents/skills/tdd
+# setup creates docs/agents/ templates
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 38 docs/agents/triage-labels.md should be created
+ok 39 docs/agents/domain.md should be created
+# setup does not overwrite non-tracker docs
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (already exists)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 40 should preserve existing triage-labels.md
+# setup is idempotent
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+Created symlinks in .claude/skills/
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+Created symlinks in .claude/skills/
+
+  docs/agents/triage-labels.md (already exists)
+  docs/agents/domain.md (already exists)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 41 grill/ should still exist after second run
+ok 42 grill symlink should still be valid
+ok 43 grilling/ should still exist after second run
+ok 44 grilling symlink should still be valid
+ok 45 domain-modeling/ should still exist after second run
+ok 46 domain-modeling symlink should still be valid
+ok 47 to-spec/ should still exist after second run
+ok 48 to-spec symlink should still be valid
+ok 49 to-tickets/ should still exist after second run
+ok 50 to-tickets symlink should still be valid
+ok 51 tdd/ should still exist after second run
+ok 52 tdd symlink should still be valid
+ok 53 docs/agents/triage-labels.md should still exist
+ok 54 docs/agents/domain.md should still exist
+# checkGhAuth exists and is callable
+ok 55 checkGhAuth should be a function
+# setup with tracker:local copies local markdown template
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 56 docs/agents/issue-tracker.md should exist
+ok 57 should copy local markdown template
+# setup with tracker:github copies github template
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (github)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 58 docs/agents/issue-tracker.md should exist
+ok 59 should copy github template
+# setup creates AGENTS.md with local markdown text
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 60 AGENTS.md should exist
+ok 61 should mention local markdown
+# setup creates AGENTS.md with GitHub Issues text
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (github)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 62 AGENTS.md should exist
+ok 63 should mention GitHub Issues
+# tracker template overwrites when switching trackers
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 64 should have local template initially
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md)
+  grilling/ (SKILL.md)
+  domain-modeling/ (SKILL.md)
+  to-spec/ (SKILL.md)
+  to-tickets/ (SKILL.md)
+  tdd/ (SKILL.md)
+
+  docs/agents/triage-labels.md (already exists)
+  docs/agents/domain.md (already exists)
+  docs/agents/issue-tracker.md (github)
+
+  AGENTS.md (updated)
+
+Source: test/repo @ abc123
+ok 65 should overwrite with GitHub template
+ok 66 should not contain local template anymore
+
+1..66
+# tests 66
+# pass  66
+
+# ok
+TAP version 13
+# parseTicketFilename parses valid names
+ok 1 should return a result
+ok 2 num
+ok 3 slug
+# parseTicketFilename with multi-digit number
+ok 4 should return a result
+ok 5 num
+ok 6 slug
+# parseTicketFilename rejects non-matching names
+ok 7 no leading number
+ok 8 wrong extension
+ok 9 no extension
+# parseStatus extracts status
+ok 10 basic
+ok 11 trims and lowercases
+ok 12 missing status returns empty
+# parseStatus works in multi-line body
+ok 13 should be equal
+# parseBlockers extracts blocker numbers
+ok 14 comma-separated
+ok 15 hash-prefixed
+# parseBlockers returns empty for none
+ok 16 explicit none
+ok 17 case-insensitive none
+ok 18 missing field
+# scanTickets reads and parses ticket files
+ok 19 finds 2 tickets
+ok 20 first ticket num
+ok 21 first ticket slug
+ok 22 first ticket status
+ok 23 first has no blockers
+ok 24 second ticket num
+ok 25 second blocked by 1
+# scanTickets returns sorted by number
+ok 26 numeric sort
+# findReadyTickets returns unblocked ready tickets
+ok 27 only one is ready
+ok 28 ticket 1 is ready
+# findReadyTickets unblocks after deps done
+ok 29 only ticket 2 is ready
+ok 30 ticket 2 unblocked because 1 is done
+# findReadyTickets returns nothing when all blocked
+ok 31 circular dep deadlock
+# markDone updates file and ticket object
+ok 32 in-memory status
+ok 33 file updated on disk
+ok 34 old status removed
+# renderPrompt includes spec and ticket
+ok 35 contains spec
+ok 36 contains ticket filename
+ok 37 contains instructions
+# spawnAgent with cwd option runs in that directory
+ok 38 should exit successfully
+ok 39 log file should be created
+ok 40 log should contain the cwd
+# runWaves completes unblocked tickets
+
+Wave 1: 01-first.md, 02-second.md
+  Starting 01-first.md
+  Starting 02-second.md
+  01-first.md: done
+  02-second.md: done
+
+Finished: 2 completed
+ok 41 ticket 1 done
+ok 42 ticket 2 done
+ok 43 ticket 1 persisted to disk
+# runWaves respects dependency order
+
+Wave 1: 01-base.md
+  Starting 01-base.md
+  01-base.md: done
+
+Wave 2: 02-depends-on-1.md
+  Starting 02-depends-on-1.md
+  02-depends-on-1.md: done
+
+Wave 3: 03-depends-on-2.md
+  Starting 03-depends-on-2.md
+  03-depends-on-2.md: done
+
+Finished: 3 completed
+ok 44 01-base.md completed
+ok 45 02-depends-on-1.md completed
+ok 46 03-depends-on-2.md completed
+# runWaves stops dependents when agent fails
+
+Wave 1: 01-will-fail.md
+  Starting 01-will-fail.md
+  01-will-fail.md: agent exited 1
+
+No tickets completed this wave. Stopping.
+
+Finished: 0 completed, 2 remaining
+ok 47 failed ticket keeps status
+ok 48 dependent never ran
+# runWaves writes log files
+
+Wave 1: 01-task.md
+  Starting 01-task.md
+  01-task.md: done
+
+Finished: 1 completed
+ok 49 log file created
+# runWaves skips already-done tickets
+
+Wave 1: 02-ready.md
+  Starting 02-ready.md
+  02-ready.md: done
+
+Finished: 1 completed
+ok 50 pre-done ticket unchanged
+ok 51 dependent ran and completed
+ok 52 no log for skipped ticket
+# runWaves handles parallel independent tickets
+
+Wave 1: 01-a.md, 02-b.md, 03-c.md
+  Starting 01-a.md
+  Starting 02-b.md
+  Starting 03-c.md
+  01-a.md: done
+  02-b.md: done
+  03-c.md: done
+
+Wave 2: 04-final.md
+  Starting 04-final.md
+  04-final.md: done
+
+Finished: 4 completed
+ok 53 01-a.md completed
+ok 54 02-b.md completed
+ok 55 03-c.md completed
+ok 56 04-final.md completed
+ok 57 all four logs written
+
+1..57
+# tests 57
+# pass  57
+
+# ok
+TAP version 13
+# getRepoName returns the directory basename
+ok 1 should return current repo basename
+# getCurrentBranch returns the branch name
+ok 2 branch should be master or main, got main
+# createWorktree creates a worktree at the expected path
+ok 3 worktree path should be in parent dir
+ok 4 worktree directory should exist
+# createWorktree creates with the expected branch name
+ok 5 branch name should match pattern
+ok 6 branch should exist in repo
+# createWorktree branch is based on specified base branch
+Switched to a new branch 'develop'
+Switched to branch 'main'
+ok 7 worktree should have the feature branch
+# removeWorktree removes the worktree
+ok 8 worktree should exist before removal
+ok 9 worktree should not exist after removal
+# listWorktrees returns all worktree paths
+ok 10 should include first worktree
+ok 11 should include second worktree
+# removeWorktree throws for non-existent path
+ok 12 should throw an Error
+
+1..12
+# tests 12
+# pass  12
+
+# ok
+TAP version 13
+# generateProgress creates entries for all tickets, all marked not done
+ok 1 should set feature name
+ok 2 should have all tickets
+ok 3 should preserve ticket number
+ok 4 should mark all as not done
+ok 5 all tickets should be not done
+ok 6 all tickets should be not done
+ok 7 branch should be null
+ok 8 exitCode should be null
+ok 9 completedAt should be null
+# renderProgress produces valid markdown with unchecked boxes
+ok 10 should have feature title
+ok 11 should have Started line
+ok 12 should have unchecked checkbox for ticket 1
+ok 13 should have unchecked checkbox for ticket 2
+ok 14 should not have metadata for unchecked items
+# checkTicket marks the right ticket done and fills metadata
+ok 15 should start not done
+ok 16 should mark done
+ok 17 should set branch
+ok 18 should set exitCode
+ok 19 should set completedAt
+ok 20 should not affect other tickets
+# renderProgress after checkTicket shows [x] with metadata lines
+ok 21 should have checked checkbox
+ok 22 should have branch metadata
+ok 23 should have exit code metadata
+ok 24 should have completed timestamp
+# checkTicket for unknown ticket number is a no-op
+ok 25 should not throw
+ok 26 should not modify data
+# commitProgress creates a git commit containing the progress file
+ok 27 should create commit with message
+ok 28 should have progress file in commit
+
+1..28
+# tests 28
+# pass  28
+
+# ok
+TAP version 13
+# mergeBranch merges a clean branch (no conflicts)
+Switched to a new branch 'feature-1'
+Switched to branch 'main'
+ok 1 mergeBranch should return true for clean merge
+ok 2 should have merged file in HEAD
+# mergeBranch returns false and aborts on conflict
+Switched to a new branch 'feature-2'
+Switched to branch 'main'
+Switched to branch 'feature-2'
+Switched to branch 'main'
+ok 3 mergeBranch should return false on conflict
+ok 4 git should be clean after abort
+# rebaseBranch rebases a branch onto updated base
+Switched to a new branch 'feature-3'
+Switched to branch 'main'
+ok 5 rebaseBranch should return true on success
+ok 6 HEAD should be on base branch after successful rebase
+ok 7 base file should be in tree
+ok 8 updated base file should be in tree
+Switched to branch 'feature-3'
+ok 9 feature file should be in tree on feature branch after rebase
+# rebaseBranch returns false and aborts on conflict
+Switched to a new branch 'feature-4'
+Switched to branch 'main'
+ok 10 rebaseBranch should return false on conflict
+ok 11 should be back on base branch after abort
+ok 12 git should be clean after rebase abort
+# mergeWave merges multiple non-conflicting branches sequentially
+Switched to a new branch 'feature-5a'
+Switched to branch 'main'
+Switched to a new branch 'feature-5b'
+Switched to branch 'main'
+ok 13 should merge both branches
+ok 14 first branch should be merged
+ok 15 second branch should be merged
+ok 16 should not stop (no conflicts)
+ok 17 should have file-a.txt
+ok 18 should have file-b.txt
+# mergeWave with strategy:stop stops at first conflict and returns stoppedAt
+Switched to a new branch 'feature-6a'
+Switched to branch 'main'
+Note: switching to 'HEAD~1'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+HEAD is now at b41a93c add shared.txt
+Switched to a new branch 'feature-6b'
+Switched to branch 'main'
+ok 19 should return results for both
+ok 20 first branch merged
+ok 21 second branch conflicted
+ok 22 stoppedAt should not be null
+ok 23 stoppedAt should be ticket 2
+# mergeWave with strategy:stop stops when first branch conflicts
+Switched to a new branch 'feature-6b-a'
+Switched to branch 'main'
+Note: switching to 'HEAD~2'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+HEAD is now at f5f9a46 init
+Switched to a new branch 'feature-6b-b'
+Switched to branch 'main'
+ok 24 should only return first branch (stopped)
+ok 25 first branch should be conflicted
+ok 26 stoppedAt should not be null
+ok 27 stoppedAt should be ticket 1
+# mergeWave with strategy:respawn marks conflicted branch and continues
+Switched to a new branch 'feature-7a'
+Switched to branch 'main'
+Note: switching to 'HEAD~2'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+HEAD is now at f5f9a46 init
+Switched to a new branch 'feature-7b'
+Switched to branch 'main'
+Switched to a new branch 'feature-7c'
+Switched to branch 'main'
+ok 28 should process all branches
+ok 29 first branch merged
+ok 30 second branch marked conflicted
+ok 31 third branch still merged despite second conflict
+ok 32 stoppedAt should be null with respawn strategy
+
+1..32
+# tests 32
+# pass  32
+
+# ok
+TAP version 13
+# findFeatureDirs - no .scratch dir
+ok 1 returns empty array when .scratch/ missing
+# findFeatureDirs - dirs without issues/
+ok 2 returns empty when no issues/ subdirs
+# findFeatureDirs - valid feature dirs
+ok 3 finds one feature
+ok 4 correct name
+ok 5 correct dir path
+ok 6 correct spec path
+# findFeatureDirs - ignores non-directory entries
+ok 7 only returns the directory entry
+ok 8 returns the valid feature
+# resolveIssuesDir - resolves name to .scratch/
+ok 9 dir resolves to .scratch/<name>/issues
+ok 10 spec resolves to .scratch/<name>/spec.md
+# CLI subprocess - --model flag forwarded to agent
+ok 11 exit code 0
+ok 12 log file created
+ok 13 log contains --model flag
+ok 14 log contains model value
+# CLI subprocess - --dry-run output
+ok 15 exit code 0
+ok 16 stdout contains Wave 1 with first ticket
+ok 17 stdout contains Wave 2 with second ticket
+ok 18 stdout contains prompt preview
+ok 19 ticket 1 NOT modified
+ok 20 ticket 2 NOT modified
+# CLI subprocess - no tickets exits gracefully
+ok 21 exit code 0 (graceful)
+ok 22 stdout contains no-tickets message
+# CLI subprocess - error for nonexistent feature
+ok 23 exit code is non-zero
+ok 24 stderr contains not found
+# CLI subprocess - unknown blocker warning and stripping
+ok 25 output warns about blocker 99
+ok 26 output mentions blocker not found
+ok 27 exit code 0
+ok 28 ticket completed after blocker stripped
+ok 29 log file created
+# CLI subprocess - dry-run deadlock detection
+ok 30 exit code 0
+ok 31 output contains Deadlocked tickets
+ok 32 deadlock lists first ticket
+ok 33 deadlock lists second ticket
+# CLI subprocess - execute smoke test
+ok 34 exit code 0
+ok 35 ticket 1 marked done
+ok 36 ticket 2 marked done
+ok 37 log file created for ticket 1
+ok 38 log file created for ticket 2
+# runWavesIsolated - two independent tickets run in parallel worktrees
+
+Wave 1: 01-first.md, 02-second.md
+  Starting 01-first.md
+  Starting 02-second.md
+  01-first.md: done
+  02-second.md: done
+
+Finished: 2 completed
+ok 39 ticket 1 should be done
+ok 40 ticket 2 should be done
+ok 41 log file for ticket 1 created
+ok 42 log file for ticket 2 created
+ok 43 progress.md should be created
+ok 44 progress should show ticket 1 as done
+ok 45 progress should show ticket 2 as done
+# runWavesIsolated - two-wave scenario with dependency
+
+Wave 1: 01-base.md
+  Starting 01-base.md
+  01-base.md: done
+
+Wave 2: 02-depends-on-1.md
+  Starting 02-depends-on-1.md
+  02-depends-on-1.md: done
+
+Finished: 2 completed
+ok 46 ticket 1 done
+ok 47 ticket 2 done
+ok 48 log file for ticket 1
+ok 49 log file for ticket 2
+# runWavesIsolated - progress.md committed after each ticket
+
+Wave 1: 01-ticket-a.md, 02-ticket-b.md
+  Starting 01-ticket-a.md
+  Starting 02-ticket-b.md
+  01-ticket-a.md: done
+  02-ticket-b.md: done
+
+Finished: 2 completed
+ok 50 should have initial progress commit
+ok 51 should have commit for ticket a done
+ok 52 should have commit for ticket b done
+ok 53 progress shows a done
+ok 54 progress shows b done
+ok 55 progress includes branch info
+# runWavesIsolated - failed ticket leaves worktree intact
+
+Wave 1: 01-will-fail.md
+  Starting 01-will-fail.md
+  01-will-fail.md: agent exited 1
+
+No tickets completed this wave. Stopping.
+
+Finished: 0 completed, 1 remaining
+ok 56 failed ticket keeps ready status
+ok 57 worktree should still exist after failure
+# runWavesIsolated - conflictStrategy stop halts on first failure
+
+Wave 1: 01-first.md, 02-second.md
+  Starting 01-first.md
+  Starting 02-second.md
+  01-first.md: agent exited 1
+  02-second.md: agent exited 1
+
+No tickets completed this wave. Stopping.
+
+Finished: 0 completed, 2 remaining
+ok 58 first ticket fails and stays ready
+ok 59 second ticket not attempted when stop strategy
+# setup-then-execute composition
+Installing skills to .agents/skills/
+
+  grill/ (SKILL.md, agents)
+  grilling/ (SKILL.md, agents)
+  domain-modeling/ (ADR-FORMAT.md, CONTEXT-FORMAT.md, SKILL.md, agents)
+  to-spec/ (SKILL.md, agents)
+  to-tickets/ (SKILL.md, agents)
+  tdd/ (SKILL.md, agents, mocking.md, tests.md)
+
+  docs/agents/triage-labels.md (created)
+  docs/agents/domain.md (created)
+  docs/agents/issue-tracker.md (local)
+
+  AGENTS.md (updated)
+
+Source: mattpocock/skills @ 6654f6b
+ok 60 exit code 0
+ok 61 ticket 1 marked done
+ok 62 ticket 2 marked done
+ok 63 log file created for ticket 1
+ok 64 log file created for ticket 2
+ok 65 docs/agents/issue-tracker.md exists from setup
+ok 66 .agents/skills/grill/ exists from setup
+ok 67 .agents/skills/grilling/ exists from setup
+ok 68 .agents/skills/domain-modeling/ exists from setup
+ok 69 .agents/skills/to-spec/ exists from setup
+ok 70 .agents/skills/to-tickets/ exists from setup
+ok 71 .agents/skills/tdd/ exists from setup
+
+1..71
+# tests 71
+# pass  71
+
+# ok
