@@ -4,8 +4,10 @@ import {
     mkdirSync,
     readFileSync,
     writeFileSync,
+    unlinkSync,
     readdirSync,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
 import { createInterface } from 'node:readline'
 import {
@@ -245,6 +247,11 @@ const PROVIDER_ARGS:Record<string, string[]> = {
         '--dangerously-skip-permissions',
     ],
     codex:['exec', '--full-auto'],
+    pi:[
+        '-p', '--verbose',
+        '--approve', '--no-session',
+        '--mode', 'json',
+    ],
 }
 
 export function getProviderArgs (cmd:string):string[] {
@@ -296,6 +303,96 @@ export function formatStreamLine (
     return null
 }
 
+export function createPiStreamFormatter (
+):(line:string) => string|null {
+    const calls = new Map<
+        number,
+        { name:string; buf:string }
+    >()
+    let toolNum = 0
+
+    return (line:string):string|null => {
+        let obj:Record<string, unknown>
+        try {
+            obj = JSON.parse(line) as
+                Record<string, unknown>
+        } catch {
+            return line
+        }
+
+        const evt = obj.assistantMessageEvent as
+            Record<string, unknown>|undefined
+        if (!evt) return null
+
+        const type = evt.type as string|undefined
+        const ci = evt.contentIndex as
+            number|undefined ?? -1
+
+        if (type === 'text_delta') {
+            return (evt.delta as string|undefined) ??
+                null
+        }
+
+        if (type === 'toolcall_start') {
+            toolNum++
+            calls.set(ci, {
+                name:(evt.toolName as
+                    string|undefined) ?? '?',
+                buf:'',
+            })
+            return null
+        }
+
+        if (
+            type === 'toolcall_delta' &&
+            calls.has(ci)
+        ) {
+            calls.get(ci)!.buf +=
+                (evt.delta as string|undefined) ?? ''
+            return null
+        }
+
+        if (
+            type === 'toolcall_end' &&
+            calls.has(ci)
+        ) {
+            const call = calls.get(ci)!
+            calls.delete(ci)
+            let label = ''
+            try {
+                const args = JSON.parse(call.buf) as
+                    Record<string, unknown>
+                label = String(
+                    args.command ??
+                    args.file_path ??
+                    args.query ?? ''
+                ).split('\n')[0].slice(0, 72)
+            } catch {
+                // unparseable tool args
+            }
+            return `[${call.name}] ${label}`
+        }
+
+        return null
+    }
+}
+
+function writePromptFile (prompt:string):string {
+    const name = `nightralph-${Date.now()}-` +
+        `${Math.random().toString(36).slice(2)}.md`
+    const filePath = join(tmpdir(), name)
+    writeFileSync(filePath, prompt)
+    return filePath
+}
+
+function cleanupPromptFile (filePath:string):void {
+    try {
+        unlinkSync(filePath)
+    } catch {
+        // already removed
+    }
+}
+
 export function spawnAgent (opts:{
     prompt:string
     agentCmd:string
@@ -312,10 +409,18 @@ export function spawnAgent (opts:{
         args.push('--model', opts.model)
     }
 
-    const isClaude = basename(opts.agentCmd) === 'claude'
+    const providerName = basename(opts.agentCmd)
+    const isClaude = providerName === 'claude'
+    const isPi = providerName === 'pi'
     const prefix = opts.label ?
         `  [${opts.label}] ` :
         '  '
+
+    let promptFile:string|null = null
+    if (isPi) {
+        promptFile = writePromptFile(opts.prompt)
+        args.push(`@${promptFile}`)
+    }
 
     const logStream = createWriteStream(
         opts.logPath,
@@ -328,10 +433,19 @@ export function spawnAgent (opts:{
 
     proc.stdout.pipe(logStream)
 
+    const piFormatter = isPi ?
+        createPiStreamFormatter() :
+        null
+
     const rl = createInterface({ input:proc.stdout })
     rl.on('line', line => {
         if (isClaude) {
             const formatted = formatStreamLine(line)
+            if (formatted !== null) {
+                console.log(`${prefix}${formatted}`)
+            }
+        } else if (piFormatter) {
+            const formatted = piFormatter(line)
             if (formatted !== null) {
                 console.log(`${prefix}${formatted}`)
             }
@@ -356,7 +470,9 @@ export function spawnAgent (opts:{
         }
     }, opts.timeout * 1000)
 
-    proc.stdin.write(opts.prompt)
+    if (!promptFile) {
+        proc.stdin.write(opts.prompt)
+    }
     proc.stdin.end()
 
     return new Promise<number>(resolve => {
@@ -365,6 +481,7 @@ export function spawnAgent (opts:{
             rl.close()
             rlErr.close()
             logStream.end()
+            if (promptFile) cleanupPromptFile(promptFile)
             resolve(code ?? 1)
         })
         proc.on('error', err => {
@@ -372,6 +489,7 @@ export function spawnAgent (opts:{
             rl.close()
             rlErr.close()
             logStream.end()
+            if (promptFile) cleanupPromptFile(promptFile)
             console.error(
                 'Agent process error:',
                 formatErrorMessage(err)

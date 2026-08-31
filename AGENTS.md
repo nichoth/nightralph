@@ -63,12 +63,19 @@ Small orchestrator that runs a single-agent session per issue.
 - **Exposes**: `Ticket`, `scanTickets(dir)`,
   `findReadyTickets(tickets)`, `markDone(ticket)`,
   `renderPrompt(specBody, ticket)`,
-  `spawnAgent(opts)`, `dryRun(tickets, specBody)`,
+  `spawnAgent(opts)`, `createPiStreamFormatter()`,
+  `dryRun(tickets, specBody)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
   `runWavesIsolated(opts)`
+- **Supported providers**: `claude` (stdin prompt,
+  stream-json output), `codex` (stdin prompt),
+  `pi` (file-based prompt via `@tmpfile`, JSON
+  mode output parsed by `createPiStreamFormatter`)
 - **spawnAgent(opts)**: accepts optional `cwd` to run
   the agent process in a specific directory (used for
-  worktree isolation)
+  worktree isolation); for `pi`, writes prompt to a
+  temp file and passes `@path` as a positional arg
+  instead of piping to stdin
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress

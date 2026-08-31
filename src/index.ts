@@ -82,7 +82,8 @@ yargs(hideBin(process.argv))
         y => y
             .positional('provider', {
                 type:'string',
-                describe:'Agent CLI to spawn (e.g. claude, codex)',
+                describe:'Agent CLI to spawn ' +
+                    '(e.g. claude, codex, pi)',
                 demandOption:true,
             })
             .option('m', {

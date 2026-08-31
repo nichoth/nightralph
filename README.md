@@ -104,7 +104,7 @@ The `nightralph` CLI does the `tdd` part of the workflow.
 >
 
 
-### Execute Tasks with `nightralph`
+### Examples
 
 After you have the tickets, use the `nightralph` loop to execute.
 The `to-tickets` skill produces markdown files at
@@ -113,6 +113,9 @@ The `to-tickets` skill produces markdown files at
 ```bash
 # Auto-discover .scratch features and run with claude
 npx nightralph claude -m claude-opus-4-6
+
+# Run with pi and an OpenRouter model
+npx nightralph pi -m openrouter/z-ai/glm-5.3-flash
 
 # Dry run to inspect the dependency graph and prompt
 npx nightralph codex --dry-run
@@ -131,7 +134,7 @@ Flags:
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
-| `<provider>` | yes | -- | Agent CLI to spawn (e.g. `claude`, `codex`) |
+| `<provider>` | yes | -- | Agent harness to spawn (e.g. `claude`, `codex`, `pi`) |
 | `-m`, `--model` | no | -- | Model flag passed to the agent |
 | `--spec <name>` | no | auto | Feature name (resolves `.scratch/<name>/`) |
 | `--dry-run` | no | -- | Show wave order and prompt without running |
@@ -161,6 +164,8 @@ Notes:
   actually be implemented without a permission prompt:
   * `claude`: `--print --dangerously-skip-permissions`
   * `codex`: `exec --full-auto`
+  * `pi`: `-p --approve --no-session`
+    (prompt delivered via temp file, not stdin)
 
 
 ## How It Works
