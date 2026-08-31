@@ -141,7 +141,8 @@ Flags:
 | `-X` | no | -- | Stop on merge conflict instead of re-spawning |
 | `--timeout` | no | `300` | Kill agent after N seconds |
 
-Notes:
+
+**Notes**:
 
 * When `--spec <name>` is omitted, the CLI looks for
   `.scratch/<feature>/issues/` directories. If multiple features exist,

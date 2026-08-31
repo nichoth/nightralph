@@ -120,6 +120,30 @@ export function findReadyTickets (
     })
 }
 
+export const COMPLETED_RE = /^\[x\]\s+(.+)$/i
+
+export function checkItems (
+    ticket:Ticket,
+    completedItems:string[]
+):void {
+    if (completedItems.length === 0) return
+    let body = ticket.body
+    for (const item of completedItems) {
+        const escaped = item.replace(
+            /[.*+?^${}()|[\]\\]/g, '\\$&'
+        )
+        body = body.replace(
+            new RegExp(
+                `- \\[ \\] ${escaped}`,
+                'i'
+            ),
+            `- [x] ${item}`
+        )
+    }
+    writeFileSync(ticket.filepath, body)
+    ticket.body = body
+}
+
 export function markDone (ticket:Ticket):void {
     const updated = ticket.body.replace(
         /\*\*Status:\*\*\s*.+/i,
@@ -157,6 +181,9 @@ export function renderPrompt (
             'the immediate context. You can read more ' +
             'files as needed while implementing.',
         '- Commit your work when finished.',
+        '- After completing each checklist item in the ' +
+            'ticket, print a line: [x] <item text> ' +
+            '(matching the checklist text exactly).',
         '',
     ].join('\n')
 }
@@ -387,6 +414,11 @@ function cleanupPromptFile (filePath:string):void {
     }
 }
 
+export type AgentResult = {
+    exitCode:number
+    completedItems:string[]
+}
+
 export function spawnAgent (opts:{
     prompt:string
     agentCmd:string
@@ -395,7 +427,7 @@ export function spawnAgent (opts:{
     logPath:string
     cwd?:string
     label?:string
-}):Promise<number> {
+}):Promise<AgentResult> {
     const args:string[] = [
         ...getProviderArgs(opts.agentCmd),
     ]
@@ -431,19 +463,29 @@ export function spawnAgent (opts:{
         createPiStreamFormatter() :
         null
 
+    const completedItems:string[] = []
+
+    function collectCompleted (text:string):void {
+        const match = text.match(COMPLETED_RE)
+        if (match) completedItems.push(match[1])
+    }
+
     const rl = createInterface({ input:proc.stdout })
     rl.on('line', line => {
         if (isClaude) {
             const formatted = formatStreamLine(line)
             if (formatted !== null) {
+                collectCompleted(formatted)
                 console.log(`${prefix}${formatted}`)
             }
         } else if (piFormatter) {
             const formatted = piFormatter(line)
             if (formatted !== null) {
+                collectCompleted(formatted)
                 console.log(`${prefix}${formatted}`)
             }
         } else {
+            collectCompleted(line)
             console.log(`${prefix}${line}`)
         }
     })
@@ -469,14 +511,17 @@ export function spawnAgent (opts:{
     }
     proc.stdin.end()
 
-    return new Promise<number>(resolve => {
+    return new Promise<AgentResult>(resolve => {
         proc.on('close', code => {
             clearTimeout(timeout)
             rl.close()
             rlErr.close()
             logStream.end()
             if (promptFile) cleanupPromptFile(promptFile)
-            resolve(code ?? 1)
+            resolve({
+                exitCode:code ?? 1,
+                completedItems,
+            })
         })
         proc.on('error', err => {
             clearTimeout(timeout)
@@ -488,7 +533,7 @@ export function spawnAgent (opts:{
                 'Agent process error:',
                 formatErrorMessage(err)
             )
-            resolve(1)
+            resolve({ exitCode:1, completedItems })
         })
     })
 }
@@ -615,7 +660,7 @@ async function respawnAndRetryMerge (opts:{
     const label = opts.ticket.filename.replace(
         /\.md$/, ''
     )
-    const exitCode = await spawnAgent({
+    const result = await spawnAgent({
         prompt,
         agentCmd:opts.agentCmd,
         model:opts.model,
@@ -625,10 +670,10 @@ async function respawnAndRetryMerge (opts:{
         label,
     })
 
-    if (exitCode !== 0) {
+    if (result.exitCode !== 0) {
         console.log(
             `  ${opts.ticket.filename}: respawned agent ` +
-            `exited ${exitCode}`
+            `exited ${result.exitCode}`
         )
         return false
     }
@@ -679,7 +724,7 @@ export async function runWaves (
                     /\.md$/, ''
                 )
                 console.log(`  Starting ${t.filename}`)
-                const code = await spawnAgent({
+                const result = await spawnAgent({
                     prompt,
                     agentCmd,
                     model,
@@ -687,22 +732,23 @@ export async function runWaves (
                     logPath,
                     label,
                 })
-                return { ticket:t, exitCode:code }
+                return { ticket:t, result }
             })
         )
 
         let waveCompleted = 0
         for (const r of results) {
             if (r.status === 'rejected') continue
-            const { ticket, exitCode } = r.value
-            if (exitCode !== 0) {
+            const { ticket, result } = r.value
+            if (result.exitCode !== 0) {
                 console.log(
                     `  ${ticket.filename}: ` +
-                    `agent exited ${exitCode}`
+                    `agent exited ${result.exitCode}`
                 )
                 continue
             }
 
+            checkItems(ticket, result.completedItems)
             markDone(ticket)
             waveCompleted++
             totalCompleted++
@@ -840,18 +886,19 @@ export async function runWavesIsolated (opts:{
         for (let i = 0; i < results.length; i++) {
             const r = results[i]
             if (r.status === 'rejected') continue
-            const exitCode = r.value
+            const agentResult = r.value
             const ticket = activeTickets[i]
             const worktree = worktrees[i]
 
-            if (exitCode !== 0) {
+            if (agentResult.exitCode !== 0) {
                 console.log(
                     `  ${ticket.filename}: ` +
-                    `agent exited ${exitCode}`
+                    `agent exited ${agentResult.exitCode}`
                 )
+                checkItems(ticket, agentResult.completedItems)
                 checkTicket(progress, ticket.num, {
                     branch:worktree.branchName,
-                    exitCode,
+                    exitCode:agentResult.exitCode,
                     done:false,
                 })
                 writeProgress(progressPath, progress)
@@ -898,6 +945,7 @@ export async function runWavesIsolated (opts:{
                 continue
             }
 
+            checkItems(ticket, agentResult.completedItems)
             console.log(
                 `  ${ticket.filename}: agent finished, ` +
                 'awaiting merge'

@@ -13,6 +13,8 @@ import {
     scanTickets,
     findReadyTickets,
     markDone,
+    checkItems,
+    COMPLETED_RE,
     renderPrompt,
     runWaves,
     spawnAgent,
@@ -555,6 +557,141 @@ test('markDone updates file and ticket object', t => {
     )
 })
 
+// -- COMPLETED_RE --
+
+test('COMPLETED_RE matches [x] lines', t => {
+    const match = '[x] first item'.match(COMPLETED_RE)
+    t.ok(match, 'matches [x] line')
+    t.equal(match![1], 'first item', 'captures item text')
+})
+
+test('COMPLETED_RE is case insensitive', t => {
+    const match = '[X] uppercase marker'.match(COMPLETED_RE)
+    t.ok(match, 'matches uppercase [X]')
+    t.equal(match![1], 'uppercase marker')
+})
+
+test('COMPLETED_RE ignores non-matching lines', t => {
+    t.equal(
+        'some other output'.match(COMPLETED_RE),
+        null,
+        'plain text does not match'
+    )
+    t.equal(
+        '- [ ] unchecked item'.match(COMPLETED_RE),
+        null,
+        'unchecked item does not match'
+    )
+    t.equal(
+        '[ ] missing x'.match(COMPLETED_RE),
+        null,
+        'empty brackets do not match'
+    )
+})
+
+// -- checkItems --
+
+test('checkItems checks off matching items on disk', t => {
+    const dir = tmp()
+    const filepath = join(dir, '01-test.md')
+    const body = [
+        '# Test ticket',
+        '',
+        '**Status:** ready-for-agent',
+        '',
+        '- [ ] first item',
+        '- [ ] second item',
+        '- [ ] third item',
+    ].join('\n')
+    writeFileSync(filepath, body)
+
+    const ticket:Ticket = {
+        num:1,
+        slug:'test',
+        filename:'01-test.md',
+        filepath,
+        body,
+        status:'ready-for-agent',
+        blockers:[],
+    }
+
+    checkItems(ticket, ['first item', 'third item'])
+
+    const onDisk = readFileSync(filepath, 'utf8')
+    t.ok(
+        onDisk.includes('- [x] first item'),
+        'first item checked'
+    )
+    t.ok(
+        onDisk.includes('- [ ] second item'),
+        'second item still unchecked'
+    )
+    t.ok(
+        onDisk.includes('- [x] third item'),
+        'third item checked'
+    )
+})
+
+test('checkItems is a no-op for empty list', t => {
+    const dir = tmp()
+    const filepath = join(dir, '01-noop.md')
+    const body = [
+        '# Test ticket',
+        '',
+        '**Status:** ready-for-agent',
+        '',
+        '- [ ] some item',
+    ].join('\n')
+    writeFileSync(filepath, body)
+
+    const ticket:Ticket = {
+        num:1,
+        slug:'noop',
+        filename:'01-noop.md',
+        filepath,
+        body,
+        status:'ready-for-agent',
+        blockers:[],
+    }
+
+    checkItems(ticket, [])
+
+    const onDisk = readFileSync(filepath, 'utf8')
+    t.equal(onDisk, body, 'file unchanged')
+})
+
+test('checkItems handles special regex characters', t => {
+    const dir = tmp()
+    const filepath = join(dir, '01-special.md')
+    const itemText = '`POST /api/setup/verify` works'
+    const body = [
+        '# Test ticket',
+        '',
+        '**Status:** ready-for-agent',
+        '',
+        `- [ ] ${itemText}`,
+    ].join('\n')
+    writeFileSync(filepath, body)
+
+    const ticket:Ticket = {
+        num:1,
+        slug:'special',
+        filename:'01-special.md',
+        filepath,
+        body,
+        status:'ready-for-agent',
+        blockers:[],
+    }
+
+    checkItems(ticket, [itemText])
+
+    const onDisk = readFileSync(filepath, 'utf8')
+    t.ok(
+        onDisk.includes(`- [x] ${itemText}`),
+        'item with special chars checked'
+    )
+})
+
 // -- renderPrompt --
 
 test('renderPrompt includes spec and ticket', t => {
@@ -577,6 +714,22 @@ test('renderPrompt includes spec and ticket', t => {
     )
 })
 
+test('renderPrompt instructs agent to report [x] items',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderPrompt(
+            'spec body here', ticket
+        )
+        t.ok(
+            prompt.includes('[x]'),
+            'prompt mentions [x] format'
+        )
+    }
+)
+
 // -- spawnAgent --
 
 test('spawnAgent with cwd option runs in that directory',
@@ -589,7 +742,7 @@ test('spawnAgent with cwd option runs in that directory',
             process.cwd(), 'test', 'mock-agent-create-file.js'
         )
 
-        const code = await spawnAgent({
+        const result = await spawnAgent({
             prompt:'test',
             agentCmd:MOCK_CWD,
             model:null,
@@ -598,7 +751,10 @@ test('spawnAgent with cwd option runs in that directory',
             cwd,
         })
 
-        t.equal(code, 0, 'should exit successfully')
+        t.equal(
+            result.exitCode, 0,
+            'should exit successfully'
+        )
         t.ok(
             existsSync(logPath),
             'log file should be created'
@@ -609,6 +765,37 @@ test('spawnAgent with cwd option runs in that directory',
         t.ok(
             logContent.includes(cwd),
             'log should contain the cwd'
+        )
+    }
+)
+
+test('spawnAgent collects completed items from output',
+    async t => {
+        const base = tmp()
+        const logPath = join(base, 'test.log')
+
+        const MOCK_CHECKLIST = join(
+            process.cwd(),
+            'test',
+            'mock-agent-checklist.js'
+        )
+
+        const result = await spawnAgent({
+            prompt:'test',
+            agentCmd:MOCK_CHECKLIST,
+            model:null,
+            timeout:10,
+            logPath,
+        })
+
+        t.equal(
+            result.exitCode, 0,
+            'agent exits successfully'
+        )
+        t.deepEqual(
+            result.completedItems,
+            ['first item', 'third item'],
+            'collects [x] items from output'
         )
     }
 )

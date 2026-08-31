@@ -60,8 +60,10 @@ Small orchestrator that runs a single-agent session per issue.
   (`runWaves`)
 
 ### orchestrator (`src/orchestrator.ts`)
-- **Exposes**: `Ticket`, `scanTickets(dir)`,
-  `findReadyTickets(tickets)`, `markDone(ticket)`,
+- **Exposes**: `Ticket`, `AgentResult`,
+  `COMPLETED_RE`, `scanTickets(dir)`,
+  `findReadyTickets(tickets)`, `checkItems(ticket, items)`,
+  `markDone(ticket)`,
   `renderPrompt(specBody, ticket)`,
   `spawnAgent(opts)`, `createPiStreamFormatter()`,
   `dryRun(tickets, specBody)`,
@@ -71,7 +73,17 @@ Small orchestrator that runs a single-agent session per issue.
   stream-json output), `codex` (stdin prompt),
   `pi` (file-based prompt via `@tmpfile`, JSON
   mode output parsed by `createPiStreamFormatter`)
-- **spawnAgent(opts)**: accepts optional `cwd` to run
+- **COMPLETED_RE**: regex matching `[x] <text>` lines
+  from agent output; used to detect which checklist
+  items the agent has completed
+- **checkItems(ticket, items)**: checks off specific
+  `- [ ]` items in a ticket file by matching text;
+  called with completed items from agent output
+- **AgentResult**: `{ exitCode, completedItems }` --
+  returned by `spawnAgent`
+- **spawnAgent(opts)**: returns `AgentResult`; collects
+  `[x] <text>` lines from agent stdout via
+  `COMPLETED_RE`; accepts optional `cwd` to run
   the agent process in a specific directory (used for
   worktree isolation); for `pi`, writes prompt to a
   temp file and passes `@path` as a positional arg

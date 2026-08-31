@@ -1833,7 +1833,7 @@ test('spawnAgent - claude provider prepends --print ' +
         chmodSync(join(binDir, 'claude'), 0o755)
 
         const logPath = join(logDir, 'claude.log')
-        const exitCode = await spawnAgent({
+        const result = await spawnAgent({
             prompt:'test prompt',
             agentCmd:join(binDir, 'claude'),
             model:'test-model',
@@ -1841,7 +1841,7 @@ test('spawnAgent - claude provider prepends --print ' +
             logPath,
         })
 
-        t.equal(exitCode, 0, 'agent exits 0')
+        t.equal(result.exitCode, 0, 'agent exits 0')
 
         const log = readFileSync(logPath, 'utf8')
         const args = JSON.parse(log.trim())
@@ -1873,7 +1873,7 @@ test('spawnAgent - codex provider prepends exec ' +
         chmodSync(join(binDir, 'codex'), 0o755)
 
         const logPath = join(logDir, 'codex.log')
-        const exitCode = await spawnAgent({
+        const result = await spawnAgent({
             prompt:'test prompt',
             agentCmd:join(binDir, 'codex'),
             model:null,
@@ -1881,7 +1881,7 @@ test('spawnAgent - codex provider prepends exec ' +
             logPath,
         })
 
-        t.equal(exitCode, 0, 'agent exits 0')
+        t.equal(result.exitCode, 0, 'agent exits 0')
 
         const log = readFileSync(logPath, 'utf8')
         const args = JSON.parse(log.trim())
@@ -1902,7 +1902,7 @@ test('spawnAgent - unknown provider passes through ' +
     )
     try {
         const logPath = join(logDir, 'unknown.log')
-        const exitCode = await spawnAgent({
+        const result = await spawnAgent({
             prompt:'test prompt',
             agentCmd:MOCK_ECHO,
             model:'m1',
@@ -1910,7 +1910,7 @@ test('spawnAgent - unknown provider passes through ' +
             logPath,
         })
 
-        t.equal(exitCode, 0, 'agent exits 0')
+        t.equal(result.exitCode, 0, 'agent exits 0')
 
         const log = readFileSync(logPath, 'utf8')
         const args:string[] = JSON.parse(log.trim())
