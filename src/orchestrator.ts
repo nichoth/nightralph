@@ -303,13 +303,8 @@ export function formatStreamLine (
     return null
 }
 
-export function createPiStreamFormatter (
-):(line:string) => string|null {
-    const calls = new Map<
-        number,
-        { name:string; buf:string }
-    >()
-    let toolNum = 0
+export function createPiStreamFormatter ():((line:string) => string|null) {
+    const calls = new Map<number, { name:string; buf:string }>()
 
     return (line:string):string|null => {
         let obj:Record<string, unknown>
@@ -334,7 +329,6 @@ export function createPiStreamFormatter (
         }
 
         if (type === 'toolcall_start') {
-            toolNum++
             calls.set(ci, {
                 name:(evt.toolName as
                     string|undefined) ?? '?',
