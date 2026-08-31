@@ -25,7 +25,7 @@ so they can't drift as long as you install the skills with this package.
   * [Install Dependency Skills](#install-dependency-skills)
 - [Workflow](#workflow)
   * [Create Issues](#create-issues)
-  * [Execute Tasks with `nightralph`](#execute-tasks-with-nightralph)
+  * [Examples](#examples)
 - [How It Works](#how-it-works)
   * [Select a ticket](#select-a-ticket)
   * [Worktrees](#worktrees)
