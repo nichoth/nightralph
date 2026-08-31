@@ -95,7 +95,8 @@ export default tseslint.config(
             '@stylistic/comma-dangle': 'off',
             '@stylistic/no-multi-spaces': ['error', {
                 ignoreEOLComments: true
-            }]
+            }],
+            'promise/param-names': 'off'
         }
     },
 
@@ -127,8 +128,6 @@ export default tseslint.config(
                 before: true,
                 after: true
             }],
-            // No space around the colon in object and type-literal
-            // members (`{ a:1 }`, `classes?:string[]`).
             '@stylistic/key-spacing': ['error', {
                 beforeColon: false,
                 afterColon: false,

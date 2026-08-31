@@ -35,6 +35,10 @@ import {
     updateWorktreeFromBase,
     type MergeConflictStrategy,
 } from './merge.js'
+import {
+    createDisplay,
+    type Display,
+} from './display.js'
 
 export type Ticket = {
     num:number
@@ -427,6 +431,7 @@ export function spawnAgent (opts:{
     logPath:string
     cwd?:string
     label?:string
+    onLine?:(line:string) => void
 }):Promise<AgentResult> {
     const args:string[] = [
         ...getProviderArgs(opts.agentCmd),
@@ -476,24 +481,44 @@ export function spawnAgent (opts:{
             const formatted = formatStreamLine(line)
             if (formatted !== null) {
                 collectCompleted(formatted)
-                console.log(`${prefix}${formatted}`)
+                const output = `${prefix}${formatted}`
+                if (opts.onLine) {
+                    opts.onLine(output)
+                } else {
+                    console.log(output)
+                }
             }
         } else if (piFormatter) {
             const formatted = piFormatter(line)
             if (formatted !== null) {
                 collectCompleted(formatted)
-                console.log(`${prefix}${formatted}`)
+                const output = `${prefix}${formatted}`
+                if (opts.onLine) {
+                    opts.onLine(output)
+                } else {
+                    console.log(output)
+                }
             }
         } else {
             collectCompleted(line)
-            console.log(`${prefix}${line}`)
+            const output = `${prefix}${line}`
+            if (opts.onLine) {
+                opts.onLine(output)
+            } else {
+                console.log(output)
+            }
         }
     })
 
     proc.stderr.pipe(logStream)
     const rlErr = createInterface({ input:proc.stderr })
     rlErr.on('line', line => {
-        console.error(`${prefix}${line}`)
+        const output = `${prefix}${line}`
+        if (opts.onLine) {
+            opts.onLine(output)
+        } else {
+            console.error(output)
+        }
     })
 
     const timeout = setTimeout(() => {
@@ -643,15 +668,20 @@ async function respawnAndRetryMerge (opts:{
     model:string|null
     timeout:number
     logsDir:string
+    onLine?:(msg:string) => void
 }):Promise<boolean> {
     await updateWorktreeFromBase(
         opts.worktreePath, opts.baseBranch
     )
 
-    console.log(
-        `  ${opts.ticket.filename}: respawning agent ` +
+    const msg1 = `  ${opts.ticket.filename}: respawning agent ` +
         'to resolve merge conflict'
-    )
+    if (opts.onLine) {
+        opts.onLine(msg1)
+    } else {
+        console.log(msg1)
+    }
+
     const prompt = renderPrompt(opts.specBody, opts.ticket)
     const logPath = join(
         opts.logsDir,
@@ -668,13 +698,17 @@ async function respawnAndRetryMerge (opts:{
         logPath,
         cwd:opts.worktreePath,
         label,
+        onLine:opts.onLine,
     })
 
     if (result.exitCode !== 0) {
-        console.log(
-            `  ${opts.ticket.filename}: respawned agent ` +
+        const msg2 = `  ${opts.ticket.filename}: respawned agent ` +
             `exited ${result.exitCode}`
-        )
+        if (opts.onLine) {
+            opts.onLine(msg2)
+        } else {
+            console.log(msg2)
+        }
         return false
     }
 
@@ -682,10 +716,13 @@ async function respawnAndRetryMerge (opts:{
         opts.repoRoot, opts.branch
     )
     if (!merged) {
-        console.log(
-            `  ${opts.ticket.filename}: merge still ` +
+        const msg3 = `  ${opts.ticket.filename}: merge still ` +
             'conflicted after respawn'
-        )
+        if (opts.onLine) {
+            opts.onLine(msg3)
+        } else {
+            console.log(msg3)
+        }
     }
     return merged
 }
@@ -697,8 +734,13 @@ export async function runWaves (
     model:string|null,
     timeout:number,
     logsDir:string,
+    display?:Display,
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
+
+    const d = display ?? createDisplay()
+    let totalWaves = 0
+    for (const _ of simulateWaves(tickets)) totalWaves++
 
     let totalCompleted = 0
     let waveNum = 0
@@ -708,9 +750,13 @@ export async function runWaves (
         if (ready.length === 0) break
 
         waveNum++
-        console.log(
-            `\nWave ${waveNum}: ` +
-            ready.map(t => t.filename).join(', ')
+        d.startWave(
+            waveNum,
+            totalWaves,
+            ready.map(t => ({
+                num:t.num,
+                filename:t.filename,
+            }))
         )
 
         const results = await Promise.allSettled(
@@ -723,7 +769,8 @@ export async function runWaves (
                 const label = t.filename.replace(
                     /\.md$/, ''
                 )
-                console.log(`  Starting ${t.filename}`)
+                d.setTicketStatus(t.num, 'in-progress')
+                d.log(`  Starting ${t.filename}`)
                 const result = await spawnAgent({
                     prompt,
                     agentCmd,
@@ -731,6 +778,7 @@ export async function runWaves (
                     timeout,
                     logPath,
                     label,
+                    onLine:(line) => d.log(line),
                 })
                 return { ticket:t, result }
             })
@@ -741,7 +789,8 @@ export async function runWaves (
             if (r.status === 'rejected') continue
             const { ticket, result } = r.value
             if (result.exitCode !== 0) {
-                console.log(
+                d.setTicketStatus(ticket.num, 'failed')
+                d.log(
                     `  ${ticket.filename}: ` +
                     `agent exited ${result.exitCode}`
                 )
@@ -752,13 +801,14 @@ export async function runWaves (
             markDone(ticket)
             waveCompleted++
             totalCompleted++
-            console.log(
+            d.setTicketStatus(ticket.num, 'done')
+            d.log(
                 `  ${ticket.filename}: done`
             )
         }
 
         if (waveCompleted === 0) {
-            console.log(
+            d.log(
                 '\nNo tickets completed this wave. ' +
                 'Stopping.'
             )
@@ -769,12 +819,13 @@ export async function runWaves (
     const remaining = tickets.filter(
         t => t.status === 'ready-for-agent'
     )
-    console.log(
+    d.log(
         `\nFinished: ${totalCompleted} completed` +
         (remaining.length > 0 ?
             `, ${remaining.length} remaining` :
             '')
     )
+    d.cleanup()
 
     return { allDone:remaining.length === 0 }
 }
@@ -788,8 +839,13 @@ export async function runWavesIsolated (opts:{
     logsDir:string
     featureName:string
     conflictStrategy:MergeConflictStrategy
+    display?:Display
 }):Promise<{ allDone:boolean }> {
     mkdirSync(opts.logsDir, { recursive:true })
+
+    const d = opts.display ?? createDisplay()
+    let totalWaves = 0
+    for (const _ of simulateWaves(opts.tickets)) totalWaves++
 
     const repoRoot = getRepoRoot()
     const repoName = getRepoName()
@@ -817,9 +873,13 @@ export async function runWavesIsolated (opts:{
         if (ready.length === 0) break
 
         waveNum++
-        console.log(
-            `\nWave ${waveNum}: ` +
-            ready.map(t => t.filename).join(', ')
+        d.startWave(
+            waveNum,
+            totalWaves,
+            ready.map(t => ({
+                num:t.num,
+                filename:t.filename,
+            }))
         )
 
         const worktreeSettled = await Promise.allSettled(
@@ -841,7 +901,8 @@ export async function runWavesIsolated (opts:{
             const settled = worktreeSettled[i]
             const ticket = ready[i]
             if (settled.status === 'rejected') {
-                console.log(
+                d.setTicketStatus(ticket.num, 'failed')
+                d.log(
                     `  ${ticket.filename}: failed to create ` +
                     `worktree: ${formatErrorMessage(settled.reason)}`
                 )
@@ -861,7 +922,8 @@ export async function runWavesIsolated (opts:{
                 const label = t.filename.replace(
                     /\.md$/, ''
                 )
-                console.log(`  Starting ${t.filename}`)
+                d.setTicketStatus(t.num, 'in-progress')
+                d.log(`  Starting ${t.filename}`)
                 return spawnAgent({
                     prompt,
                     agentCmd:opts.agentCmd,
@@ -870,6 +932,7 @@ export async function runWavesIsolated (opts:{
                     logPath,
                     cwd:worktrees[i].worktreePath,
                     label,
+                    onLine:(line) => d.log(line),
                 })
             })
         )
@@ -891,7 +954,8 @@ export async function runWavesIsolated (opts:{
             const worktree = worktrees[i]
 
             if (agentResult.exitCode !== 0) {
-                console.log(
+                d.setTicketStatus(ticket.num, 'failed')
+                d.log(
                     `  ${ticket.filename}: ` +
                     `agent exited ${agentResult.exitCode}`
                 )
@@ -911,7 +975,7 @@ export async function runWavesIsolated (opts:{
                 try {
                     await removeWorktree(worktree.worktreePath)
                 } catch (err) {
-                    console.error(
+                    d.log(
                         '  Failed to remove worktree ' +
                         `${worktree.worktreePath}: ` +
                         formatErrorMessage(err)
@@ -927,7 +991,7 @@ export async function runWavesIsolated (opts:{
                     `${ticket.filename} remaining changes`
                 )
                 if (committed) {
-                    console.log(
+                    d.log(
                         `  ${ticket.filename}: ` +
                         'auto-committed remaining changes'
                     )
@@ -937,7 +1001,8 @@ export async function runWavesIsolated (opts:{
             if (!hasNewCommits(
                 repoRoot, baseBranch, worktree.branchName
             )) {
-                console.log(
+                d.setTicketStatus(ticket.num, 'failed')
+                d.log(
                     `  ${ticket.filename}: agent exited 0 ` +
                     'but made no changes; leaving ticket ' +
                     'ready-for-agent'
@@ -946,7 +1011,7 @@ export async function runWavesIsolated (opts:{
             }
 
             checkItems(ticket, agentResult.completedItems)
-            console.log(
+            d.log(
                 `  ${ticket.filename}: agent finished, ` +
                 'awaiting merge'
             )
@@ -979,7 +1044,8 @@ export async function runWavesIsolated (opts:{
                     markDone(ticket)
                     waveCompleted++
                     totalCompleted++
-                    console.log(
+                    d.setTicketStatus(ticket.num, 'done')
+                    d.log(
                         `  ${ticket.filename}: done`
                     )
                     checkTicket(progress, ticket.num, {
@@ -1000,7 +1066,7 @@ export async function runWavesIsolated (opts:{
                         try {
                             await removeWorktree(worktreePath)
                         } catch (err) {
-                            console.error(
+                            d.log(
                                 '  Failed to remove worktree ' +
                                 `${worktreePath}: ` +
                                 formatErrorMessage(err)
@@ -1025,6 +1091,7 @@ export async function runWavesIsolated (opts:{
                                 model:opts.model,
                                 timeout:opts.timeout,
                                 logsDir:opts.logsDir,
+                                onLine:(msg) => d.log(msg),
                             }) :
                             false
 
@@ -1032,7 +1099,8 @@ export async function runWavesIsolated (opts:{
                         markDone(ticket)
                         waveCompleted++
                         totalCompleted++
-                        console.log(
+                        d.setTicketStatus(ticket.num, 'done')
+                        d.log(
                             `  ${ticket.filename}: done ` +
                             '(resolved via respawn)'
                         )
@@ -1052,7 +1120,7 @@ export async function runWavesIsolated (opts:{
                             try {
                                 await removeWorktree(worktreePath)
                             } catch (err) {
-                                console.error(
+                                d.log(
                                     '  Failed to remove worktree ' +
                                     `${worktreePath}: ` +
                                     formatErrorMessage(err)
@@ -1060,7 +1128,7 @@ export async function runWavesIsolated (opts:{
                             }
                         }
                     } else {
-                        console.log(
+                        d.log(
                             `  ${ticket.filename}: merge failed, ` +
                             'staying ready-for-agent'
                         )
@@ -1069,7 +1137,7 @@ export async function runWavesIsolated (opts:{
             }
 
             if (mergeResult.stoppedAt) {
-                console.log(
+                d.log(
                     '\nMerge stopped at ' +
                     `${mergeResult.stoppedAt.branch}`
                 )
@@ -1080,7 +1148,7 @@ export async function runWavesIsolated (opts:{
                     try {
                         await removeWorktree(sb.worktreePath)
                     } catch (err) {
-                        console.error(
+                        d.log(
                             '  Failed to remove worktree ' +
                             `${sb.worktreePath}: ` +
                             formatErrorMessage(err)
@@ -1093,7 +1161,7 @@ export async function runWavesIsolated (opts:{
         }
 
         if (waveCompleted === 0) {
-            console.log(
+            d.log(
                 '\nNo tickets completed this wave. ' +
                 'Stopping.'
             )
@@ -1104,12 +1172,13 @@ export async function runWavesIsolated (opts:{
     const remaining = opts.tickets.filter(
         t => t.status === 'ready-for-agent'
     )
-    console.log(
+    d.log(
         `\nFinished: ${totalCompleted} completed` +
         (remaining.length > 0 ?
             `, ${remaining.length} remaining` :
             '')
     )
+    d.cleanup()
 
     return { allDone:remaining.length === 0 }
 }

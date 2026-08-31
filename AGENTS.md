@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-08-28
+Last verified: 2026-08-31
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -20,6 +20,7 @@ Small orchestrator that runs a single-agent session per issue.
 - `src/orchestrator.ts` -- ticket scanning and wave execution
 - `src/worktree.ts` -- git worktree management
 - `src/progress.ts` -- run progress tracking
+- `src/display.ts` -- terminal status UI (Display interface, StatusDisplay, PlainDisplay)
 - `src/merge.ts` -- branch merging after wave completion
 - `src/skills/` -- bundled skill definitions
 - `src/docs-templates/` -- doc templates copied to target projects
@@ -85,15 +86,40 @@ Small orchestrator that runs a single-agent session per issue.
   `[x] <text>` lines from agent stdout via
   `COMPLETED_RE`; accepts optional `cwd` to run
   the agent process in a specific directory (used for
-  worktree isolation); for `pi`, writes prompt to a
+  worktree isolation); accepts optional `onLine`
+  callback to redirect output lines (used by
+  Display integration); for `pi`, writes prompt to a
   temp file and passes `@path` as a positional arg
   instead of piping to stdin
+- **runWaves(...)**: accepts optional `display`
+  parameter (`Display` interface); defaults to
+  `createDisplay()` when omitted
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
-  updates
+  updates; accepts optional `display` in opts
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names
+
+### display module (`src/display.ts`)
+- **Exposes**: `Display` (type), `StatusDisplay` (class),
+  `PlainDisplay` (class), `createDisplay()`,
+  `TicketStatus`, `DisplayTicket`, `WaveState`,
+  `DisplayConfig`, `ansi`, `color`, `renderDot`
+- **Display interface**: `startWave(...)`,
+  `setTicketStatus(num, status)`, `log(message)`,
+  `cleanup()`
+- **StatusDisplay**: ANSI-based terminal UI with
+  paginated ticket grid, wave progress, and scrolling
+  message log; handles terminal resize
+- **PlainDisplay**: plain-text fallback when
+  stdout is not a TTY
+- **createDisplay()**: factory that returns
+  `StatusDisplay` when stdout is a TTY,
+  `PlainDisplay` otherwise
+- **Guarantees**: `StatusDisplay.cleanup()` restores
+  cursor and clears ANSI state; resize listener is
+  removed on cleanup
 
 ### worktree module (`src/worktree.ts`)
 - **Exposes**: `getRepoRoot()`, `getRepoName()`,

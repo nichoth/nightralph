@@ -13,6 +13,7 @@ import {
     runWaves,
     runWavesIsolated,
 } from './orchestrator.js'
+import { createDisplay } from './display.js'
 import {
     findFeatureDirs,
     resolveIssuesDir,
@@ -225,6 +226,7 @@ async function runExecute (argv:{
         return
     }
 
+    const display = createDisplay()
     let result:{ allDone:boolean }
 
     if (isGitRepo()) {
@@ -237,6 +239,7 @@ async function runExecute (argv:{
             logsDir,
             featureName,
             conflictStrategy,
+            display,
         })
     } else {
         result = await runWaves(
@@ -244,6 +247,7 @@ async function runExecute (argv:{
             argv.provider, argv.model ?? null,
             timeout,
             logsDir,
+            display,
         )
     }
 

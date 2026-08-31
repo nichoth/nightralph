@@ -1,0 +1,380 @@
+export type TicketStatus =
+    | 'pending'
+    | 'in-progress'
+    | 'done'
+    | 'failed'
+
+export type DisplayTicket = {
+    readonly num:number
+    readonly filename:string
+    status:TicketStatus
+}
+
+export type WaveState = {
+    readonly waveNum:number
+    readonly totalWaves:number
+    readonly tickets:Array<DisplayTicket>
+}
+
+export type DisplayConfig = {
+    readonly messageLines:number
+    readonly stream:NodeJS.WriteStream
+}
+
+export type Display = {
+    startWave(
+        waveNum:number,
+        totalWaves:number,
+        tickets:ReadonlyArray<{
+            num:number
+            filename:string
+        }>
+    ):void
+    setTicketStatus(num:number, status:TicketStatus):void
+    log(message:string):void
+    cleanup():void
+}
+
+const ESC = '\x1b['
+
+export const ansi = {
+    cursorUp (n:number):string {
+        return `${ESC}${n}A`
+    },
+    cursorTo (col:number):string {
+        return `${ESC}${col}G`
+    },
+    eraseLine ():string {
+        return `${ESC}2K`
+    },
+    eraseLines (n:number):string {
+        let out = ''
+        for (let i = 0; i < n; i++) {
+            out += ansi.eraseLine()
+            if (i < n - 1) out += ansi.cursorUp(1)
+        }
+        return out
+    },
+    cursorHide ():string {
+        return `${ESC}?25l`
+    },
+    cursorShow ():string {
+        return `${ESC}?25h`
+    },
+} as const
+
+export const color = {
+    green (text:string):string {
+        return `${ESC}32m${text}${ESC}0m`
+    },
+    yellow (text:string):string {
+        return `${ESC}33m${text}${ESC}0m`
+    },
+    red (text:string):string {
+        return `${ESC}31m${text}${ESC}0m`
+    },
+    dim (text:string):string {
+        return `${ESC}2m${text}${ESC}0m`
+    },
+} as const
+
+const FILLED_DOT = '●'
+const EMPTY_DOT = '○'
+
+export function renderDot (status:TicketStatus):string {
+    switch (status) {
+        case 'pending':
+            return color.dim(EMPTY_DOT)
+        case 'in-progress':
+            return color.yellow(FILLED_DOT)
+        case 'done':
+            return color.green(FILLED_DOT)
+        case 'failed':
+            return color.red(FILLED_DOT)
+    }
+}
+
+export class StatusDisplay implements Display {
+    private wave:WaveState|null = null
+    private messages:Array<string> = []
+    private renderedLines:number = 0
+    private config:DisplayConfig
+    private viewportStart:number = 0
+    private resizeListener:(() => void)|null = null
+    private signalHandler:(() => void)|null = null
+
+    constructor (config?:Readonly<Partial<DisplayConfig>>) {
+        this.config = {
+            messageLines:config?.messageLines ?? 4,
+            stream:config?.stream ?? process.stdout,
+        }
+    }
+
+    private getAvailableRows ():number {
+        const termHeight = this.config.stream.rows ?? 24
+        const overhead = 2 + this.config.messageLines
+        const available = termHeight - overhead
+        return Math.max(1, available)
+    }
+
+    startWave (
+        waveNum:number,
+        totalWaves:number,
+        tickets:Array<Readonly<{ num:number; filename:string }>>,
+    ):void {
+        this.wave = {
+            waveNum,
+            totalWaves,
+            tickets:tickets.map(t => ({
+                ...t,
+                status:'pending' as const,
+            })),
+        }
+        this.messages = []
+        this.viewportStart = 0
+        this.config.stream.write(ansi.cursorHide())
+
+        if (this.config.stream.isTTY) {
+            if (this.resizeListener) {
+                this.config.stream.removeListener(
+                    'resize', this.resizeListener,
+                )
+            }
+            this.resizeListener = () => this.render()
+            this.config.stream.on(
+                'resize', this.resizeListener,
+            )
+        }
+
+        // Register signal handler to restore cursor on interruption
+        if (this.signalHandler) {
+            process.removeListener('SIGINT', this.signalHandler)
+            process.removeListener('SIGTERM', this.signalHandler)
+        }
+        this.signalHandler = () => this.cleanup()
+        process.on('SIGINT', this.signalHandler)
+        process.on('SIGTERM', this.signalHandler)
+
+        this.render()
+    }
+
+    setTicketStatus (num:number, status:TicketStatus):void {
+        if (!this.wave) return
+
+        const ticket = this.wave.tickets.find(t => t.num === num)
+        if (ticket) {
+            ticket.status = status
+
+            if (status === 'in-progress') {
+                const ticketIndex =
+                    this.wave.tickets.indexOf(ticket)
+                const availableRows =
+                    this.getAvailableRows()
+                const totalTickets =
+                    this.wave.tickets.length
+
+                if (ticketIndex < this.viewportStart) {
+                    this.viewportStart = ticketIndex
+                } else if (
+                    ticketIndex >=
+                    this.viewportStart + availableRows
+                ) {
+                    // offset by 3 to keep context visible below
+                    // the active ticket
+                    this.viewportStart =
+                        ticketIndex - availableRows + 3
+                }
+                this.viewportStart = Math.max(
+                    0,
+                    Math.min(
+                        this.viewportStart,
+                        totalTickets - 1,
+                    ),
+                )
+            }
+
+            this.render()
+        }
+    }
+
+    log (message:string):void {
+        this.messages.push(message)
+        if (this.messages.length > this.config.messageLines) {
+            this.messages.shift()
+        }
+        this.render()
+    }
+
+    cleanup ():void {
+        // Remove resize listener if it exists
+        if (this.resizeListener && this.config.stream.isTTY) {
+            this.config.stream.removeListener('resize', this.resizeListener)
+        }
+        // Remove signal handlers
+        if (this.signalHandler) {
+            process.removeListener('SIGINT', this.signalHandler)
+            process.removeListener('SIGTERM', this.signalHandler)
+        }
+        this.config.stream.write(ansi.cursorShow())
+    }
+
+    private render ():void {
+        if (!this.wave) return
+
+        let output = ''
+
+        if (this.renderedLines > 0) {
+            output +=
+                ansi.eraseLines(this.renderedLines + 1)
+        }
+
+        const completed = this.wave.tickets.filter(
+            t => t.status === 'done',
+        ).length
+        const total = this.wave.tickets.length
+        const pct = total === 0 ? 0 : Math.round((completed / total) * 100)
+
+        output += `Wave ${this.wave.waveNum}/` +
+            `${this.wave.totalWaves} -- ` +
+            `${pct}% complete\n`
+
+        // Pagination logic
+        const availableRows = this.getAvailableRows()
+        const tickets = this.wave.tickets
+        let renderedTicketCount = 0
+
+        if (tickets.length <= availableRows) {
+            // All tickets fit, no pagination
+            for (const ticket of tickets) {
+                const dot = renderDot(ticket.status)
+                output += `${dot} ${ticket.filename}\n`
+            }
+            renderedTicketCount = tickets.length
+        } else {
+            // Need pagination -- iterative clamp
+            this.viewportStart = Math.max(
+                0,
+                Math.min(
+                    this.viewportStart,
+                    tickets.length - 1,
+                ),
+            )
+
+            let hasMoreAbove = this.viewportStart > 0
+            let tentativeCount =
+                availableRows - (hasMoreAbove ? 1 : 0)
+            let hasMoreBelow =
+                this.viewportStart + tentativeCount <
+                tickets.length
+            let ticketsToShow = Math.max(
+                0,
+                tentativeCount - (hasMoreBelow ? 1 : 0),
+            )
+
+            const maxStart = Math.max(
+                0,
+                tickets.length - Math.max(1, ticketsToShow),
+            )
+            if (this.viewportStart > maxStart) {
+                this.viewportStart = maxStart
+                hasMoreAbove = this.viewportStart > 0
+                tentativeCount =
+                    availableRows - (hasMoreAbove ? 1 : 0)
+                hasMoreBelow =
+                    this.viewportStart + tentativeCount <
+                    tickets.length
+                ticketsToShow = Math.max(
+                    0,
+                    tentativeCount -
+                    (hasMoreBelow ? 1 : 0),
+                )
+            }
+
+            // Show "more above" indicator if needed
+            if (hasMoreAbove) {
+                const moreCount = this.viewportStart
+                output += `  ... ${moreCount} more above\n`
+            }
+
+            // Get visible tickets and render them
+            const visibleTickets = tickets.slice(
+                this.viewportStart,
+                this.viewportStart + ticketsToShow,
+            )
+
+            for (const ticket of visibleTickets) {
+                const dot = renderDot(ticket.status)
+                output += `${dot} ${ticket.filename}\n`
+            }
+
+            // Show "more below" indicator if needed
+            if (hasMoreBelow) {
+                const moreCount =
+                    tickets.length -
+                    (this.viewportStart + ticketsToShow)
+                output += `  ... ${moreCount} more below\n`
+            }
+
+            renderedTicketCount = (hasMoreAbove ? 1 : 0) +
+                visibleTickets.length +
+                (hasMoreBelow ? 1 : 0)
+        }
+
+        output += '-'.repeat(50) + '\n'
+
+        const msgLines = Math.max(
+            0,
+            this.config.messageLines - this.messages.length,
+        )
+        for (const msg of this.messages) {
+            output += `${msg}\n`
+        }
+        for (let i = 0; i < msgLines; i++) {
+            output += '\n'
+        }
+
+        this.renderedLines = 2 + renderedTicketCount + this.config.messageLines
+        this.config.stream.write(output)
+    }
+}
+
+export class PlainDisplay implements Display {
+    startWave (
+        waveNum:number,
+        _totalWaves:number,
+        tickets:ReadonlyArray<{
+            num:number
+            filename:string
+        }>
+    ):void {
+        console.log(
+            `\nWave ${waveNum}: ` +
+            tickets.map(t => t.filename).join(', ')
+        )
+    }
+
+    setTicketStatus (
+        _num:number,
+        _status:TicketStatus
+    ):void {
+        // no-op: plain mode reports via log()
+    }
+
+    log (message:string):void {
+        console.log(message)
+    }
+
+    cleanup ():void {
+        // no-op
+    }
+}
+
+export function createDisplay (
+    stream?:NodeJS.WriteStream
+):Display {
+    const s = stream ?? process.stdout
+    if (s.isTTY) {
+        return new StatusDisplay({ stream:s })
+    }
+    return new PlainDisplay()
+}
