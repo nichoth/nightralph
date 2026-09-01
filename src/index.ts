@@ -34,7 +34,7 @@ yargs(hideBin(process.argv))
         y => y.option('claude', {
             type:'boolean',
             describe:'Also create .claude/skills/ symlinks',
-            default:false,
+            default:true,
         }),
         async argv => {
             const tracker = await select<TrackerKind>({
