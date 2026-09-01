@@ -126,6 +126,7 @@ export function findReadyTickets (
 }
 
 export const COMPLETED_RE = /^\[x\]\s+(.+)$/i
+export const TOOL_USE_RE = /^\[[\w.]+\]/
 
 export function checkItems (
     ticket:Ticket,
@@ -514,6 +515,7 @@ export function spawnAgent (opts:{
     proc.stderr.pipe(logStream)
     const rlErr = createInterface({ input:proc.stderr })
     rlErr.on('line', line => {
+        if (isClaude && !TOOL_USE_RE.test(line)) return
         const output = `${prefix}${line}`
         if (opts.onLine) {
             opts.onLine(output)
