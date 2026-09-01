@@ -108,9 +108,13 @@ Small orchestrator that runs a single-agent session per issue.
   `DisplayConfig`, `RunProgress`, `ansi`, `color`,
   `renderDot`, `fitLine(line, width)`
 - **Display interface**:
-  `startWave(waveNum, totalWaves, tickets, progress?)`,
+  `startWave(waveNum, totalWaves, tickets, progress?,
+  remaining?)`,
   `setTicketStatus(num, status)`, `log(message)`,
   `cleanup()`
+- **remaining**: optional array of tickets not in the
+  current wave but still pending; rendered with empty
+  dots after wave tickets in `StatusDisplay`
 - **RunProgress**: `{ completed, total }` for the whole
   run; `completed` counts tickets done before the wave
   started. The percent in the status line is

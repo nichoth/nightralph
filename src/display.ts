@@ -39,7 +39,11 @@ export type Display = {
             num:number
             filename:string
         }>,
-        progress?:RunProgress
+        progress?:RunProgress,
+        remaining?:ReadonlyArray<{
+            num:number
+            filename:string
+        }>,
     ):void
     setTicketStatus(num:number, status:TicketStatus):void
     log(message:string):void
@@ -124,6 +128,7 @@ export function renderDot (status:TicketStatus):string {
 export class StatusDisplay implements Display {
     private wave:WaveState|null = null
     private progress:RunProgress|null = null
+    private remaining:Array<DisplayTicket> = []
     private messages:Array<string> = []
     private renderedLines:number = 0
     private config:DisplayConfig
@@ -150,6 +155,10 @@ export class StatusDisplay implements Display {
         totalWaves:number,
         tickets:Array<Readonly<{ num:number; filename:string }>>,
         progress?:RunProgress,
+        remaining?:ReadonlyArray<{
+            num:number
+            filename:string
+        }>,
     ):void {
         this.wave = {
             waveNum,
@@ -159,6 +168,10 @@ export class StatusDisplay implements Display {
                 status:'pending' as const,
             })),
         }
+        this.remaining = (remaining ?? []).map(t => ({
+            ...t,
+            status:'pending' as const,
+        }))
         this.progress = progress ?? null
         this.messages = []
         this.viewportStart = 0
@@ -264,7 +277,10 @@ export class StatusDisplay implements Display {
 
         // Pagination logic
         const availableRows = this.getAvailableRows()
-        const tickets = this.wave.tickets
+        const tickets:ReadonlyArray<DisplayTicket> = [
+            ...this.wave.tickets,
+            ...this.remaining,
+        ]
         let renderedTicketCount = 0
 
         if (tickets.length <= availableRows) {
@@ -370,6 +386,10 @@ export class PlainDisplay implements Display {
         _totalWaves:number,
         tickets:ReadonlyArray<{ num:number; filename:string }>,
         progress?:RunProgress,
+        _remaining?:ReadonlyArray<{
+            num:number
+            filename:string
+        }>,
     ):void {
         const pct = progress && progress.total > 0 ?
             ` (${progress.completed}/${progress.total} done)` :

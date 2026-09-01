@@ -214,13 +214,19 @@ This is expected to run for a long time, like overnight.
 
 ### Mac OS
 
-#### Claude
+#### Claude Opus 4.6
 
 ```sh
 caffeinate -i npx nightralph claude -m claude-opus-4-6
 ```
 
-##### Run with `pi` and an OpenRouter model
+#### Claude Sonnet 5
+
+```sh
+caffeinate -i npx nightralph claude -m claude-sonnet-5
+```
+
+#### `pi` + OpenRouter model
 
 ```sh
 caffeinate -i npx nightralph pi -m openrouter/z-ai/glm-5.3-flash

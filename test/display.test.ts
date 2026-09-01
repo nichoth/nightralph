@@ -612,6 +612,144 @@ test('cleanup restores cursor visibility', t => {
     )
 })
 
+// -- Tests for remaining tickets --
+
+test('startWave renders remaining tickets with empty dots', t => {
+    const stream = createMockStream()
+    stream.rows = 40
+    const display = new StatusDisplay({
+        messageLines:4,
+        stream,
+    })
+
+    const waveTickets = [
+        { num:6, filename:'06-active.md' },
+    ]
+    const remaining = [
+        { num:7, filename:'07-queued.md' },
+        { num:8, filename:'08-queued.md' },
+    ]
+    display.startWave(1, 3, waveTickets, undefined, remaining)
+
+    const output = stream.getOutput()
+    t.ok(
+        output.includes('06-active.md'),
+        'should display wave ticket'
+    )
+    t.ok(
+        output.includes('07-queued.md'),
+        'should display first remaining ticket'
+    )
+    t.ok(
+        output.includes('08-queued.md'),
+        'should display second remaining ticket'
+    )
+})
+
+test('remaining tickets show dim empty dot', t => {
+    const stream = createMockStream()
+    stream.rows = 40
+    const display = new StatusDisplay({
+        messageLines:4,
+        stream,
+    })
+
+    const waveTickets = [
+        { num:1, filename:'active.md' },
+    ]
+    const remaining = [
+        { num:2, filename:'queued.md' },
+    ]
+    display.startWave(1, 2, waveTickets, undefined, remaining)
+
+    const output = stream.getOutput()
+    const lines = output.split('\n')
+    const queuedLine = lines.find(l => l.includes('queued.md'))
+    t.ok(queuedLine, 'should have a line for queued ticket')
+    t.ok(
+        queuedLine!.includes('○'),
+        'remaining ticket should use empty dot'
+    )
+})
+
+test('setTicketStatus does not affect remaining tickets', t => {
+    const stream = createMockStream()
+    stream.rows = 40
+    const display = new StatusDisplay({
+        messageLines:4,
+        stream,
+    })
+
+    const waveTickets = [
+        { num:1, filename:'active.md' },
+    ]
+    const remaining = [
+        { num:2, filename:'queued.md' },
+    ]
+    display.startWave(1, 2, waveTickets, undefined, remaining)
+
+    // Setting status on a wave ticket triggers re-render;
+    // remaining ticket should still have empty dot
+    stream.clear()
+    display.setTicketStatus(1, 'in-progress')
+
+    const output = stream.getOutput()
+    const lines = output.split('\n')
+    const queuedLine = lines.find(l => l.includes('queued.md'))
+    t.ok(queuedLine, 'remaining ticket should still be rendered')
+    t.ok(
+        queuedLine!.includes('○'),
+        'remaining ticket should still show empty dot'
+    )
+})
+
+test('remaining tickets are included in pagination', t => {
+    const stream = createMockStream()
+    stream.rows = 12
+    const display = new StatusDisplay({
+        messageLines:4,
+        stream,
+    })
+
+    const waveTickets = [
+        { num:1, filename:'wave-1.md' },
+        { num:2, filename:'wave-2.md' },
+    ]
+    const remaining = Array.from({ length:10 }, (_, i) => ({
+        num:i + 3,
+        filename:`remaining-${i + 3}.md`,
+    }))
+    display.startWave(1, 3, waveTickets, undefined, remaining)
+
+    const output = stream.getOutput()
+    t.ok(
+        output.includes('more below'),
+        'should paginate when wave + remaining exceed viewport'
+    )
+})
+
+test('startWave without remaining works as before', t => {
+    const stream = createMockStream()
+    stream.rows = 40
+    const display = new StatusDisplay({
+        messageLines:4,
+        stream,
+    })
+
+    const tickets = createTestTickets()
+    display.startWave(1, 1, tickets)
+
+    const output = stream.getOutput()
+    t.ok(
+        output.includes('task1.md'),
+        'should still work without remaining parameter'
+    )
+    t.ok(
+        output.includes('task2.md'),
+        'should still display all wave tickets'
+    )
+})
+
 // -- Tests for AC5: Pagination --
 
 test('viewport limits rendering when tickets exceed available rows', t => {
@@ -973,11 +1111,19 @@ class RecordingDisplay implements Display {
         tickets:ReadonlyArray<{
             num:number
             filename:string
-        }>
+        }>,
+        progress?:any,
+        remaining?:ReadonlyArray<{
+            num:number
+            filename:string
+        }>,
     ):void {
         this.calls.push({
             method:'startWave',
-            args:[waveNum, totalWaves, tickets],
+            args:[
+                waveNum, totalWaves, tickets,
+                progress, remaining,
+            ],
         })
     }
 
@@ -1049,6 +1195,68 @@ function makeTicketBody (status:string):string {
 
 const MOCK_AGENT_PASS = join(
     process.cwd(), 'test', 'mock-agent-pass.js'
+)
+
+test(
+    'runWaves passes remaining tickets to startWave',
+    async t => {
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+
+        // ticket 1 is ready, ticket 2 is blocked by 1
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            '# First\n\n**Status:** ready-for-agent\n'
+        )
+        writeFileSync(
+            join(issuesDir, '02-second.md'),
+            '# Second\n\n**Status:** ready-for-agent\n' +
+            '**Blocked by:** 1\n'
+        )
+
+        const tickets = scanTickets(issuesDir)
+        const display = new RecordingDisplay()
+
+        const originalCwd = process.cwd()
+        process.chdir(base)
+        try {
+            await runWaves(
+                tickets,
+                'test spec',
+                MOCK_AGENT_PASS,
+                null,
+                10,
+                logsDir,
+                display,
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+
+        const startWaveCalls =
+            display.getCallsByMethod('startWave')
+        t.ok(
+            startWaveCalls.length >= 1,
+            'startWave should be called'
+        )
+
+        // First wave: ticket 1 is ready, ticket 2 is
+        // remaining (blocked)
+        const firstCall = startWaveCalls[0]
+        const remaining = firstCall[4] as
+            Array<{ num:number; filename:string }>|undefined
+        t.ok(
+            remaining && remaining.length === 1,
+            'first wave should have 1 remaining ticket'
+        )
+        t.equal(
+            remaining?.[0]?.filename,
+            '02-second.md',
+            'remaining ticket should be the blocked one'
+        )
+    }
 )
 
 test(

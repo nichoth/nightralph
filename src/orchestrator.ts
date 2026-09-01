@@ -799,6 +799,11 @@ export async function runWaves (
         if (ready.length === 0) break
 
         waveNum++
+        const readyNums = new Set(ready.map(t => t.num))
+        const remaining = tickets.filter(t =>
+            t.status === 'ready-for-agent' &&
+            !readyNums.has(t.num)
+        )
         d.startWave(
             waveNum,
             totalWaves,
@@ -807,6 +812,10 @@ export async function runWaves (
                 filename:t.filename,
             })),
             runProgress(tickets),
+            remaining.map(t => ({
+                num:t.num,
+                filename:t.filename,
+            })),
         )
 
         const results = await Promise.allSettled(
@@ -923,6 +932,11 @@ export async function runWavesIsolated (opts:{
         if (ready.length === 0) break
 
         waveNum++
+        const readyNums = new Set(ready.map(t => t.num))
+        const remaining = opts.tickets.filter(t =>
+            t.status === 'ready-for-agent' &&
+            !readyNums.has(t.num)
+        )
         d.startWave(
             waveNum,
             totalWaves,
@@ -931,6 +945,10 @@ export async function runWavesIsolated (opts:{
                 filename:t.filename,
             })),
             runProgress(opts.tickets),
+            remaining.map(t => ({
+                num:t.num,
+                filename:t.filename,
+            })),
         )
 
         const worktreeSettled = await Promise.allSettled(
