@@ -105,7 +105,7 @@ export class StatusDisplay implements Display {
 
     constructor (config?:Readonly<Partial<DisplayConfig>>) {
         this.config = {
-            messageLines:config?.messageLines ?? 4,
+            messageLines:config?.messageLines ?? 10,
             stream:config?.stream ?? process.stdout,
         }
     }
