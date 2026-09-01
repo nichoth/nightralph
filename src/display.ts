@@ -166,30 +166,20 @@ export class StatusDisplay implements Display {
             ticket.status = status
 
             if (status === 'in-progress') {
-                const ticketIndex =
-                    this.wave.tickets.indexOf(ticket)
-                const availableRows =
-                    this.getAvailableRows()
-                const totalTickets =
-                    this.wave.tickets.length
+                const ticketIndex = this.wave.tickets.indexOf(ticket)
+                const availableRows = this.getAvailableRows()
+                const totalTickets = this.wave.tickets.length
 
                 if (ticketIndex < this.viewportStart) {
                     this.viewportStart = ticketIndex
-                } else if (
-                    ticketIndex >=
-                    this.viewportStart + availableRows
-                ) {
+                } else if (ticketIndex >= this.viewportStart + availableRows) {
                     // offset by 3 to keep context visible below
                     // the active ticket
-                    this.viewportStart =
-                        ticketIndex - availableRows + 3
+                    this.viewportStart = ticketIndex - availableRows + 3
                 }
                 this.viewportStart = Math.max(
                     0,
-                    Math.min(
-                        this.viewportStart,
-                        totalTickets - 1,
-                    ),
+                    Math.min(this.viewportStart, totalTickets - 1),
                 )
             }
 
@@ -224,8 +214,7 @@ export class StatusDisplay implements Display {
         let output = ''
 
         if (this.renderedLines > 0) {
-            output +=
-                ansi.eraseLines(this.renderedLines + 1)
+            output += ansi.eraseLines(this.renderedLines + 1)
         }
 
         const completed = this.wave.tickets.filter(
@@ -235,7 +224,7 @@ export class StatusDisplay implements Display {
         const pct = total === 0 ? 0 : Math.round((completed / total) * 100)
 
         output += `Wave ${this.wave.waveNum}/` +
-            `${this.wave.totalWaves} -- ` +
+            `${this.wave.totalWaves} - ` +
             `${pct}% complete\n`
 
         // Pagination logic
@@ -278,15 +267,14 @@ export class StatusDisplay implements Display {
             if (this.viewportStart > maxStart) {
                 this.viewportStart = maxStart
                 hasMoreAbove = this.viewportStart > 0
-                tentativeCount =
-                    availableRows - (hasMoreAbove ? 1 : 0)
-                hasMoreBelow =
-                    this.viewportStart + tentativeCount <
-                    tickets.length
+                tentativeCount = availableRows - (hasMoreAbove ? 1 : 0)
+                hasMoreBelow = (
+                    this.viewportStart +
+                    tentativeCount < tickets.length
+                )
                 ticketsToShow = Math.max(
                     0,
-                    tentativeCount -
-                    (hasMoreBelow ? 1 : 0),
+                    tentativeCount - (hasMoreBelow ? 1 : 0)
                 )
             }
 
@@ -309,9 +297,10 @@ export class StatusDisplay implements Display {
 
             // Show "more below" indicator if needed
             if (hasMoreBelow) {
-                const moreCount =
+                const moreCount = (
                     tickets.length -
                     (this.viewportStart + ticketsToShow)
+                )
                 output += `  ... ${moreCount} more below\n`
             }
 
@@ -339,24 +328,17 @@ export class StatusDisplay implements Display {
 }
 
 export class PlainDisplay implements Display {
-    startWave (
-        waveNum:number,
-        _totalWaves:number,
-        tickets:ReadonlyArray<{
-            num:number
-            filename:string
-        }>
-    ):void {
+    startWave (waveNum:number, _totalWaves:number, tickets:ReadonlyArray<{
+        num:number
+        filename:string
+    }>):void {
         console.log(
             `\nWave ${waveNum}: ` +
             tickets.map(t => t.filename).join(', ')
         )
     }
 
-    setTicketStatus (
-        _num:number,
-        _status:TicketStatus
-    ):void {
+    setTicketStatus (_num:number, _status:TicketStatus):void {
         // no-op: plain mode reports via log()
     }
 
@@ -369,12 +351,11 @@ export class PlainDisplay implements Display {
     }
 }
 
-export function createDisplay (
-    stream?:NodeJS.WriteStream
-):Display {
+export function createDisplay (stream?:NodeJS.WriteStream):Display {
     const s = stream ?? process.stdout
     if (s.isTTY) {
         return new StatusDisplay({ stream:s })
     }
+
     return new PlainDisplay()
 }
