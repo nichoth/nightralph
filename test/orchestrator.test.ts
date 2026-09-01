@@ -15,6 +15,7 @@ import {
     markDone,
     checkItems,
     COMPLETED_RE,
+    TOOL_USE_RE,
     renderPrompt,
     runWaves,
     spawnAgent,
@@ -586,6 +587,50 @@ test('COMPLETED_RE ignores non-matching lines', t => {
         '[ ] missing x'.match(COMPLETED_RE),
         null,
         'empty brackets do not match'
+    )
+})
+
+// -- TOOL_USE_RE --
+
+test('TOOL_USE_RE matches tool invocation lines', t => {
+    t.ok(
+        TOOL_USE_RE.test('[bash] sed -n 1,35p src/server/events.ts'),
+        'matches [bash] with command'
+    )
+    t.ok(
+        TOOL_USE_RE.test('[edit]'),
+        'matches [edit] alone'
+    )
+    t.ok(
+        TOOL_USE_RE.test('[Read] src/index.ts'),
+        'matches [Read] with path'
+    )
+    t.ok(
+        TOOL_USE_RE.test('[Write] src/foo.ts'),
+        'matches [Write]'
+    )
+})
+
+test('TOOL_USE_RE rejects non-tool lines', t => {
+    t.equal(
+        TOOL_USE_RE.test('to'),
+        false,
+        'plain word does not match'
+    )
+    t.equal(
+        TOOL_USE_RE.test('drop the approval frame'),
+        false,
+        'sentence does not match'
+    )
+    t.equal(
+        TOOL_USE_RE.test(''),
+        false,
+        'empty string does not match'
+    )
+    t.equal(
+        TOOL_USE_RE.test('some error occurred'),
+        false,
+        'error text does not match'
     )
 })
 
