@@ -43,7 +43,7 @@ Small orchestrator that runs a single-agent session per issue.
   templates); always writes AGENTS.md to the target project
 
 ### CLI (`src/index.ts`)
-- `nightralph setup [--claude]` -- prompts for tracker
+- `nightralph init [--claude]` -- prompts for tracker
   format, then scaffolds skills and docs
 - `nightralph <provider> [--spec <name>]` -- executes
   tickets; `--spec` takes a feature name that resolves

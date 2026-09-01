@@ -29,7 +29,7 @@ yargs(hideBin(process.argv))
     .scriptName('nightralph')
     .usage('$0 <command>')
     .command(
-        'setup',
+        'init',
         'Install bundled skills and doc templates',
         y => y.option('claude', {
             type:'boolean',

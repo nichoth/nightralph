@@ -17,7 +17,7 @@ This is inspired by [nightshift](https://github.com/Shaurya-Sethi/nightshift/).
 I made it because I noticed the API in `nightshift` had already drifted
 from the skill definitions. This module bundles its skill dependencies,
 so they can't drift as long as you install the skills with this package.
-(See [the section on the `setup` command](#install-dependency-skills).)
+(See [the section on the `init` command](#install-dependency-skills).)
 
 <!-- toc -->
 
@@ -44,10 +44,10 @@ npm i -S nightralph
 ### Install Dependency Skills
 
 ```sh
-npx nightralph setup
+npx nightralph init
 ```
 
-Use the `setup` subcommand in this package to add the required
+Use the `init` subcommand in this package to add the required
 [Pocock skills](https://github.com/mattpocock/skills) to your repo.
 This command will copy some files in this package to a specific directory
 in your repo. The upstream
@@ -78,7 +78,7 @@ grill -> to-spec -> to-tickets -> tdd
 First create issues.
 
 After installing this package, use
-[the `npx nightralph setup` command](#install-dependency-skills)
+[the `npx nightralph init` command](#install-dependency-skills)
 to add the required skills to your local `.agents/skills/` folder.
 
 ### Create Issues
