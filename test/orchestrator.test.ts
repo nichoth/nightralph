@@ -23,6 +23,7 @@ import {
     dryRunIsolated,
     getProviderArgs,
     formatStreamLine,
+    createPiStreamFormatter,
     type Ticket,
 } from '../src/orchestrator.js'
 
@@ -1566,5 +1567,159 @@ test('formatStreamLine - returns raw non-JSON lines',
             formatStreamLine('plain text output'),
             'plain text output',
             'should pass through non-JSON lines'
+        )
+    })
+
+// -- createPiStreamFormatter --
+
+function piTextDelta (text:string):string {
+    return JSON.stringify({
+        assistantMessageEvent:{
+            type:'text_delta',
+            delta:text,
+        },
+    })
+}
+
+function piToolCallStart (
+    index:number, name:string
+):string {
+    return JSON.stringify({
+        assistantMessageEvent:{
+            type:'toolcall_start',
+            contentIndex:index,
+            toolName:name,
+        },
+    })
+}
+
+function piToolCallDelta (
+    index:number, delta:string
+):string {
+    return JSON.stringify({
+        assistantMessageEvent:{
+            type:'toolcall_delta',
+            contentIndex:index,
+            delta,
+        },
+    })
+}
+
+function piToolCallEnd (index:number):string {
+    return JSON.stringify({
+        assistantMessageEvent:{
+            type:'toolcall_end',
+            contentIndex:index,
+        },
+    })
+}
+
+test('piFormatter - buffers tokens until newline',
+    t => {
+        const fmt = createPiStreamFormatter()
+        t.deepEqual(
+            fmt.process(piTextDelta('hello ')),
+            [],
+            'no output before newline'
+        )
+        t.deepEqual(
+            fmt.process(piTextDelta('world')),
+            [],
+            'still no output'
+        )
+        t.deepEqual(
+            fmt.process(piTextDelta('\n')),
+            ['hello world'],
+            'emits line on newline'
+        )
+    })
+
+test('piFormatter - multiple lines in one delta',
+    t => {
+        const fmt = createPiStreamFormatter()
+        t.deepEqual(
+            fmt.process(
+                piTextDelta('line one\nline two\n')
+            ),
+            ['line one', 'line two'],
+            'emits all complete lines'
+        )
+    })
+
+test('piFormatter - newline mid-token keeps remainder',
+    t => {
+        const fmt = createPiStreamFormatter()
+        t.deepEqual(
+            fmt.process(
+                piTextDelta('first\nsecond')
+            ),
+            ['first'],
+            'emits first line'
+        )
+        t.deepEqual(
+            fmt.process(piTextDelta(' part\n')),
+            ['second part'],
+            'second line includes buffered text'
+        )
+    })
+
+test('piFormatter - flush emits remaining buffer',
+    t => {
+        const fmt = createPiStreamFormatter()
+        fmt.process(piTextDelta('no newline'))
+        t.deepEqual(
+            fmt.flush(),
+            ['no newline'],
+            'flush emits buffered text'
+        )
+    })
+
+test('piFormatter - flush with empty buffer', t => {
+    const fmt = createPiStreamFormatter()
+    t.deepEqual(
+        fmt.flush(),
+        [],
+        'flush with nothing buffered returns empty'
+    )
+})
+
+test('piFormatter - tool calls returned as lines',
+    t => {
+        const fmt = createPiStreamFormatter()
+        t.deepEqual(
+            fmt.process(piToolCallStart(0, 'Bash')),
+            [],
+        )
+        t.deepEqual(
+            fmt.process(piToolCallDelta(
+                0, '{"command":"ls"}'
+            )),
+            [],
+        )
+        t.deepEqual(
+            fmt.process(piToolCallEnd(0)),
+            ['[Bash] ls'],
+            'tool call end emits formatted line'
+        )
+    })
+
+test('piFormatter - text buffer flushed before ' +
+    'tool output', t => {
+    const fmt = createPiStreamFormatter()
+    fmt.process(piTextDelta('buffered text'))
+    t.deepEqual(
+        fmt.process(piToolCallStart(0, 'Read')),
+        ['buffered text'],
+        'pending text emitted before tool event'
+    )
+})
+
+test('piFormatter - non-JSON lines returned as-is',
+    t => {
+        const fmt = createPiStreamFormatter()
+        t.deepEqual(
+            fmt.process('plain text'),
+            ['plain text'],
+            'raw lines pass through'
         )
     })

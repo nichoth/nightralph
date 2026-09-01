@@ -336,38 +336,64 @@ export function formatStreamLine (
     return null
 }
 
-export function createPiStreamFormatter ():((line:string) => string|null) {
-    const calls = new Map<number, { name:string; buf:string }>()
+export type PiStreamFormatter = {
+    process:(line:string) => string[]
+    flush:() => string[]
+}
 
-    return (line:string):string|null => {
+export function createPiStreamFormatter (
+):PiStreamFormatter {
+    const calls = new Map<
+        number, { name:string; buf:string }
+    >()
+    let textBuf = ''
+
+    function drainLines ():string[] {
+        const parts = textBuf.split('\n')
+        if (parts.length === 1) return []
+        textBuf = parts[parts.length - 1]
+        return parts.slice(0, -1)
+    }
+
+    function flushBuf ():string[] {
+        if (textBuf.length === 0) return []
+        const out = textBuf
+        textBuf = ''
+        return [out]
+    }
+
+    function process (line:string):string[] {
         let obj:Record<string, unknown>
         try {
             obj = JSON.parse(line) as
                 Record<string, unknown>
         } catch {
-            return line
+            return [line]
         }
 
         const evt = obj.assistantMessageEvent as
             Record<string, unknown>|undefined
-        if (!evt) return null
+        if (!evt) return []
 
         const type = evt.type as string|undefined
         const ci = evt.contentIndex as
             number|undefined ?? -1
 
         if (type === 'text_delta') {
-            return (evt.delta as string|undefined) ??
-                null
+            const delta =
+                (evt.delta as string|undefined) ?? ''
+            textBuf += delta
+            return drainLines()
         }
 
         if (type === 'toolcall_start') {
+            const flushed = flushBuf()
             calls.set(ci, {
                 name:(evt.toolName as
                     string|undefined) ?? '?',
                 buf:'',
             })
-            return null
+            return flushed
         }
 
         if (
@@ -376,7 +402,7 @@ export function createPiStreamFormatter ():((line:string) => string|null) {
         ) {
             calls.get(ci)!.buf +=
                 (evt.delta as string|undefined) ?? ''
-            return null
+            return []
         }
 
         if (
@@ -397,11 +423,13 @@ export function createPiStreamFormatter ():((line:string) => string|null) {
             } catch {
                 // unparseable tool args
             }
-            return `[${call.name}] ${label}`
+            return [`[${call.name}] ${label}`]
         }
 
-        return null
+        return []
     }
+
+    return { process, flush:flushBuf }
 }
 
 function writePromptFile (prompt:string):string {
@@ -491,8 +519,8 @@ export function spawnAgent (opts:{
                 }
             }
         } else if (piFormatter) {
-            const formatted = piFormatter(line)
-            if (formatted !== null) {
+            const lines = piFormatter.process(line)
+            for (const formatted of lines) {
                 collectCompleted(formatted)
                 const output = `${prefix}${formatted}`
                 if (opts.onLine) {
@@ -542,6 +570,17 @@ export function spawnAgent (opts:{
     return new Promise<AgentResult>(resolve => {
         proc.on('close', code => {
             clearTimeout(timeout)
+            if (piFormatter) {
+                for (const line of piFormatter.flush()) {
+                    collectCompleted(line)
+                    const output = `${prefix}${line}`
+                    if (opts.onLine) {
+                        opts.onLine(output)
+                    } else {
+                        console.log(output)
+                    }
+                }
+            }
             rl.close()
             rlErr.close()
             logStream.end()
