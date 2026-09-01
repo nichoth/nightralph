@@ -538,6 +538,22 @@ const MOCK_FAIL = join(
     process.cwd(), 'test', 'mock-agent-fail.js'
 )
 
+const GIT_ENV = {
+    ...process.env,
+    GIT_COMMITTER_NAME:'Test',
+    GIT_COMMITTER_EMAIL:'test@example.com',
+    GIT_AUTHOR_NAME:'Test',
+    GIT_AUTHOR_EMAIL:'test@example.com',
+}
+
+function commitAll (dir:string, message:string):void {
+    execSync('git add -A', { cwd:dir })
+    execSync(
+        `git commit -m "${message}" --no-verify`,
+        { cwd:dir, env:GIT_ENV }
+    )
+}
+
 function initTempGitRepo ():string {
     const dir = tmp()
     execSync('git init', { cwd:dir })
@@ -587,6 +603,7 @@ test('runWavesIsolated - two independent tickets ' +
         )
 
         const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
 
         // Change to project directory for git operations
         const originalCwd = process.cwd()
@@ -680,6 +697,7 @@ async t => {
         )
 
         const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
 
         const originalCwd = process.cwd()
         process.chdir(projectDir)
@@ -748,6 +766,7 @@ async t => {
         )
 
         const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
 
         const originalCwd = process.cwd()
         process.chdir(projectDir)
@@ -830,6 +849,7 @@ test('runWavesIsolated - worktrees removed after successful merge',
             )
 
             const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
 
             const originalCwd = process.cwd()
             process.chdir(projectDir)
@@ -917,6 +937,7 @@ test('runWavesIsolated - two-wave scenario with dependency',
             )
 
             const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
 
             const originalCwd = process.cwd()
             process.chdir(projectDir)
@@ -993,6 +1014,7 @@ test('runWavesIsolated - progress.md committed after each ticket',
             )
 
             const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
 
             const originalCwd = process.cwd()
             process.chdir(projectDir)
@@ -1083,6 +1105,7 @@ test('runWavesIsolated - failed ticket worktree is cleaned up',
             )
 
             const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
 
             const originalCwd = process.cwd()
             process.chdir(projectDir)
@@ -1153,6 +1176,7 @@ test('runWavesIsolated - re-run after a prior failed run does not ' +
         )
 
         const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
         const repoName = projectDir.split('/').pop()
 
         // Simulate a branch left over from a prior failed run,
@@ -1224,6 +1248,7 @@ test('runWavesIsolated returns allDone:false when agent fails',
             )
 
             const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
 
             const originalCwd = process.cwd()
             process.chdir(projectDir)
@@ -1287,6 +1312,7 @@ test('runWavesIsolated - conflictStrategy stop halts on first failure',
             )
 
             const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
 
             const originalCwd = process.cwd()
             process.chdir(projectDir)
@@ -1356,6 +1382,7 @@ test('runWavesIsolated - conflictStrategy stop cleans up ' +
         )
 
         const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
 
         const originalCwd = process.cwd()
         process.chdir(projectDir)
@@ -1470,6 +1497,7 @@ test('runWavesIsolated - agent succeeds but merge conflicts, ' +
         )
 
         const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
 
         const originalCwd = process.cwd()
         process.chdir(projectDir)
@@ -1590,6 +1618,7 @@ async t => {
         )
 
         const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
 
         const originalCwd = process.cwd()
         process.chdir(projectDir)
@@ -1667,6 +1696,7 @@ test('runWavesIsolated - respawned agent fails, ' +
         )
 
         const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
 
         const originalCwd = process.cwd()
         process.chdir(projectDir)

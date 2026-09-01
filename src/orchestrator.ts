@@ -194,6 +194,38 @@ export function renderPrompt (
     ].join('\n')
 }
 
+export function renderMergePrompt (
+    specBody:string,
+    ticket:Ticket
+):string {
+    return [
+        '---- SPEC CONTEXT ----',
+        specBody,
+        '',
+        '---- TICKET ----',
+        ticket.filename,
+        ticket.body,
+        '',
+        '---- AGENT INSTRUCTIONS ----',
+        'You are an autonomous coding agent resolving ' +
+            'a merge conflict.',
+        '',
+        'Another agent already implemented this ticket ' +
+            'on a feature branch. The branch was then ' +
+            'merged with the base branch, but conflicts ' +
+            'arose. The working tree may contain conflict ' +
+            'markers that need resolution.',
+        '',
+        'Your task:',
+        '1. Find and resolve all conflict markers ' +
+            '(<<<<<<< / ======= / >>>>>>>).',
+        '2. Make sure the code compiles and tests pass.',
+        '3. Commit the resolved files.',
+        '',
+        'Do NOT re-implement the ticket from scratch.',
+    ].join('\n')
+}
+
 function listTickets (tickets:ReadonlyArray<Ticket>):void {
     console.log('\nTickets:')
     for (const t of tickets) {
@@ -724,7 +756,9 @@ async function respawnAndRetryMerge (opts:{
         console.log(msg1)
     }
 
-    const prompt = renderPrompt(opts.specBody, opts.ticket)
+    const prompt = renderMergePrompt(
+        opts.specBody, opts.ticket
+    )
     const logPath = join(
         opts.logsDir,
         opts.ticket.filename.replace(/\.md$/, '.respawn.log')
@@ -754,10 +788,10 @@ async function respawnAndRetryMerge (opts:{
         return false
     }
 
-    const merged = await mergeBranch(
+    const mergeResult = await mergeBranch(
         opts.repoRoot, opts.branch
     )
-    if (!merged) {
+    if (!mergeResult.success) {
         const msg3 = `  ${opts.ticket.filename}: merge still ` +
             'conflicted after respawn'
         if (opts.onLine) {
@@ -765,8 +799,17 @@ async function respawnAndRetryMerge (opts:{
         } else {
             console.log(msg3)
         }
+        if (mergeResult.stderr) {
+            const stderrMsg =
+                `  git: ${mergeResult.stderr.trim()}`
+            if (opts.onLine) {
+                opts.onLine(stderrMsg)
+            } else {
+                console.log(stderrMsg)
+            }
+        }
     }
-    return merged
+    return mergeResult.success
 }
 
 function runProgress (tickets:ReadonlyArray<Ticket>):RunProgress {
@@ -909,6 +952,13 @@ export async function runWavesIsolated (opts:{
     const repoRoot = getRepoRoot()
     const repoName = getRepoName()
     const baseBranch = getCurrentBranch()
+
+    if (isDirty(repoRoot)) {
+        throw new Error(
+            'Working tree is dirty; commit or stash ' +
+            'changes before running'
+        )
+    }
 
     const progressPath = join(
         dirname(opts.logsDir), 'progress.md'
@@ -1200,6 +1250,24 @@ export async function runWavesIsolated (opts:{
                         d.log(
                             `  ${ticket.filename}: merge failed, ` +
                             'staying ready-for-agent'
+                        )
+                        if (branchResult.stderr) {
+                            d.log(
+                                '  git: ' +
+                                branchResult.stderr.trim()
+                            )
+                        }
+                        checkTicket(progress, ticket.num, {
+                            branch:branchResult.branch,
+                            exitCode:0,
+                            done:false,
+                        })
+                        writeProgress(progressPath, progress)
+                        await commitProgress(
+                            repoRoot,
+                            progressPath,
+                            `nightralph: ${ticket.filename} ` +
+                            'merge failed'
                         )
                     }
                 }

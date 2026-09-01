@@ -66,6 +66,7 @@ Small orchestrator that runs a single-agent session per issue.
   `findReadyTickets(tickets)`, `checkItems(ticket, items)`,
   `markDone(ticket)`,
   `renderPrompt(specBody, ticket)`,
+  `renderMergePrompt(specBody, ticket)`,
   `spawnAgent(opts)`, `createPiStreamFormatter()`,
   `dryRun(tickets, specBody)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
@@ -94,10 +95,18 @@ Small orchestrator that runs a single-agent session per issue.
 - **runWaves(...)**: accepts optional `display`
   parameter (`Display` interface); defaults to
   `createDisplay()` when omitted
+- **renderMergePrompt(specBody, ticket)**: prompt for
+  a respawned agent resolving a merge conflict; tells
+  the agent to resolve conflict markers, not re-implement
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
   updates; accepts optional `display` in opts
+- **Guarantees**: `runWavesIsolated` throws if the
+  base branch working tree is dirty; merge failures
+  are recorded in progress.md with `done:false`;
+  respawned agents receive `renderMergePrompt`
+  instead of `renderPrompt`
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names
 
@@ -162,18 +171,25 @@ Small orchestrator that runs a single-agent session per issue.
   progress file
 
 ### merge module (`src/merge.ts`)
-- **Exposes**: `MergeConflictStrategy`, `MergeResult`,
-  `WaveMergeResult`, `mergeBranch(repoRoot, branch)`,
+- **Exposes**: `GitOpResult`, `MergeConflictStrategy`,
+  `MergeResult`, `WaveMergeResult`,
+  `mergeBranch(repoRoot, branch)`,
   `rebaseBranch(repoRoot, branch, onto)`,
   `mergeWave(opts)`
+- **GitOpResult**: `{ success:boolean; stderr?:string }`
+  -- returned by `mergeBranch` and `rebaseBranch`
 - **MergeConflictStrategy**: `'respawn'|'stop'`
+- **MergeResult**: includes `stderr?:string` with git's
+  diagnostic output on conflict
 - **mergeWave**: merges the first branch directly,
   rebases subsequent branches onto the base before
   merging; respects strategy to either skip conflicted
   branches or stop entirely
 - **Guarantees**: on conflict, `mergeBranch` aborts
-  the merge and returns false; `rebaseBranch` aborts
-  and checks out the base branch on failure
+  the merge and returns `{ success:false, stderr }`;
+  `rebaseBranch` aborts and checks out the base
+  branch on failure; stderr captures git's stdout
+  (conflict info) or stderr (fatal errors)
 
 ## Agent skills
 

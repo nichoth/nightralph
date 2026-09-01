@@ -214,6 +214,9 @@ This is expected to run for a long time, like overnight.
 
 ### Mac OS
 
+Use `caffeinate` to prevent your machine from sleeping. These examples will
+keep the machine awake, but the display can still go dark.
+
 #### Claude Opus 4.6
 
 ```sh
@@ -232,5 +235,8 @@ caffeinate -i npx nightralph claude -m claude-sonnet-5
 caffeinate -i npx nightralph pi -m openrouter/z-ai/glm-5.3-flash
 ```
 
-That command will prevent your machine from sleeping, but the display can still
-go dark.
+#### `codex` + Luna
+
+```sh
+caffeinate -i npx nightralph codex -m gpt-5.6-luna
+```

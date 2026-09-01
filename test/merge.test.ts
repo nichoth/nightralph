@@ -136,9 +136,9 @@ test(
         const result = await mergeBranch(repoRoot, 'feature-1')
 
         t.equal(
-            result,
+            result.success,
             true,
-            'mergeBranch should return true for clean merge'
+            'mergeBranch should return success for clean merge'
         )
 
         // Verify file was merged
@@ -221,9 +221,13 @@ test(
         const result = await mergeBranch(repoRoot, 'feature-2')
 
         t.equal(
-            result,
+            result.success,
             false,
-            'mergeBranch should return false on conflict'
+            'mergeBranch should return !success on conflict'
+        )
+        t.ok(
+            result.stderr,
+            'mergeBranch should include stderr on conflict'
         )
 
         // Verify git state is clean (merge aborted)
@@ -271,9 +275,9 @@ test(
         )
 
         t.equal(
-            result,
+            result.success,
             true,
-            'rebaseBranch should return true on success'
+            'rebaseBranch should return success on success'
         )
 
         // Verify HEAD is on base branch after success
@@ -363,9 +367,13 @@ test(
         )
 
         t.equal(
-            result,
+            result.success,
             false,
-            'rebaseBranch should return false on conflict'
+            'rebaseBranch should return !success on conflict'
+        )
+        t.ok(
+            result.stderr,
+            'rebaseBranch should include stderr on conflict'
         )
 
         // Verify we're back on base branch

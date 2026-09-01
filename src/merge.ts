@@ -10,6 +10,7 @@ export type MergeResult = {
     ticketNum:number
     merged:boolean
     conflicted:boolean
+    stderr?:string
 }
 
 export type WaveMergeResult = {
@@ -17,10 +18,15 @@ export type WaveMergeResult = {
     stoppedAt:MergeResult|null
 }
 
+export type GitOpResult = {
+    success:boolean
+    stderr?:string
+}
+
 export async function mergeBranch (
     repoRoot:string,
     branch:string
-):Promise<boolean> {
+):Promise<GitOpResult> {
     if (!repoRoot || typeof repoRoot !== 'string') {
         throw new Error('repoRoot must be a non-empty string')
     }
@@ -34,8 +40,13 @@ export async function mergeBranch (
             ['merge', branch, '--no-edit'],
             { cwd:repoRoot }
         )
-        return true
-    } catch {
+        return { success:true }
+    } catch (err) {
+        const execErr = err as {
+            stdout?:string; stderr?:string
+        }
+        const stderr =
+            execErr.stderr || execErr.stdout
         try {
             await execFileAsync(
                 'git',
@@ -45,7 +56,7 @@ export async function mergeBranch (
         } catch {
             // no merge in progress to abort
         }
-        return false
+        return { success:false, stderr }
     }
 }
 
@@ -54,7 +65,7 @@ export async function rebaseBranch (
     branch:string,
     onto:string,
     worktreePath?:string
-):Promise<boolean> {
+):Promise<GitOpResult> {
     if (!repoRoot || typeof repoRoot !== 'string') {
         throw new Error('repoRoot must be a non-empty string')
     }
@@ -75,8 +86,13 @@ export async function rebaseBranch (
                 ['rebase', onto],
                 { cwd:worktreePath }
             )
-            return true
-        } catch {
+            return { success:true }
+        } catch (err) {
+            const execErr = err as {
+                stdout?:string; stderr?:string
+            }
+            const stderr =
+                execErr.stderr || execErr.stdout
             try {
                 await execFileAsync(
                     'git',
@@ -86,7 +102,7 @@ export async function rebaseBranch (
             } catch {
                 // ignore abort errors
             }
-            return false
+            return { success:false, stderr }
         }
     }
 
@@ -109,8 +125,10 @@ export async function rebaseBranch (
             { cwd:repoRoot }
         )
 
-        return true
-    } catch {
+        return { success:true }
+    } catch (err) {
+        const stderr =
+            (err as { stderr?:string }).stderr
         try {
             await execFileAsync(
                 'git',
@@ -129,7 +147,7 @@ export async function rebaseBranch (
         } catch {
             // ignore checkout errors
         }
-        return false
+        return { success:false, stderr }
     }
 }
 
@@ -187,14 +205,17 @@ export async function mergeWave (
         }
 
         if (i === 0) {
-            const success = await mergeBranch(
+            const result = await mergeBranch(
                 repoRoot,
                 branch
             )
-            mergingResult.merged = success
-            mergingResult.conflicted = !success
+            mergingResult.merged = result.success
+            mergingResult.conflicted = !result.success
+            if (!result.success) {
+                mergingResult.stderr = result.stderr
+            }
 
-            if (!success) {
+            if (!result.success) {
                 if (strategy === 'stop') {
                     stoppedAt = mergingResult
                     merged.push(mergingResult)
@@ -204,15 +225,16 @@ export async function mergeWave (
                 continue
             }
         } else {
-            const rebaseSuccess = await rebaseBranch(
+            const rebaseResult = await rebaseBranch(
                 repoRoot,
                 branch,
                 baseBranch,
                 worktreePath
             )
 
-            if (!rebaseSuccess) {
+            if (!rebaseResult.success) {
                 mergingResult.conflicted = true
+                mergingResult.stderr = rebaseResult.stderr
 
                 if (strategy === 'stop') {
                     stoppedAt = mergingResult
@@ -225,14 +247,17 @@ export async function mergeWave (
                 }
             }
 
-            const mergeSuccess = await mergeBranch(
+            const mergeResult = await mergeBranch(
                 repoRoot,
                 branch
             )
-            mergingResult.merged = mergeSuccess
-            mergingResult.conflicted = !mergeSuccess
+            mergingResult.merged = mergeResult.success
+            mergingResult.conflicted = !mergeResult.success
+            if (!mergeResult.success) {
+                mergingResult.stderr = mergeResult.stderr
+            }
 
-            if (!mergeSuccess) {
+            if (!mergeResult.success) {
                 if (strategy === 'stop') {
                     stoppedAt = mergingResult
                     merged.push(mergingResult)
