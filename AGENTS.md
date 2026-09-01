@@ -105,10 +105,24 @@ Small orchestrator that runs a single-agent session per issue.
 - **Exposes**: `Display` (type), `StatusDisplay` (class),
   `PlainDisplay` (class), `createDisplay()`,
   `TicketStatus`, `DisplayTicket`, `WaveState`,
-  `DisplayConfig`, `ansi`, `color`, `renderDot`
-- **Display interface**: `startWave(...)`,
+  `DisplayConfig`, `RunProgress`, `ansi`, `color`,
+  `renderDot`, `fitLine(line, width)`
+- **Display interface**:
+  `startWave(waveNum, totalWaves, tickets, progress?)`,
   `setTicketStatus(num, status)`, `log(message)`,
   `cleanup()`
+- **RunProgress**: `{ completed, total }` for the whole
+  run; `completed` counts tickets done before the wave
+  started. The percent in the status line is
+  `(completed + done-in-wave) / total`. When `progress`
+  is omitted the percent falls back to per-wave
+  (done-in-wave / tickets-in-wave). The orchestrator
+  always passes it, derived from `ticket.status`
+- **Guarantees**: `StatusDisplay` clamps every rendered
+  line to `stream.columns - 1` visible characters
+  (`fitLine`) so lines never wrap; a wrapped line would
+  occupy more rows than the erase count and leave
+  stale rows behind on the next render
 - **StatusDisplay**: ANSI-based terminal UI with
   paginated ticket grid, wave progress, and scrolling
   message log; handles terminal resize

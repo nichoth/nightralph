@@ -21,6 +21,16 @@ export type DisplayConfig = {
     readonly stream:NodeJS.WriteStream
 }
 
+/**
+ * Progress across the whole run, not just the current wave.
+ * `completed` counts tickets done before the wave started;
+ * tickets that finish during the wave are added on top.
+ */
+export type RunProgress = {
+    readonly completed:number
+    readonly total:number
+}
+
 export type Display = {
     startWave(
         waveNum:number,
@@ -28,7 +38,8 @@ export type Display = {
         tickets:ReadonlyArray<{
             num:number
             filename:string
-        }>
+        }>,
+        progress?:RunProgress
     ):void
     setTicketStatus(num:number, status:TicketStatus):void
     log(message:string):void
@@ -80,6 +91,22 @@ export const color = {
 
 const FILLED_DOT = '●'
 const EMPTY_DOT = '○'
+const SEPARATOR_WIDTH = 50
+const DEFAULT_COLUMNS = 80
+
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g
+
+/**
+ * Clamp a line to `width` visible columns so it can never wrap.
+ * A wrapped line occupies more terminal rows than `render`
+ * counts, which leaves stale rows behind on the next erase.
+ */
+export function fitLine (line:string, width:number):string {
+    const visible = line.replace(ANSI_RE, '')
+    if (visible.length <= width) return line
+    return visible.slice(0, width)
+}
 
 export function renderDot (status:TicketStatus):string {
     switch (status) {
@@ -96,6 +123,7 @@ export function renderDot (status:TicketStatus):string {
 
 export class StatusDisplay implements Display {
     private wave:WaveState|null = null
+    private progress:RunProgress|null = null
     private messages:Array<string> = []
     private renderedLines:number = 0
     private config:DisplayConfig
@@ -121,6 +149,7 @@ export class StatusDisplay implements Display {
         waveNum:number,
         totalWaves:number,
         tickets:Array<Readonly<{ num:number; filename:string }>>,
+        progress?:RunProgress,
     ):void {
         this.wave = {
             waveNum,
@@ -130,6 +159,7 @@ export class StatusDisplay implements Display {
                 status:'pending' as const,
             })),
         }
+        this.progress = progress ?? null
         this.messages = []
         this.viewportStart = 0
         this.config.stream.write(ansi.cursorHide())
@@ -217,11 +247,16 @@ export class StatusDisplay implements Display {
             output += ansi.eraseLines(this.renderedLines + 1)
         }
 
-        const completed = this.wave.tickets.filter(
+        const doneInWave = this.wave.tickets.filter(
             t => t.status === 'done',
         ).length
-        const total = this.wave.tickets.length
+        const completed = doneInWave + (this.progress?.completed ?? 0)
+        const total = this.progress?.total ?? this.wave.tickets.length
         const pct = total === 0 ? 0 : Math.round((completed / total) * 100)
+        const width = Math.max(
+            1,
+            (this.config.stream.columns ?? DEFAULT_COLUMNS) - 1,
+        )
 
         output += `Wave ${this.wave.waveNum}/` +
             `${this.wave.totalWaves} - ` +
@@ -236,7 +271,8 @@ export class StatusDisplay implements Display {
             // All tickets fit, no pagination
             for (const ticket of tickets) {
                 const dot = renderDot(ticket.status)
-                output += `${dot} ${ticket.filename}\n`
+                const name = fitLine(ticket.filename, width - 2)
+                output += `${dot} ${name}\n`
             }
             renderedTicketCount = tickets.length
         } else {
@@ -292,7 +328,8 @@ export class StatusDisplay implements Display {
 
             for (const ticket of visibleTickets) {
                 const dot = renderDot(ticket.status)
-                output += `${dot} ${ticket.filename}\n`
+                const name = fitLine(ticket.filename, width - 2)
+                output += `${dot} ${name}\n`
             }
 
             // Show "more below" indicator if needed
@@ -309,14 +346,14 @@ export class StatusDisplay implements Display {
                 (hasMoreBelow ? 1 : 0)
         }
 
-        output += '-'.repeat(50) + '\n'
+        output += '-'.repeat(Math.min(SEPARATOR_WIDTH, width)) + '\n'
 
         const msgLines = Math.max(
             0,
             this.config.messageLines - this.messages.length,
         )
         for (const msg of this.messages) {
-            output += `${msg}\n`
+            output += `${fitLine(msg, width)}\n`
         }
         for (let i = 0; i < msgLines; i++) {
             output += '\n'
@@ -328,12 +365,17 @@ export class StatusDisplay implements Display {
 }
 
 export class PlainDisplay implements Display {
-    startWave (waveNum:number, _totalWaves:number, tickets:ReadonlyArray<{
-        num:number
-        filename:string
-    }>):void {
+    startWave (
+        waveNum:number,
+        _totalWaves:number,
+        tickets:ReadonlyArray<{ num:number; filename:string }>,
+        progress?:RunProgress,
+    ):void {
+        const pct = progress && progress.total > 0 ?
+            ` (${progress.completed}/${progress.total} done)` :
+            ''
         console.log(
-            `\nWave ${waveNum}: ` +
+            `\nWave ${waveNum}${pct}: ` +
             tickets.map(t => t.filename).join(', ')
         )
     }

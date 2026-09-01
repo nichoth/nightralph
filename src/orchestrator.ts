@@ -37,6 +37,7 @@ import {
 } from './merge.js'
 import {
     createDisplay,
+    type RunProgress,
     type Display,
 } from './display.js'
 
@@ -727,6 +728,13 @@ async function respawnAndRetryMerge (opts:{
     return merged
 }
 
+function runProgress (tickets:ReadonlyArray<Ticket>):RunProgress {
+    return {
+        completed:tickets.filter(t => t.status === 'done').length,
+        total:tickets.length,
+    }
+}
+
 export async function runWaves (
     tickets:Ticket[],
     specBody:string,
@@ -756,7 +764,8 @@ export async function runWaves (
             ready.map(t => ({
                 num:t.num,
                 filename:t.filename,
-            }))
+            })),
+            runProgress(tickets),
         )
 
         const results = await Promise.allSettled(
@@ -879,7 +888,8 @@ export async function runWavesIsolated (opts:{
             ready.map(t => ({
                 num:t.num,
                 filename:t.filename,
-            }))
+            })),
+            runProgress(opts.tickets),
         )
 
         const worktreeSettled = await Promise.allSettled(

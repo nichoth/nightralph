@@ -10,6 +10,7 @@ import {
     StatusDisplay,
     PlainDisplay,
     createDisplay,
+    color,
     type DisplayTicket,
     type Display,
 } from '../src/display.js'
@@ -25,6 +26,7 @@ const __dirname = dirname(__filename)
 class MockStream {
     private buffer:string = ''
     rows:number = 24
+    columns:number = 80
     isTTY:boolean = true
     private listeners:Map<string, Set<() => void>> = new Map()
 
@@ -306,7 +308,7 @@ test('status line shows Wave {current}/{total} -- {pct}% complete (AC2.1)', t =>
     const output = stream.getOutput()
     // Should match pattern like "Wave 1/2 -- 0% complete"
     t.ok(
-        /Wave \d+\/\d+ -- \d+%/.test(output),
+        /Wave \d+\/\d+ -+ \d+%/.test(output),
         'status line should have format Wave {current}/{total} -- {pct}%'
     )
 })
@@ -377,6 +379,74 @@ test('percentage only counts done tickets, not failed', t => {
     t.ok(
         output.includes('67%') || output.includes('66%'),
         'failed tickets should not count as completed'
+    )
+})
+
+test('percentage reflects overall run progress when given', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({
+        messageLines:4,
+        stream,
+    })
+
+    // wave 2 of 3; 3 of 11 tickets already done before this wave
+    const tickets = createTestTickets()
+    display.startWave(2, 3, tickets, { completed:3, total:11 })
+
+    let output = stream.getOutput()
+    t.ok(
+        output.includes('27%'),
+        'should show 3/11 = 27% at wave start, not 0%'
+    )
+
+    stream.clear()
+    display.setTicketStatus(1, 'done')
+    output = stream.getOutput()
+    t.ok(
+        output.includes('36%'),
+        'one more done should show 4/11 = 36%'
+    )
+
+    // next wave carries the running total forward
+    stream.clear()
+    display.startWave(3, 3, createTestTickets(), {
+        completed:6,
+        total:11,
+    })
+    output = stream.getOutput()
+    t.ok(
+        output.includes('55%'),
+        'new wave should show 6/11 = 55%, not reset to 0%'
+    )
+})
+
+test('rendered lines never exceed terminal width', t => {
+    const stream = createMockStream()
+    stream.columns = 40
+    const display = new StatusDisplay({
+        messageLines:4,
+        stream,
+    })
+
+    const tickets:Array<DisplayTicket> = [
+        {
+            num:1,
+            filename:'a-very-long-ticket-filename-that-wraps.md',
+            status:'pending',
+        },
+    ]
+    display.startWave(1, 1, tickets)
+    display.log('[bash] ' + 'x'.repeat(200))
+    display.log(color.yellow('y'.repeat(100)))
+
+    const esc = String.fromCharCode(27)
+    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
+    const plain = stream.getOutput().replace(ansiRe, '')
+    const tooLong = plain.split('\n').filter(l => l.length > 40)
+    t.equal(
+        tooLong.length, 0,
+        'no rendered line should be wider than columns: ' +
+        JSON.stringify(tooLong)
     )
 })
 
