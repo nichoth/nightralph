@@ -214,8 +214,16 @@ This is expected to run for a long time, like overnight.
 
 ### Mac OS
 
+#### Claude
+
 ```sh
 caffeinate -i npx nightralph claude -m claude-opus-4-6
+```
+
+##### Run with `pi` and an OpenRouter model
+
+```sh
+caffeinate -i npx nightralph pi -m openrouter/z-ai/glm-5.3-flash
 ```
 
 That command will prevent your machine from sleeping, but the display can still
