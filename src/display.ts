@@ -17,7 +17,6 @@ export type WaveState = {
 }
 
 export type DisplayConfig = {
-    readonly messageLines:number
     readonly stream:NodeJS.WriteStream
 }
 
@@ -97,6 +96,8 @@ const FILLED_DOT = '●'
 const EMPTY_DOT = '○'
 const SEPARATOR_WIDTH = 50
 const DEFAULT_COLUMNS = 80
+const MIN_LOG_ROWS = 1
+const MAX_MESSAGE_BUFFER = 200
 
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g
@@ -138,14 +139,13 @@ export class StatusDisplay implements Display {
 
     constructor (config?:Readonly<Partial<DisplayConfig>>) {
         this.config = {
-            messageLines:config?.messageLines ?? 10,
             stream:config?.stream ?? process.stdout,
         }
     }
 
     private getAvailableRows ():number {
         const termHeight = this.config.stream.rows ?? 24
-        const overhead = 2 + this.config.messageLines
+        const overhead = 2 + MIN_LOG_ROWS
         const available = termHeight - overhead
         return Math.max(1, available)
     }
@@ -232,7 +232,7 @@ export class StatusDisplay implements Display {
 
     log (message:string):void {
         this.messages.push(message)
-        if (this.messages.length > this.config.messageLines) {
+        if (this.messages.length > MAX_MESSAGE_BUFFER) {
             this.messages.shift()
         }
         this.render()
@@ -364,18 +364,21 @@ export class StatusDisplay implements Display {
 
         output += '-'.repeat(Math.min(SEPARATOR_WIDTH, width)) + '\n'
 
-        const msgLines = Math.max(
+        const termHeight = this.config.stream.rows ?? 24
+        const logRows = Math.max(
             0,
-            this.config.messageLines - this.messages.length,
+            termHeight - 2 - renderedTicketCount,
         )
-        for (const msg of this.messages) {
+        const visibleMessages = this.messages.slice(-logRows)
+        for (const msg of visibleMessages) {
             output += `${fitLine(msg, width)}\n`
         }
-        for (let i = 0; i < msgLines; i++) {
+        const emptyRows = logRows - visibleMessages.length
+        for (let i = 0; i < emptyRows; i++) {
             output += '\n'
         }
 
-        this.renderedLines = 2 + renderedTicketCount + this.config.messageLines
+        this.renderedLines = 2 + renderedTicketCount + logRows
         this.config.stream.write(output)
     }
 }

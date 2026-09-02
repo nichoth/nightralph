@@ -86,7 +86,6 @@ function createTestTickets ():Array<DisplayTicket> {
 test('startWave initializes display with tickets in pending status', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -115,7 +114,6 @@ test('startWave initializes display with tickets in pending status', t => {
 test('startWave resets ticket list on second call', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -150,7 +148,6 @@ test('startWave resets ticket list on second call', t => {
 test('startWave updates wave number in status line', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -178,7 +175,6 @@ test('startWave updates wave number in status line', t => {
 test('renders dot and filename for each ticket', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -194,7 +190,6 @@ test('renders dot and filename for each ticket', t => {
 test('pending ticket shows empty/dim dot (AC1.2)', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -218,7 +213,6 @@ test('pending ticket shows empty/dim dot (AC1.2)', t => {
 test('in-progress ticket shows yellow filled dot (AC1.3)', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -244,7 +238,6 @@ test('in-progress ticket shows yellow filled dot (AC1.3)', t => {
 test('done ticket shows green filled dot (AC1.4)', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -270,7 +263,6 @@ test('done ticket shows green filled dot (AC1.4)', t => {
 test('failed ticket shows red filled dot (AC1.5)', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -298,7 +290,6 @@ test('failed ticket shows red filled dot (AC1.5)', t => {
 test('status line shows Wave {current}/{total} -- {pct}% complete (AC2.1)', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -316,7 +307,6 @@ test('status line shows Wave {current}/{total} -- {pct}% complete (AC2.1)', t =>
 test('percentage reflects completed tickets divided by total (AC2.2)', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -361,7 +351,6 @@ test('percentage reflects completed tickets divided by total (AC2.2)', t => {
 test('percentage only counts done tickets, not failed', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -385,7 +374,6 @@ test('percentage only counts done tickets, not failed', t => {
 test('percentage reflects overall run progress when given', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -424,7 +412,6 @@ test('rendered lines never exceed terminal width', t => {
     const stream = createMockStream()
     stream.columns = 40
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -455,14 +442,14 @@ test('rendered lines never exceed terminal width', t => {
 test('message area has fixed height of messageLines (AC3.1)', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
     const tickets = createTestTickets()
     display.startWave(1, 1, tickets)
 
-    // With 0 messages, message area should be 4 empty lines (all padding)
+    // With 0 messages, message area fills remaining rows
+    // rows=24, header=1, tickets=3, separator=1 -> logRows=19
     let output = stream.getOutput()
     const separatorIdx = output.lastIndexOf('-'.repeat(50))
     if (separatorIdx >= 0) {
@@ -471,8 +458,8 @@ test('message area has fixed height of messageLines (AC3.1)', t => {
         const messageAreaText = output.substring(messageAreaStart, messageAreaEnd)
         const messageAreaNewlines = (messageAreaText.match(/\n/g) || []).length
         t.equal(
-            messageAreaNewlines, 4,
-            'message area with 0 messages should have 4 newlines (4 empty lines)'
+            messageAreaNewlines, 19,
+            'message area should fill remaining terminal rows'
         )
     }
 
@@ -485,8 +472,7 @@ test('message area has fixed height of messageLines (AC3.1)', t => {
         'should display logged message'
     )
 
-    // Log 2 more messages, message area should still be 4 lines
-    // (2 messages + 2 padding lines)
+    // Log 2 more messages, area height stays the same
     stream.clear()
     display.log('message 2')
     output = stream.getOutput()
@@ -496,23 +482,24 @@ test('message area has fixed height of messageLines (AC3.1)', t => {
         const msgAreaText = output.substring(msgStart)
         const msgAreaNewlines = (msgAreaText.match(/\n/g) || []).length
         t.equal(
-            msgAreaNewlines, 4,
-            'message area with 2 messages should still have 4 newlines total'
+            msgAreaNewlines, 19,
+            'message area height should remain stable'
         )
     }
 })
 
 test('new messages push old messages out (AC3.2)', t => {
     const stream = createMockStream()
+    // rows=8, 3 tickets -> logRows = 8-2-3 = 3 visible log lines
+    stream.rows = 8
     const display = new StatusDisplay({
-        messageLines:3, // Small buffer for testing
         stream,
     })
 
     const tickets = createTestTickets()
     display.startWave(1, 1, tickets)
 
-    // Log more messages than messageLines
+    // Log more messages than visible log rows (3)
     display.log('msg1')
     display.log('msg2')
     display.log('msg3')
@@ -520,7 +507,7 @@ test('new messages push old messages out (AC3.2)', t => {
     display.log('msg4')
     const output = stream.getOutput()
 
-    // msg1 should be gone, msg4 should be there
+    // msg1 should not be visible, msg4 should be there
     t.ok(
         !output.includes('msg1'),
         'oldest message should be removed when buffer full'
@@ -538,7 +525,6 @@ test('new messages push old messages out (AC3.2)', t => {
 test('log accepts any string message (AC3.3)', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -567,7 +553,6 @@ test('log accepts any string message (AC3.3)', t => {
 test('setTicketStatus updates ticket status and triggers render', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -594,7 +579,6 @@ test('setTicketStatus updates ticket status and triggers render', t => {
 test('cleanup restores cursor visibility', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -618,7 +602,6 @@ test('startWave renders remaining tickets with empty dots', t => {
     const stream = createMockStream()
     stream.rows = 40
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -650,7 +633,6 @@ test('remaining tickets show dim empty dot', t => {
     const stream = createMockStream()
     stream.rows = 40
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -676,7 +658,6 @@ test('setTicketStatus does not affect remaining tickets', t => {
     const stream = createMockStream()
     stream.rows = 40
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -707,7 +688,6 @@ test('remaining tickets are included in pagination', t => {
     const stream = createMockStream()
     stream.rows = 12
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -732,7 +712,6 @@ test('startWave without remaining works as before', t => {
     const stream = createMockStream()
     stream.rows = 40
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -758,7 +737,6 @@ test('viewport limits rendering when tickets exceed available rows', t => {
     // Overhead: 1 (status) + 1 (separator) + 4 (messages) = 6
     // Available for tickets: 12 - 6 = 6 rows
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -787,9 +765,8 @@ test('viewport limits rendering when tickets exceed available rows', t => {
 
 test('viewport shows "more above" indicator when scrolled down', t => {
     const stream = createMockStream()
-    stream.rows = 12
+    stream.rows = 9
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -817,7 +794,6 @@ test('no pagination when all tickets fit in available rows', t => {
     const stream = createMockStream()
     stream.rows = 24 // Large terminal
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -845,9 +821,8 @@ test('no pagination when all tickets fit in available rows', t => {
 
 test('auto-scroll on in-progress status change when below viewport', t => {
     const stream = createMockStream()
-    stream.rows = 12 // 6 rows available for tickets
+    stream.rows = 9 // 6 rows available for tickets
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -877,9 +852,8 @@ test('auto-scroll on in-progress status change when below viewport', t => {
 
 test('auto-scroll on in-progress status change when above viewport', t => {
     const stream = createMockStream()
-    stream.rows = 12
+    stream.rows = 9
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -909,7 +883,6 @@ test('resize event triggers re-render', t => {
     const stream = createMockStream()
     stream.rows = 12
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 
@@ -941,7 +914,6 @@ test('cleanup removes resize listener', t => {
     const stream = createMockStream()
     stream.rows = 12
     const display = new StatusDisplay({
-        messageLines:4,
         stream,
     })
 

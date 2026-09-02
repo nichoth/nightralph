@@ -136,6 +136,9 @@ Small orchestrator that runs a single-agent session per issue.
   (`fitLine`) so lines never wrap; a wrapped line would
   occupy more rows than the erase count and leave
   stale rows behind on the next render
+- **DisplayConfig**: `{ stream }` -- the log message
+  area dynamically fills remaining terminal rows after
+  the ticket grid and separator
 - **StatusDisplay**: ANSI-based terminal UI with
   paginated ticket grid, wave progress, and scrolling
   message log; handles terminal resize
