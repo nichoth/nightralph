@@ -45,7 +45,9 @@ export function runTestCmd (opts:{
                 try {
                     process.kill(-child.pid, 'SIGKILL')
                 } catch {
-                    // process group already exited
+                    // No process group (or it already
+                    // exited); fall back to the child.
+                    child.kill('SIGKILL')
                 }
             } else {
                 child.kill('SIGKILL')

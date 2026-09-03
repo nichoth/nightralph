@@ -810,6 +810,41 @@ export function dryRunIsolated (opts:{
     console.log(`Progress file: ${opts.progressPath}`)
 }
 
+// Runs the project's test command in a ticket's worktree.
+// Writes the output to a per-ticket log either way, and
+// returns true only when the suite is green.
+async function runTestGate (opts:{
+    testCmd:string
+    ticket:Ticket
+    worktreePath:string
+    timeout:number
+    logsDir:string
+    log:(msg:string) => void
+}):Promise<boolean> {
+    const result = await runTestCmd({
+        cmd:opts.testCmd,
+        cwd:opts.worktreePath,
+        timeout:opts.timeout,
+    })
+    const testLogPath = join(
+        opts.logsDir,
+        opts.ticket.filename.replace(/\.md$/, '.test.log')
+    )
+    writeFileSync(testLogPath, result.output)
+
+    if (result.exitCode !== 0) {
+        opts.log(
+            `  ${opts.ticket.filename}: tests failed ` +
+            `(exit ${result.exitCode}); ` +
+            `see ${testLogPath}`
+        )
+        return false
+    }
+
+    opts.log(`  ${opts.ticket.filename}: tests passed`)
+    return true
+}
+
 // Re-runs the agent in a ticket's existing worktree
 // after a merge conflict, then retries the merge once.
 // Called at most once per ticket per wave.
@@ -824,8 +859,17 @@ async function respawnAndRetryMerge (opts:{
     model:string|null
     timeout:number
     logsDir:string
+    testCmd?:string|null
     onLine?:(msg:string) => void
 }):Promise<boolean> {
+    const log = (msg:string):void => {
+        if (opts.onLine) {
+            opts.onLine(msg)
+        } else {
+            console.log(msg)
+        }
+    }
+
     await updateWorktreeFromBase(
         opts.worktreePath, opts.baseBranch
     )
@@ -868,6 +912,24 @@ async function respawnAndRetryMerge (opts:{
             console.log(msg2)
         }
         return false
+    }
+
+    if (opts.testCmd) {
+        const passed = await runTestGate({
+            testCmd:opts.testCmd,
+            ticket:opts.ticket,
+            worktreePath:opts.worktreePath,
+            timeout:opts.timeout,
+            logsDir:opts.logsDir,
+            log,
+        })
+        if (!passed) {
+            log(
+                `  ${opts.ticket.filename}: tests failed ` +
+                'after conflict respawn; not merging'
+            )
+            return false
+        }
     }
 
     const mergeResult = await mergeBranch(
@@ -1057,6 +1119,10 @@ export async function runWavesIsolated (opts:{
         `nightralph: start ${opts.featureName}`
     )
 
+    if (!opts.testCmd) {
+        d.log('  Test gate disabled: no test command')
+    }
+
     let totalCompleted = 0
     let waveNum = 0
 
@@ -1210,32 +1276,23 @@ export async function runWavesIsolated (opts:{
             }
 
             if (opts.testCmd) {
-                const testResult = await runTestCmd({
-                    cmd:opts.testCmd,
-                    cwd:worktree.worktreePath,
+                const passed = await runTestGate({
+                    testCmd:opts.testCmd,
+                    ticket,
+                    worktreePath:worktree.worktreePath,
                     timeout:opts.timeout,
+                    logsDir:opts.logsDir,
+                    log:(msg) => d.log(msg),
                 })
-                const testLogPath = join(
-                    opts.logsDir,
-                    ticket.filename.replace(
-                        /\.md$/, '.test.log'
-                    )
-                )
-                writeFileSync(testLogPath, testResult.output)
 
-                if (testResult.exitCode !== 0) {
+                if (!passed) {
                     // Acceptance criteria are not met when
                     // the suite is red, so checklist items
                     // the agent claimed are not checked off.
                     d.setTicketStatus(ticket.num, 'failed')
-                    d.log(
-                        `  ${ticket.filename}: tests failed ` +
-                        `(exit ${testResult.exitCode}); ` +
-                        `see ${testLogPath}`
-                    )
                     checkTicket(progress, ticket.num, {
                         branch:worktree.branchName,
-                        exitCode:testResult.exitCode,
+                        exitCode:1,
                         done:false,
                     })
                     writeProgress(progressPath, progress)
@@ -1250,8 +1307,6 @@ export async function runWavesIsolated (opts:{
                     )
                     continue
                 }
-
-                d.log(`  ${ticket.filename}: tests passed`)
             }
 
             checkItems(ticket, agentResult.completedItems)
@@ -1329,6 +1384,7 @@ export async function runWavesIsolated (opts:{
                                 model:opts.model,
                                 timeout:opts.timeout,
                                 logsDir:opts.logsDir,
+                                testCmd:opts.testCmd,
                                 onLine:(msg) => d.log(msg),
                             }) :
                             false

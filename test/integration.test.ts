@@ -742,6 +742,20 @@ test('runWavesIsolated - failing test command keeps the ' +
             process.chdir(originalCwd)
         }
     } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
         rmSync(projectDir, { recursive:true, force:true })
     }
 })
@@ -787,6 +801,20 @@ test('runWavesIsolated - passing test command runs in the ' +
             process.chdir(originalCwd)
         }
     } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
         rmSync(projectDir, { recursive:true, force:true })
     }
 })
@@ -1837,6 +1865,95 @@ test('runWavesIsolated - respawned agent fails, ' +
                 existsSync(worktreePath),
                 'worktree should still exist after ' +
                 'respawn failure'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        fakeGit.restore()
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - test gate runs again after a ' +
+    'merge-conflict respawn', async t => {
+    const projectDir = initTempGitRepo()
+    const repoName = projectDir.split('/').pop()
+    const failBranch = `${repoName}/01-first`
+    const fakeGit = installMergeFailOnceGit(failBranch)
+    // Lives outside the worktree so the gate cannot dirty
+    // the tree it is judging.
+    const counter = join(
+        mkdtempSync(join(tmpdir(), 'nightralph-gate-')),
+        'count'
+    )
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            // Green on the first run, red on the second:
+            // the merge conflict happens in between, so
+            // only the post-respawn gate can reject this.
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-respawn-gate',
+                conflictStrategy:'respawn',
+                testCmd:`n=$(cat ${counter} ` +
+                    '2>/dev/null || echo 0); ' +
+                    `echo $((n + 1)) > ${counter}; ` +
+                    'test "$n" -lt 1',
+            })
+
+            t.equal(result.allDone, false, 'run not done')
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'ticket not marked done when the suite ' +
+                'is red after the respawn'
+            )
+            t.equal(
+                readFileSync(counter, 'utf8').trim(),
+                '2',
+                'gate ran twice: once per agent run'
+            )
+
+            const log = execSync(
+                'git log --oneline', { cwd:projectDir }
+            ).toString()
+            t.ok(
+                !log.includes('mock agent change'),
+                'branch was not merged into base'
             )
         } finally {
             process.chdir(originalCwd)

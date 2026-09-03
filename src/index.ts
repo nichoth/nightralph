@@ -219,7 +219,11 @@ async function runExecute (argv:{
     const logsDir = join(dirname(dir), 'logs')
     const timeout = argv.timeout ?? 900
     const testCmd = argv.testCmd === undefined ?
-        detectTestCmd(process.cwd()) :
+        detectTestCmd(
+            isGitRepo() ?
+                getRepoRoot() :
+                process.cwd()
+        ) :
         (argv.testCmd || null)
     const featureName = extractFeatureName(spec)
     const conflictStrategy = argv.stopOnConflict ?

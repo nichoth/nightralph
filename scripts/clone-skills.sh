@@ -42,9 +42,11 @@ sed -i '' 's/^name: grill-with-docs$/name: grill/' \
 
 # This package's setup command is `nightralph init`, not
 # the upstream slash command.
-for f in "$SKILLS_DIR"/*/SKILL.md; do
-    sed -i '' 's#`/setup-matt-pocock-skills`#`npx nightralph init`#g' "$f"
-done
+MATCHES=$(grep -rl 'setup-matt-pocock-skills' "$SKILLS_DIR" || true)
+if [ -n "$MATCHES" ]; then
+    echo "$MATCHES" | xargs sed -i '' \
+        's#`/setup-matt-pocock-skills`#`npx nightralph init`#g'
+fi
 
 if grep -rq 'setup-matt-pocock-skills' "$SKILLS_DIR"; then
     echo "error: stale setup command reference remains" >&2
