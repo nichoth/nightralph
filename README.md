@@ -86,7 +86,11 @@ to add the required skills to your local `.agents/skills/` folder.
 Use the `to-tickets` skill to create issues in local markdown files from
 a prose text description.
 
-The `nightralph` CLI does the `tdd` part of the workflow.
+The `nightralph` CLI does the `tdd` part of the workflow: the agent
+prompt tells the agent to write a failing test per acceptance
+criterion at the seams named in the spec's Testing Decisions, and
+the orchestrator runs the project's test command in the worktree
+before a ticket can be marked `done`.
 
 >
 > [!NOTE]  
@@ -139,7 +143,8 @@ Flags:
 | `--spec <name>` | no | auto | Feature name (resolves `.scratch/<name>/`) |
 | `--dry-run` | no | -- | Show wave order and prompt without running |
 | `-X` | no | -- | Stop on merge conflict instead of re-spawning |
-| `--timeout` | no | `300` | Kill agent after N seconds |
+| `--timeout` | no | `900` | Kill agent after N seconds |
+| `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable |
 
 
 **Notes**:
@@ -154,11 +159,14 @@ Flags:
   tickets start in the next wave.
 * An agent run only counts as a success when the agent exits 0,
   its worktree branch has new commits relative to the base branch,
-  and the worktree is clean (no uncommitted changes). On success,
-  the ticket's status is updated to `done` in-place. If the agent
-  exits 0 but made no commits or left uncommitted changes, the
-  ticket is left `ready-for-agent` for a retry. Failed tickets
-  (non-zero exit) keep their status and block dependents.
+  and the test command (see `--test-cmd`) exits 0 in that worktree.
+  Uncommitted changes left by the agent are auto-committed before
+  the check. On success, the ticket's status is updated to `done`
+  in-place. If the agent exits 0 but made no commits, or the test
+  command fails, the ticket is left `ready-for-agent` for a retry
+  and the test output is written to `<dir>/../logs/<ticket>.test.log`.
+  Failed tickets (non-zero exit) keep their status and block
+  dependents.
 * Agent logs are written to `<dir>/../logs/<ticket>.log`.
 * Provider commands are launched non-interactively with default flags
   that grant the agent write access to the worktree, so tickets can
