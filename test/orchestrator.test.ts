@@ -776,6 +776,46 @@ test('renderPrompt instructs agent to report [x] items',
     }
 )
 
+test('renderPrompt includes the test command when given',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderPrompt(
+            'spec body here', ticket,
+            { testCmd:'npm run check' }
+        )
+        t.ok(
+            prompt.includes('npm run check'),
+            'names the test command'
+        )
+        t.ok(
+            prompt.includes('Testing Decisions'),
+            'points the agent at the spec seams'
+        )
+    })
+
+test('renderPrompt omits test rules when no test command',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const withNull = renderPrompt(
+            'spec body here', ticket, { testCmd:null }
+        )
+        const withNothing = renderPrompt(
+            'spec body here', ticket
+        )
+        t.equal(withNull, withNothing,
+            'null and omitted produce the same prompt')
+        t.ok(
+            !withNull.includes('Testing Decisions'),
+            'no test rules without a command'
+        )
+    })
+
 // -- spawnAgent --
 
 test('spawnAgent with cwd option runs in that directory',

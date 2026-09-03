@@ -162,8 +162,24 @@ export function markDone (ticket:Ticket):void {
 
 export function renderPrompt (
     specBody:string,
-    ticket:Ticket
+    ticket:Ticket,
+    opts:{ testCmd?:string|null } = {}
 ):string {
+    const testRules = opts.testCmd ?
+        [
+            '- Work test-first. For each checklist ' +
+                'item, write a failing test at the ' +
+                'seams named in the spec\'s Testing ' +
+                'Decisions section, then write only ' +
+                'enough code to make it pass.',
+            `- Run \`${opts.testCmd}\` before ` +
+                'committing. Do not commit with failing ' +
+                'tests. The orchestrator runs the same ' +
+                'command after you exit and rejects the ' +
+                'ticket if it fails.',
+        ] :
+        []
+
     return [
         '---- SPEC CONTEXT ----',
         specBody,
@@ -186,6 +202,7 @@ export function renderPrompt (
         '- Start writing code as soon as you understand ' +
             'the immediate context. You can read more ' +
             'files as needed while implementing.',
+        ...testRules,
         '- Commit your work when finished.',
         '- After completing each checklist item in the ' +
             'ticket, print a line: [x] <item text> ' +
