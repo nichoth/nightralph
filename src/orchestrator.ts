@@ -40,6 +40,7 @@ import {
     type RunProgress,
     type Display,
 } from './display.js'
+import { runTestCmd } from './testcmd.js'
 
 export type Ticket = {
     num:number
@@ -694,6 +695,7 @@ export function dryRunIsolated (opts:{
     repoName:string
     conflictStrategy:MergeConflictStrategy
     progressPath:string
+    testCmd?:string|null
 }):void {
     listTickets(opts.tickets)
 
@@ -731,7 +733,10 @@ export function dryRunIsolated (opts:{
             `(${firstReady[0].filename}):\n`
         )
         console.log(
-            renderPrompt(opts.specBody, firstReady[0])
+            renderPrompt(
+                opts.specBody, firstReady[0],
+                { testCmd:opts.testCmd }
+            )
         )
     }
 
@@ -739,6 +744,9 @@ export function dryRunIsolated (opts:{
         opts.conflictStrategy === 'respawn' ?
             'respawn (re-run agent on conflict)' :
             'stop (stop merging on conflict)'
+    console.log(
+        `\nTest command: ${opts.testCmd ?? '(none)'}`
+    )
     console.log(
         `\nMerge strategy: ${strategyDesc}`
     )
@@ -959,6 +967,7 @@ export async function runWavesIsolated (opts:{
     featureName:string
     conflictStrategy:MergeConflictStrategy
     display?:Display
+    testCmd?:string|null
 }):Promise<{ allDone:boolean }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
@@ -1050,7 +1059,10 @@ export async function runWavesIsolated (opts:{
 
         const results = await Promise.allSettled(
             activeTickets.map((t, i) => {
-                const prompt = renderPrompt(opts.specBody, t)
+                const prompt = renderPrompt(
+                    opts.specBody, t,
+                    { testCmd:opts.testCmd }
+                )
                 const logPath = join(
                     opts.logsDir,
                     t.filename.replace(/\.md$/, '.log')
@@ -1144,6 +1156,59 @@ export async function runWavesIsolated (opts:{
                     'ready-for-agent'
                 )
                 continue
+            }
+
+            if (opts.testCmd) {
+                const testResult = await runTestCmd({
+                    cmd:opts.testCmd,
+                    cwd:worktree.worktreePath,
+                    timeout:opts.timeout,
+                })
+                const testLogPath = join(
+                    opts.logsDir,
+                    ticket.filename.replace(
+                        /\.md$/, '.test.log'
+                    )
+                )
+                writeFileSync(testLogPath, testResult.output)
+
+                if (testResult.exitCode !== 0) {
+                    // Acceptance criteria are not met when
+                    // the suite is red, so checklist items
+                    // the agent claimed are not checked off.
+                    d.setTicketStatus(ticket.num, 'failed')
+                    d.log(
+                        `  ${ticket.filename}: tests failed ` +
+                        `(exit ${testResult.exitCode}); ` +
+                        `see ${testLogPath}`
+                    )
+                    checkTicket(progress, ticket.num, {
+                        branch:worktree.branchName,
+                        exitCode:testResult.exitCode,
+                        done:false,
+                    })
+                    writeProgress(progressPath, progress)
+                    await commitProgress(
+                        repoRoot,
+                        progressPath,
+                        `nightralph: ${ticket.filename} ` +
+                            'tests failed'
+                    )
+                    try {
+                        await removeWorktree(
+                            worktree.worktreePath
+                        )
+                    } catch (err) {
+                        d.log(
+                            '  Failed to remove worktree ' +
+                            `${worktree.worktreePath}: ` +
+                            formatErrorMessage(err)
+                        )
+                    }
+                    continue
+                }
+
+                d.log(`  ${ticket.filename}: tests passed`)
             }
 
             checkItems(ticket, agentResult.completedItems)
