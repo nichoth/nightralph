@@ -30,6 +30,7 @@ export function runTestCmd (opts:{
     timeout:number
 }):Promise<TestResult> {
     return new Promise(resolve => {
+        let settled = false
         const child = spawn('sh', ['-c', opts.cmd], {
             cwd:opts.cwd,
             stdio:['ignore', 'pipe', 'pipe'],
@@ -51,7 +52,20 @@ export function runTestCmd (opts:{
             }
         }, opts.timeout * 1000)
 
+        child.on('error', err => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            chunks.push(String(err))
+            resolve({
+                exitCode:1,
+                output:chunks.join(''),
+            })
+        })
+
         child.on('close', code => {
+            if (settled) return
+            settled = true
             clearTimeout(timer)
             resolve({
                 exitCode:code ?? 1,

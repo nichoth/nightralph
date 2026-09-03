@@ -124,3 +124,22 @@ test('runTestCmd - kills the command after the timeout',
             rmSync(dir, { recursive:true, force:true })
         }
     })
+
+test('runTestCmd - cwd does not exist', async t => {
+    const dir = tmp()
+    const missing = join(dir, 'missing')
+    try {
+        const result = await runTestCmd({
+            cmd:'echo ok',
+            cwd:missing,
+            timeout:10,
+        })
+        t.ok(result.exitCode !== 0, 'non-zero exit')
+        t.ok(
+            result.output.includes('ENOENT'),
+            'output contains the error text'
+        )
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
