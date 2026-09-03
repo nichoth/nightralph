@@ -17,3 +17,19 @@ Create a new file under `.scratch/<feature-slug>/` (creating the directory if ne
 ## When a skill says "fetch the relevant ticket"
 
 Read the file at the referenced path. The user will normally pass the path or the issue number directly.
+
+## Tickets are executed within hours, not weeks
+
+Tickets in this tracker are run by an autonomous agent shortly
+after they are written, with a fixed time budget and no
+interview. This changes one upstream rule:
+
+- Do include the file paths, module names, and exported symbols
+  the ticket touches. Put them on a `**Touches:**` line directly
+  under `**Blocked by:**`. The "avoid specific file paths" guidance
+  in `to-tickets` exists for long-lived human trackers and does not
+  apply here.
+- Keep the `- [ ]` acceptance criteria phrased as observable
+  behavior. The agent writes one failing test per criterion, so
+  each criterion should be testable at a seam named in the spec's
+  Testing Decisions.
