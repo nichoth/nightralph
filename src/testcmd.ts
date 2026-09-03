@@ -33,13 +33,22 @@ export function runTestCmd (opts:{
         const child = spawn('sh', ['-c', opts.cmd], {
             cwd:opts.cwd,
             stdio:['ignore', 'pipe', 'pipe'],
+            detached:true,
         })
         const chunks:string[] = []
         child.stdout.on('data', d => chunks.push(String(d)))
         child.stderr.on('data', d => chunks.push(String(d)))
 
         const timer = setTimeout(() => {
-            child.kill('SIGKILL')
+            if (child.pid) {
+                try {
+                    process.kill(-child.pid, 'SIGKILL')
+                } catch {
+                    // process group already exited
+                }
+            } else {
+                child.kill('SIGKILL')
+            }
         }, opts.timeout * 1000)
 
         child.on('close', code => {

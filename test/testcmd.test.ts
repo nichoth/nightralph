@@ -111,7 +111,7 @@ test('runTestCmd - kills the command after the timeout',
         try {
             const started = Date.now()
             const result = await runTestCmd({
-                cmd:'sleep 30',
+                cmd:'sleep 30; echo done',
                 cwd:dir,
                 timeout:1,
             })
