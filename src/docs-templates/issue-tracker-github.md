@@ -148,8 +148,9 @@ after they are written, with a fixed time budget and no
 interview. This changes one upstream rule:
 
 - Do include the file paths, module names, and exported symbols
-  the ticket touches. Put the list under a `## Touches` heading in the issue body. The "avoid specific file paths" guidance
-  in `to-tickets` exists for long-lived human trackers and does not
+  the ticket touches. Put the list under a `## Touches` heading
+  in the issue body. The "avoid specific file paths" guidance in
+  `to-tickets` exists for long-lived human trackers and does not
   apply here.
 - Keep the `- [ ]` acceptance criteria phrased as observable
   behavior. The agent writes one failing test per criterion, so
