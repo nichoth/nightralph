@@ -17,6 +17,7 @@ import {
     COMPLETED_RE,
     TOOL_USE_RE,
     renderPrompt,
+    stripSpecSection,
     runWaves,
     spawnAgent,
     dryRun,
@@ -1762,4 +1763,53 @@ test('piFormatter - non-JSON lines returned as-is',
             ['plain text'],
             'raw lines pass through'
         )
+    })
+
+// -- stripSpecSection --
+
+const SPEC = [
+    '# Feature',
+    '',
+    '## Problem Statement',
+    'p',
+    '',
+    '## User Stories',
+    '1. As a user',
+    '',
+    '### Nested under stories',
+    'still stories',
+    '',
+    '## Implementation Decisions',
+    'keep me',
+    '',
+].join('\n')
+
+test('stripSpecSection removes the section and nested ' +
+    'subsections', t => {
+    const out = stripSpecSection(SPEC, 'User Stories')
+    t.ok(!out.includes('As a user'), 'body removed')
+    t.ok(!out.includes('still stories'), 'nested removed')
+    t.ok(out.includes('## Problem Statement'), 'before kept')
+    t.ok(out.includes('keep me'), 'after kept')
+})
+
+test('stripSpecSection is a no-op when heading absent', t => {
+    t.equal(
+        stripSpecSection(SPEC, 'Out of Scope'),
+        SPEC,
+        'unchanged'
+    )
+})
+
+test('stripSpecSection matches heading text at any level',
+    t => {
+        const out = stripSpecSection(
+            SPEC, 'Nested under stories'
+        )
+        t.ok(!out.includes('still stories'), 'h3 removed')
+        t.ok(
+            out.includes('## Implementation Decisions'),
+            'stops at the next h2'
+        )
+        t.ok(out.includes('As a user'), 'parent kept')
     })

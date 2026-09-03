@@ -12,6 +12,7 @@ import {
     dryRunIsolated,
     runWaves,
     runWavesIsolated,
+    stripSpecSection,
 } from './orchestrator.js'
 import { detectTestCmd } from './testcmd.js'
 import { createDisplay } from './display.js'
@@ -185,7 +186,10 @@ async function runExecute (argv:{
         process.exit(2)
     }
 
-    const specBody = readFileSync(spec, 'utf8')
+    const specBody = stripSpecSection(
+        readFileSync(spec, 'utf8'),
+        'User Stories'
+    )
     const tickets = scanTickets(dir)
 
     if (tickets.length === 0) {

@@ -178,6 +178,36 @@ export function markDone (ticket:Ticket):void {
     ticket.body = updated
 }
 
+// Drops one markdown section from a spec. Used to keep the
+// per-ticket prompt short: the User Stories list is useful
+// to humans and to to-tickets but not to an implementing agent.
+export function stripSpecSection (
+    specBody:string,
+    heading:string
+):string {
+    const out:string[] = []
+    let skipping = false
+    let skipLevel = 0
+
+    for (const line of specBody.split('\n')) {
+        const m = /^(#{1,6})\s+(.*?)\s*$/.exec(line)
+        if (m) {
+            const level = m[1].length
+            if (skipping && level <= skipLevel) {
+                skipping = false
+            }
+            if (!skipping && m[2] === heading) {
+                skipping = true
+                skipLevel = level
+                continue
+            }
+        }
+        if (!skipping) out.push(line)
+    }
+
+    return out.join('\n')
+}
+
 export function renderPrompt (
     specBody:string,
     ticket:Ticket,
