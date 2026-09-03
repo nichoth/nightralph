@@ -58,6 +58,23 @@ export function formatErrorMessage (error:unknown):string {
         String(error)
 }
 
+// Removes a ticket's worktree, logging and swallowing any
+// failure instead of letting it interrupt the wave.
+async function removeWorktreeQuietly (
+    worktreePath:string,
+    d:Display
+):Promise<void> {
+    try {
+        await removeWorktree(worktreePath)
+    } catch (err) {
+        d.log(
+            '  Failed to remove worktree ' +
+            `${worktreePath}: ` +
+            formatErrorMessage(err)
+        )
+    }
+}
+
 export const TICKET_RE = /^(\d+)-(.+)\.md$/
 
 export function parseTicketFilename (
@@ -1120,15 +1137,9 @@ export async function runWavesIsolated (opts:{
                     `nightralph: ${ticket.filename} failed`
                 )
 
-                try {
-                    await removeWorktree(worktree.worktreePath)
-                } catch (err) {
-                    d.log(
-                        '  Failed to remove worktree ' +
-                        `${worktree.worktreePath}: ` +
-                        formatErrorMessage(err)
-                    )
-                }
+                await removeWorktreeQuietly(
+                    worktree.worktreePath, d
+                )
                 continue
             }
 
@@ -1194,17 +1205,9 @@ export async function runWavesIsolated (opts:{
                         `nightralph: ${ticket.filename} ` +
                             'tests failed'
                     )
-                    try {
-                        await removeWorktree(
-                            worktree.worktreePath
-                        )
-                    } catch (err) {
-                        d.log(
-                            '  Failed to remove worktree ' +
-                            `${worktree.worktreePath}: ` +
-                            formatErrorMessage(err)
-                        )
-                    }
+                    await removeWorktreeQuietly(
+                        worktree.worktreePath, d
+                    )
                     continue
                 }
 
@@ -1264,15 +1267,9 @@ export async function runWavesIsolated (opts:{
                         ticket.num
                     )
                     if (worktreePath) {
-                        try {
-                            await removeWorktree(worktreePath)
-                        } catch (err) {
-                            d.log(
-                                '  Failed to remove worktree ' +
-                                `${worktreePath}: ` +
-                                formatErrorMessage(err)
-                            )
-                        }
+                        await removeWorktreeQuietly(
+                            worktreePath, d
+                        )
                     }
                 } else {
                     const worktreePath = worktreePathsByNum.get(
