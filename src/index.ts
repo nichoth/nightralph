@@ -12,7 +12,9 @@ import {
     dryRunIsolated,
     runWaves,
     runWavesIsolated,
+    stripSpecSection,
 } from './orchestrator.js'
+import { detectTestCmd } from './testcmd.js'
 import { createDisplay } from './display.js'
 import {
     findFeatureDirs,
@@ -107,6 +109,15 @@ yargs(hideBin(process.argv))
                 describe:'Kill agent after N seconds',
                 default:900,
             })
+            .option('test-cmd', {
+                type:'string',
+                describe:'Command run in each worktree ' +
+                    'after the agent exits; non-zero ' +
+                    'exit rejects the ticket. Defaults ' +
+                    'to "npm test" when package.json ' +
+                    'has a test script. Pass "" to ' +
+                    'disable.',
+            })
             .option('X', {
                 type:'boolean',
                 describe:'Stop on merge conflict instead of ' +
@@ -121,6 +132,7 @@ yargs(hideBin(process.argv))
                 dryRun:argv.dryRun as boolean|undefined,
                 timeout:argv.timeout as
                     number|undefined,
+                testCmd:argv.testCmd as string|undefined,
                 stopOnConflict:argv.X as
                     boolean|undefined,
             })
@@ -158,6 +170,7 @@ async function runExecute (argv:{
     spec?:string
     dryRun?:boolean
     timeout?:number
+    testCmd?:string
     stopOnConflict?:boolean
 }):Promise<void> {
     const { dir, spec } = await resolveIssuesDir(
@@ -173,7 +186,10 @@ async function runExecute (argv:{
         process.exit(2)
     }
 
-    const specBody = readFileSync(spec, 'utf8')
+    const specBody = stripSpecSection(
+        readFileSync(spec, 'utf8'),
+        'User Stories'
+    )
     const tickets = scanTickets(dir)
 
     if (tickets.length === 0) {
@@ -201,7 +217,14 @@ async function runExecute (argv:{
     }
 
     const logsDir = join(dirname(dir), 'logs')
-    const timeout = argv.timeout ?? 300
+    const timeout = argv.timeout ?? 900
+    const testCmd = argv.testCmd === undefined ?
+        detectTestCmd(
+            isGitRepo() ?
+                getRepoRoot() :
+                process.cwd()
+        ) :
+        (argv.testCmd || null)
     const featureName = extractFeatureName(spec)
     const conflictStrategy = argv.stopOnConflict ?
         'stop' :
@@ -219,6 +242,7 @@ async function runExecute (argv:{
                 repoName,
                 conflictStrategy,
                 progressPath,
+                testCmd,
             })
         } else {
             dryRun(tickets, specBody)
@@ -240,6 +264,7 @@ async function runExecute (argv:{
             featureName,
             conflictStrategy,
             display,
+            testCmd,
         })
     } else {
         result = await runWaves(

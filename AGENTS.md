@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-08-31
+Last verified: 2026-09-02
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -22,6 +22,7 @@ Small orchestrator that runs a single-agent session per issue.
 - `src/progress.ts` -- run progress tracking
 - `src/display.ts` -- terminal status UI (Display interface, StatusDisplay, PlainDisplay)
 - `src/merge.ts` -- branch merging after wave completion
+- `src/testcmd.ts` -- test command detection and execution
 - `src/skills/` -- bundled skill definitions
 - `src/docs-templates/` -- doc templates copied to target projects
 
@@ -52,6 +53,10 @@ Small orchestrator that runs a single-agent session per issue.
 - `-X` flag -- stop on merge conflict instead of
   re-spawning the agent (sets conflict strategy to
   `'stop'`)
+- `--test-cmd <cmd>` -- command run in each worktree
+  after the agent exits; non-zero exit rejects the
+  ticket. Omitted = auto-detect `npm test` from
+  `package.json` at the repo root; `""` = disabled
 - `--dry-run` -- shows wave order without running;
   auto-detects git repo and shows worktree/branch
   layout when inside one
@@ -65,7 +70,8 @@ Small orchestrator that runs a single-agent session per issue.
   `COMPLETED_RE`, `scanTickets(dir)`,
   `findReadyTickets(tickets)`, `checkItems(ticket, items)`,
   `markDone(ticket)`,
-  `renderPrompt(specBody, ticket)`,
+  `renderPrompt(specBody, ticket, opts?)`,
+  `stripSpecSection(specBody, heading)`,
   `renderMergePrompt(specBody, ticket)`,
   `spawnAgent(opts)`, `createPiStreamFormatter()`,
   `dryRun(tickets, specBody)`,
@@ -92,6 +98,13 @@ Small orchestrator that runs a single-agent session per issue.
   Display integration); for `pi`, writes prompt to a
   temp file and passes `@path` as a positional arg
   instead of piping to stdin
+- **renderPrompt(specBody, ticket, opts?)**: `opts.testCmd`
+  adds test-first rules to the prompt and names the
+  command the orchestrator will run after the agent exits
+- **stripSpecSection(specBody, heading)**: drops one
+  markdown section from a spec, ignoring headings
+  inside code fences; the CLI uses it to omit
+  `User Stories` from the per-ticket prompt
 - **runWaves(...)**: accepts optional `display`
   parameter (`Display` interface); defaults to
   `createDisplay()` when omitted
@@ -101,14 +114,36 @@ Small orchestrator that runs a single-agent session per issue.
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
-  updates; accepts optional `display` in opts
+  updates; accepts optional `display` and `testCmd`
+  in opts
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; merge failures
   are recorded in progress.md with `done:false`;
   respawned agents receive `renderMergePrompt`
-  instead of `renderPrompt`
+  instead of `renderPrompt`; when `testCmd` is set, a
+  red suite in the worktree records the ticket
+  `done:false`, writes
+  `<logsDir>/<ticket>.test.log`, and never queues the
+  branch for merge -- this holds both after the first
+  agent run and after a merge-conflict respawn
 - **dryRunIsolated(opts)**: prints simulated wave order
-  with worktree paths and branch names
+  with worktree paths and branch names; accepts
+  `testCmd` in opts and prints it
+
+### testcmd module (`src/testcmd.ts`)
+- **Exposes**: `TestResult`,
+  `detectTestCmd(projectDir)`, `runTestCmd(opts)`
+- **TestResult**: `{ exitCode, output }` -- `output`
+  is stdout and stderr interleaved
+- **detectTestCmd(projectDir)**: returns `'npm test'`
+  when `<projectDir>/package.json` declares a `test`
+  script, else `null`
+- **runTestCmd(opts)**: `{ cmd, cwd, timeout }` --
+  runs `cmd` via `sh -c` in its own process group
+- **Guarantees**: neither function throws; a spawn
+  error resolves with `exitCode:1` and the error text
+  in `output`; the timeout kills the whole process
+  group so child processes cannot outlive the run
 
 ### display module (`src/display.ts`)
 - **Exposes**: `Display` (type), `StatusDisplay` (class),

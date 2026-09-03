@@ -17,14 +17,14 @@
     "lint": "eslint \"./**/*.{ts,js}\"",
     "start": "npm run build && node dist/index.js",
     "build": "mkdir -p ./dist && rm -rf ./dist/* && npm run build-esm && npm run copy",
-    "build-esm": "esbuild src/index.ts --bundle --format=esm --platform=node --packages=external --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outfile=./dist/index.js --sourcemap && esbuild src/orchestrator.ts src/setup.ts src/resolve.ts src/worktree.ts src/progress.ts src/merge.ts src/display.ts --format=esm --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json",
+    "build-esm": "esbuild src/index.ts --bundle --format=esm --platform=node --packages=external --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outfile=./dist/index.js --sourcemap && esbuild src/orchestrator.ts src/setup.ts src/resolve.ts src/worktree.ts src/progress.ts src/merge.ts src/display.ts src/testcmd.ts --format=esm --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json",
     "copy": "mkdir -p ./dist/skills ./dist/docs-templates && cp -r ./src/skills/* ./dist/skills && cp -r ./src/docs-templates/* ./dist/docs-templates",
     "clone-skills": "bash scripts/clone-skills.sh",
     "toc": "markdown-toc --maxdepth 3 -i README.md",
     "preversion": "npm run lint",
     "version": "npm run toc",
     "postversion": "git push --follow-tags && npm publish",
-    "test": "esbuild test/setup.test.ts test/orchestrator.test.ts test/worktree.test.ts test/progress.test.ts test/merge.test.ts test/display.test.ts test/integration.test.ts --format=esm --bundle --packages=external --outdir=dist/test --sourcemap && node dist/test/setup.test.js && node dist/test/orchestrator.test.js && node dist/test/worktree.test.js && node dist/test/progress.test.js && node dist/test/merge.test.js && node dist/test/display.test.js && node dist/test/integration.test.js"
+    "test": "esbuild test/setup.test.ts test/orchestrator.test.ts test/worktree.test.ts test/progress.test.ts test/merge.test.ts test/display.test.ts test/testcmd.test.ts test/integration.test.ts --format=esm --bundle --packages=external --outdir=dist/test --sourcemap && node dist/test/setup.test.js && node dist/test/orchestrator.test.js && node dist/test/worktree.test.js && node dist/test/progress.test.js && node dist/test/merge.test.js && node dist/test/display.test.js && node dist/test/testcmd.test.js && node dist/test/integration.test.js"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.7.0",

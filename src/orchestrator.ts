@@ -40,6 +40,7 @@ import {
     type RunProgress,
     type Display,
 } from './display.js'
+import { runTestCmd } from './testcmd.js'
 
 export type Ticket = {
     num:number
@@ -55,6 +56,23 @@ export function formatErrorMessage (error:unknown):string {
     return error instanceof Error ?
         error.message :
         String(error)
+}
+
+// Removes a ticket's worktree, logging and swallowing any
+// failure instead of letting it interrupt the wave.
+async function removeWorktreeQuietly (
+    worktreePath:string,
+    d:Display
+):Promise<void> {
+    try {
+        await removeWorktree(worktreePath)
+    } catch (err) {
+        d.log(
+            '  Failed to remove worktree ' +
+            `${worktreePath}: ` +
+            formatErrorMessage(err)
+        )
+    }
 }
 
 export const TICKET_RE = /^(\d+)-(.+)\.md$/
@@ -160,10 +178,66 @@ export function markDone (ticket:Ticket):void {
     ticket.body = updated
 }
 
+// Drops one markdown section from a spec. Used to keep the
+// per-ticket prompt short: the User Stories list is useful
+// to humans and to to-tickets but not to an implementing agent.
+export function stripSpecSection (
+    specBody:string,
+    heading:string
+):string {
+    const out:string[] = []
+    let skipping = false
+    let skipLevel = 0
+    let inFence = false
+
+    for (const line of specBody.split('\n')) {
+        // Toggle fence state on lines starting with ``` (after
+        // optional whitespace)
+        if (/^\s*```/.test(line)) {
+            inFence = !inFence
+        }
+
+        // Only check for headings outside of code fences
+        if (!inFence) {
+            const m = /^(#{1,6})\s+(.*?)\s*$/.exec(line)
+            if (m) {
+                const level = m[1].length
+                if (skipping && level <= skipLevel) {
+                    skipping = false
+                }
+                if (!skipping && m[2] === heading) {
+                    skipping = true
+                    skipLevel = level
+                    continue
+                }
+            }
+        }
+        if (!skipping) out.push(line)
+    }
+
+    return out.join('\n')
+}
+
 export function renderPrompt (
     specBody:string,
-    ticket:Ticket
+    ticket:Ticket,
+    opts:{ testCmd?:string|null } = {}
 ):string {
+    const testRules = opts.testCmd ?
+        [
+            '- Work test-first. For each checklist ' +
+                'item, write a failing test at the ' +
+                'seams named in the spec\'s Testing ' +
+                'Decisions section, then write only ' +
+                'enough code to make it pass.',
+            `- Run \`${opts.testCmd}\` before ` +
+                'committing. Do not commit with failing ' +
+                'tests. The orchestrator runs the same ' +
+                'command after you exit and rejects the ' +
+                'ticket if it fails.',
+        ] :
+        []
+
     return [
         '---- SPEC CONTEXT ----',
         specBody,
@@ -186,6 +260,7 @@ export function renderPrompt (
         '- Start writing code as soon as you understand ' +
             'the immediate context. You can read more ' +
             'files as needed while implementing.',
+        ...testRules,
         '- Commit your work when finished.',
         '- After completing each checklist item in the ' +
             'ticket, print a line: [x] <item text> ' +
@@ -677,6 +752,7 @@ export function dryRunIsolated (opts:{
     repoName:string
     conflictStrategy:MergeConflictStrategy
     progressPath:string
+    testCmd?:string|null
 }):void {
     listTickets(opts.tickets)
 
@@ -714,7 +790,10 @@ export function dryRunIsolated (opts:{
             `(${firstReady[0].filename}):\n`
         )
         console.log(
-            renderPrompt(opts.specBody, firstReady[0])
+            renderPrompt(
+                opts.specBody, firstReady[0],
+                { testCmd:opts.testCmd }
+            )
         )
     }
 
@@ -723,9 +802,47 @@ export function dryRunIsolated (opts:{
             'respawn (re-run agent on conflict)' :
             'stop (stop merging on conflict)'
     console.log(
+        `\nTest command: ${opts.testCmd ?? '(none)'}`
+    )
+    console.log(
         `\nMerge strategy: ${strategyDesc}`
     )
     console.log(`Progress file: ${opts.progressPath}`)
+}
+
+// Runs the project's test command in a ticket's worktree.
+// Writes the output to a per-ticket log either way, and
+// returns true only when the suite is green.
+async function runTestGate (opts:{
+    testCmd:string
+    ticket:Ticket
+    worktreePath:string
+    timeout:number
+    logsDir:string
+    log:(msg:string) => void
+}):Promise<boolean> {
+    const result = await runTestCmd({
+        cmd:opts.testCmd,
+        cwd:opts.worktreePath,
+        timeout:opts.timeout,
+    })
+    const testLogPath = join(
+        opts.logsDir,
+        opts.ticket.filename.replace(/\.md$/, '.test.log')
+    )
+    writeFileSync(testLogPath, result.output)
+
+    if (result.exitCode !== 0) {
+        opts.log(
+            `  ${opts.ticket.filename}: tests failed ` +
+            `(exit ${result.exitCode}); ` +
+            `see ${testLogPath}`
+        )
+        return false
+    }
+
+    opts.log(`  ${opts.ticket.filename}: tests passed`)
+    return true
 }
 
 // Re-runs the agent in a ticket's existing worktree
@@ -742,8 +859,17 @@ async function respawnAndRetryMerge (opts:{
     model:string|null
     timeout:number
     logsDir:string
+    testCmd?:string|null
     onLine?:(msg:string) => void
 }):Promise<boolean> {
+    const log = (msg:string):void => {
+        if (opts.onLine) {
+            opts.onLine(msg)
+        } else {
+            console.log(msg)
+        }
+    }
+
     await updateWorktreeFromBase(
         opts.worktreePath, opts.baseBranch
     )
@@ -786,6 +912,24 @@ async function respawnAndRetryMerge (opts:{
             console.log(msg2)
         }
         return false
+    }
+
+    if (opts.testCmd) {
+        const passed = await runTestGate({
+            testCmd:opts.testCmd,
+            ticket:opts.ticket,
+            worktreePath:opts.worktreePath,
+            timeout:opts.timeout,
+            logsDir:opts.logsDir,
+            log,
+        })
+        if (!passed) {
+            log(
+                `  ${opts.ticket.filename}: tests failed ` +
+                'after conflict respawn; not merging'
+            )
+            return false
+        }
     }
 
     const mergeResult = await mergeBranch(
@@ -942,6 +1086,7 @@ export async function runWavesIsolated (opts:{
     featureName:string
     conflictStrategy:MergeConflictStrategy
     display?:Display
+    testCmd?:string|null
 }):Promise<{ allDone:boolean }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
@@ -973,6 +1118,10 @@ export async function runWavesIsolated (opts:{
         progressPath,
         `nightralph: start ${opts.featureName}`
     )
+
+    if (!opts.testCmd) {
+        d.log('  Test gate disabled: no test command')
+    }
 
     let totalCompleted = 0
     let waveNum = 0
@@ -1033,7 +1182,10 @@ export async function runWavesIsolated (opts:{
 
         const results = await Promise.allSettled(
             activeTickets.map((t, i) => {
-                const prompt = renderPrompt(opts.specBody, t)
+                const prompt = renderPrompt(
+                    opts.specBody, t,
+                    { testCmd:opts.testCmd }
+                )
                 const logPath = join(
                     opts.logsDir,
                     t.filename.replace(/\.md$/, '.log')
@@ -1091,15 +1243,9 @@ export async function runWavesIsolated (opts:{
                     `nightralph: ${ticket.filename} failed`
                 )
 
-                try {
-                    await removeWorktree(worktree.worktreePath)
-                } catch (err) {
-                    d.log(
-                        '  Failed to remove worktree ' +
-                        `${worktree.worktreePath}: ` +
-                        formatErrorMessage(err)
-                    )
-                }
+                await removeWorktreeQuietly(
+                    worktree.worktreePath, d
+                )
                 continue
             }
 
@@ -1127,6 +1273,40 @@ export async function runWavesIsolated (opts:{
                     'ready-for-agent'
                 )
                 continue
+            }
+
+            if (opts.testCmd) {
+                const passed = await runTestGate({
+                    testCmd:opts.testCmd,
+                    ticket,
+                    worktreePath:worktree.worktreePath,
+                    timeout:opts.timeout,
+                    logsDir:opts.logsDir,
+                    log:(msg) => d.log(msg),
+                })
+
+                if (!passed) {
+                    // Acceptance criteria are not met when
+                    // the suite is red, so checklist items
+                    // the agent claimed are not checked off.
+                    d.setTicketStatus(ticket.num, 'failed')
+                    checkTicket(progress, ticket.num, {
+                        branch:worktree.branchName,
+                        exitCode:1,
+                        done:false,
+                    })
+                    writeProgress(progressPath, progress)
+                    await commitProgress(
+                        repoRoot,
+                        progressPath,
+                        `nightralph: ${ticket.filename} ` +
+                            'tests failed'
+                    )
+                    await removeWorktreeQuietly(
+                        worktree.worktreePath, d
+                    )
+                    continue
+                }
             }
 
             checkItems(ticket, agentResult.completedItems)
@@ -1182,15 +1362,9 @@ export async function runWavesIsolated (opts:{
                         ticket.num
                     )
                     if (worktreePath) {
-                        try {
-                            await removeWorktree(worktreePath)
-                        } catch (err) {
-                            d.log(
-                                '  Failed to remove worktree ' +
-                                `${worktreePath}: ` +
-                                formatErrorMessage(err)
-                            )
-                        }
+                        await removeWorktreeQuietly(
+                            worktreePath, d
+                        )
                     }
                 } else {
                     const worktreePath = worktreePathsByNum.get(
@@ -1210,6 +1384,7 @@ export async function runWavesIsolated (opts:{
                                 model:opts.model,
                                 timeout:opts.timeout,
                                 logsDir:opts.logsDir,
+                                testCmd:opts.testCmd,
                                 onLine:(msg) => d.log(msg),
                             }) :
                             false

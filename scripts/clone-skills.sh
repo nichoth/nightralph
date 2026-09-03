@@ -40,6 +40,19 @@ copy_skill "skills/engineering/tdd" "tdd"
 sed -i '' 's/^name: grill-with-docs$/name: grill/' \
     "$SKILLS_DIR/grill/SKILL.md"
 
+# This package's setup command is `nightralph init`, not
+# the upstream slash command.
+MATCHES=$(grep -rl 'setup-matt-pocock-skills' "$SKILLS_DIR" || true)
+if [ -n "$MATCHES" ]; then
+    echo "$MATCHES" | xargs sed -i '' \
+        's#`/setup-matt-pocock-skills`#`npx nightralph init`#g'
+fi
+
+if grep -rq 'setup-matt-pocock-skills' "$SKILLS_DIR"; then
+    echo "error: stale setup command reference remains" >&2
+    exit 1
+fi
+
 cat > "$SKILLS_DIR/upstream.json" <<EOF
 {
   "repo": "mattpocock/skills",

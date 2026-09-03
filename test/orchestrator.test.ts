@@ -17,6 +17,7 @@ import {
     COMPLETED_RE,
     TOOL_USE_RE,
     renderPrompt,
+    stripSpecSection,
     runWaves,
     spawnAgent,
     dryRun,
@@ -775,6 +776,46 @@ test('renderPrompt instructs agent to report [x] items',
         )
     }
 )
+
+test('renderPrompt includes the test command when given',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderPrompt(
+            'spec body here', ticket,
+            { testCmd:'npm run check' }
+        )
+        t.ok(
+            prompt.includes('npm run check'),
+            'names the test command'
+        )
+        t.ok(
+            prompt.includes('Testing Decisions'),
+            'points the agent at the spec seams'
+        )
+    })
+
+test('renderPrompt omits test rules when no test command',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const withNull = renderPrompt(
+            'spec body here', ticket, { testCmd:null }
+        )
+        const withNothing = renderPrompt(
+            'spec body here', ticket
+        )
+        t.equal(withNull, withNothing,
+            'null and omitted produce the same prompt')
+        t.ok(
+            !withNull.includes('Testing Decisions'),
+            'no test rules without a command'
+        )
+    })
 
 // -- spawnAgent --
 
@@ -1721,5 +1762,98 @@ test('piFormatter - non-JSON lines returned as-is',
             fmt.process('plain text'),
             ['plain text'],
             'raw lines pass through'
+        )
+    })
+
+// -- stripSpecSection --
+
+const SPEC = [
+    '# Feature',
+    '',
+    '## Problem Statement',
+    'p',
+    '',
+    '## User Stories',
+    '1. As a user',
+    '',
+    '### Nested under stories',
+    'still stories',
+    '',
+    '## Implementation Decisions',
+    'keep me',
+    '',
+].join('\n')
+
+test('stripSpecSection removes the section and nested ' +
+    'subsections', t => {
+    const out = stripSpecSection(SPEC, 'User Stories')
+    t.ok(!out.includes('As a user'), 'body removed')
+    t.ok(!out.includes('still stories'), 'nested removed')
+    t.ok(out.includes('## Problem Statement'), 'before kept')
+    t.ok(out.includes('keep me'), 'after kept')
+})
+
+test('stripSpecSection is a no-op when heading absent', t => {
+    t.equal(
+        stripSpecSection(SPEC, 'Out of Scope'),
+        SPEC,
+        'unchanged'
+    )
+})
+
+test('stripSpecSection matches heading text at any level',
+    t => {
+        const out = stripSpecSection(
+            SPEC, 'Nested under stories'
+        )
+        t.ok(!out.includes('still stories'), 'h3 removed')
+        t.ok(
+            out.includes('## Implementation Decisions'),
+            'stops at the next h2'
+        )
+        t.ok(out.includes('As a user'), 'parent kept')
+    })
+
+test('stripSpecSection ignores # inside fenced blocks',
+    t => {
+        const specWithFence = [
+            '# Feature',
+            '',
+            '## Remove me',
+            'This section has code:',
+            '',
+            '```',
+            '# not a heading',
+            'console.log("test")',
+            '```',
+            '',
+            'End of remove section',
+            '',
+            '## Keep',
+            'This section should survive',
+        ].join('\n')
+
+        const out = stripSpecSection(
+            specWithFence, 'Remove me'
+        )
+        t.ok(
+            !out.includes('# not a heading'),
+            'fenced line removed with section'
+        )
+        t.ok(
+            !out.includes(
+                'End of remove section'
+            ),
+            'section content removed'
+        )
+        t.ok(
+            out.includes('## Keep'),
+            'next section heading kept'
+        )
+        t.ok(
+            out.includes(
+                'This section should survive'
+            ),
+            'next section content kept'
         )
     })

@@ -141,88 +141,18 @@ gh issue view <number>
 
 The user will normally pass the issue number.
 
-## Wayfinding Operations
+## Tickets are executed within hours, not weeks
 
-Used by `/wayfinder` and similar domain-driven agents. GitHub Issues uses native features for navigation:
+Tickets in this tracker are run by an autonomous agent shortly
+after they are written, with a fixed time budget and no
+interview. This changes one upstream rule:
 
-- **Map**: A pinned issue or GitHub project that lists related issues as task items
-- **Child issues**: Related issues linked via GitHub issue dependencies (see below)
-- **Blocking**: Use GitHub issue dependencies to mark blocking relationships
-- **Frontier**: Query with `gh issue list --state open --assignee "" --label "available"`
-- **Claim**: Assign the issue to yourself with `gh issue edit <number> --add-assignee "@me"`
-- **Resolve**: Close the issue and link to context (PR, gist, decision record) in the final comment
-
-## Blocking and Dependencies
-
-### Mark as blocked
-
-Add the `blocked` label and optionally a comment referencing the blocking issue:
-
-```bash
-gh issue edit <number> --add-label "blocked"
-gh issue comment <number> --body "Blocked by #42"
-```
-
-### Link related issues
-
-Use issue references in comments and body text. GitHub auto-links:
-
-```bash
-# In an issue comment or body, write:
-Relates to #123
-Depends on #456
-Blocks #789
-Fixed in #999
-```
-
-These create bidirectional links visible in the issue UI.
-
-### Check if unblocked
-
-Query the blocking issues referenced in the issue's comments or description. An issue is unblocked when no blocking issues remain open.
-
-## Frontier Query and Workflow
-
-### Find available issues
-
-Query for open, unassigned issues:
-
-```bash
-gh issue list --state open --assignee "" --label "available,p0" --json number,title
-```
-
-### Claim an issue
-
-Assign to yourself when starting work:
-
-```bash
-gh issue edit <number> --add-assignee "@me"
-```
-
-Optionally add `in-progress` label:
-
-```bash
-gh issue edit <number> --add-label "in-progress"
-```
-
-### Resolve an issue
-
-Work through the issue in a PR. When done, close the issue and link the PR:
-
-```bash
-gh issue close <number> --comment "Resolved in PR #999"
-```
-
-Alternatively, create a closing comment with a reference:
-
-```bash
-gh issue comment <number> --body "Fixed in PR #999"
-gh issue close <number>
-```
-
-## Tips
-
-- Use GitHub milestones to group related features
-- Use `gh issue create --web` to open the issue creation form in your browser
-- Use `gh issue edit <number> --web` to open an issue in the browser for complex edits
-- Save frequently-used queries as saved views in the GitHub web UI
+- Do include the file paths, module names, and exported symbols
+  the ticket touches. Put the list under a `## Touches` heading
+  in the issue body. The "avoid specific file paths" guidance in
+  `to-tickets` exists for long-lived human trackers and does not
+  apply here.
+- Keep the `- [ ]` acceptance criteria phrased as observable
+  behavior. The agent writes one failing test per criterion, so
+  each criterion should be testable at a seam named in the spec's
+  Testing Decisions.
