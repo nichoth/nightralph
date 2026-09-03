@@ -188,18 +188,28 @@ export function stripSpecSection (
     const out:string[] = []
     let skipping = false
     let skipLevel = 0
+    let inFence = false
 
     for (const line of specBody.split('\n')) {
-        const m = /^(#{1,6})\s+(.*?)\s*$/.exec(line)
-        if (m) {
-            const level = m[1].length
-            if (skipping && level <= skipLevel) {
-                skipping = false
-            }
-            if (!skipping && m[2] === heading) {
-                skipping = true
-                skipLevel = level
-                continue
+        // Toggle fence state on lines starting with ``` (after
+        // optional whitespace)
+        if (/^\s*```/.test(line)) {
+            inFence = !inFence
+        }
+
+        // Only check for headings outside of code fences
+        if (!inFence) {
+            const m = /^(#{1,6})\s+(.*?)\s*$/.exec(line)
+            if (m) {
+                const level = m[1].length
+                if (skipping && level <= skipLevel) {
+                    skipping = false
+                }
+                if (!skipping && m[2] === heading) {
+                    skipping = true
+                    skipLevel = level
+                    continue
+                }
             }
         }
         if (!skipping) out.push(line)

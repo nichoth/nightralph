@@ -1813,3 +1813,47 @@ test('stripSpecSection matches heading text at any level',
         )
         t.ok(out.includes('As a user'), 'parent kept')
     })
+
+test('stripSpecSection ignores # inside fenced blocks',
+    t => {
+        const specWithFence = [
+            '# Feature',
+            '',
+            '## Remove me',
+            'This section has code:',
+            '',
+            '```',
+            '# not a heading',
+            'console.log("test")',
+            '```',
+            '',
+            'End of remove section',
+            '',
+            '## Keep',
+            'This section should survive',
+        ].join('\n')
+
+        const out = stripSpecSection(
+            specWithFence, 'Remove me'
+        )
+        t.ok(
+            !out.includes('# not a heading'),
+            'fenced line removed with section'
+        )
+        t.ok(
+            !out.includes(
+                'End of remove section'
+            ),
+            'section content removed'
+        )
+        t.ok(
+            out.includes('## Keep'),
+            'next section heading kept'
+        )
+        t.ok(
+            out.includes(
+                'This section should survive'
+            ),
+            'next section content kept'
+        )
+    })
