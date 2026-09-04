@@ -16,11 +16,7 @@ import {
 } from './orchestrator.js'
 import { detectTestCmd } from './testcmd.js'
 import { createDisplay } from './display.js'
-import {
-    findFeatureDirs,
-    resolveIssuesDir,
-    getScriptDir,
-} from './resolve.js'
+import { findFeatureDirs, resolveIssuesDir, getScriptDir } from './resolve.js'
 import { getRepoRoot, getRepoName } from './worktree.js'
 
 export { findFeatureDirs, resolveIssuesDir }
@@ -123,6 +119,11 @@ yargs(hideBin(process.argv))
                 describe:'Stop on merge conflict instead of ' +
                     're-spawning',
                 default:false,
+            })
+            .option('max-turns', {
+                type:'number',
+                describe:'Max agentic turns per ticket ' +
+                    '(forwarded to the agent CLI)',
             }),
         async argv => {
             await runExecute({
@@ -135,6 +136,8 @@ yargs(hideBin(process.argv))
                 testCmd:argv.testCmd as string|undefined,
                 stopOnConflict:argv.X as
                     boolean|undefined,
+                maxTurns:argv.maxTurns as
+                    number|undefined,
             })
         }
     )
@@ -172,6 +175,7 @@ async function runExecute (argv:{
     timeout?:number
     testCmd?:string
     stopOnConflict?:boolean
+    maxTurns?:number
 }):Promise<void> {
     const { dir, spec } = await resolveIssuesDir(
         argv.spec
@@ -265,6 +269,7 @@ async function runExecute (argv:{
             conflictStrategy,
             display,
             testCmd,
+            maxTurns:argv.maxTurns,
         })
     } else {
         result = await runWaves(
@@ -273,6 +278,7 @@ async function runExecute (argv:{
             timeout,
             logsDir,
             display,
+            argv.maxTurns,
         )
     }
 

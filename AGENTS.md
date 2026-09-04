@@ -57,6 +57,8 @@ Small orchestrator that runs a single-agent session per issue.
   after the agent exits; non-zero exit rejects the
   ticket. Omitted = auto-detect `npm test` from
   `package.json` at the repo root; `""` = disabled
+- `--max-turns <n>` -- max agentic turns per ticket,
+  forwarded to the agent CLI (e.g. `--max-turns 30`)
 - `--dry-run` -- shows wave order without running;
   auto-detects git repo and shows worktree/branch
   layout when inside one
@@ -93,11 +95,13 @@ Small orchestrator that runs a single-agent session per issue.
   `[x] <text>` lines from agent stdout via
   `COMPLETED_RE`; accepts optional `cwd` to run
   the agent process in a specific directory (used for
-  worktree isolation); accepts optional `onLine`
-  callback to redirect output lines (used by
-  Display integration); for `pi`, writes prompt to a
-  temp file and passes `@path` as a positional arg
-  instead of piping to stdin
+  worktree isolation); accepts optional `maxTurns`
+  forwarded as `--max-turns` to the agent CLI;
+  accepts optional `onLine` callback to redirect
+  output lines (used by Display integration); for
+  `pi`, writes prompt to a temp file and passes
+  `@path` as a positional arg instead of piping to
+  stdin
 - **renderPrompt(specBody, ticket, opts?)**: `opts.testCmd`
   adds test-first rules to the prompt and names the
   command the orchestrator will run after the agent exits

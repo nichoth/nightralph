@@ -250,16 +250,12 @@ export function renderPrompt (
         'You are an autonomous coding agent. ' +
             'Implement the ticket.',
         '',
-        'Time is limited. Follow these rules:',
-        '- Spend at most 2 minutes reading existing ' +
-            'code. Read only the files directly relevant ' +
-            'to the ticket.',
+        'Follow these rules:',
+        '- Read the files directly relevant to the ' +
+            'ticket before writing code.',
         '- Do NOT research external APIs or services ' +
             'via web search. Use the spec and ticket ' +
             'body as your sole reference for API shapes.',
-        '- Start writing code as soon as you understand ' +
-            'the immediate context. You can read more ' +
-            'files as needed while implementing.',
         ...testRules,
         '- Commit your work when finished.',
         '- After completing each checklist item in the ' +
@@ -568,6 +564,7 @@ export function spawnAgent (opts:{
     logPath:string
     cwd?:string
     label?:string
+    maxTurns?:number
     onLine?:(line:string) => void
 }):Promise<AgentResult> {
     const args:string[] = [
@@ -575,6 +572,9 @@ export function spawnAgent (opts:{
     ]
     if (opts.model) {
         args.push('--model', opts.model)
+    }
+    if (opts.maxTurns) {
+        args.push('--max-turns', String(opts.maxTurns))
     }
 
     const providerName = basename(opts.agentCmd)
@@ -860,6 +860,7 @@ async function respawnAndRetryMerge (opts:{
     timeout:number
     logsDir:string
     testCmd?:string|null
+    maxTurns?:number
     onLine?:(msg:string) => void
 }):Promise<boolean> {
     const log = (msg:string):void => {
@@ -900,6 +901,7 @@ async function respawnAndRetryMerge (opts:{
         logPath,
         cwd:opts.worktreePath,
         label,
+        maxTurns:opts.maxTurns,
         onLine:opts.onLine,
     })
 
@@ -971,6 +973,7 @@ export async function runWaves (
     timeout:number,
     logsDir:string,
     display?:Display,
+    maxTurns?:number,
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
@@ -1024,6 +1027,7 @@ export async function runWaves (
                     timeout,
                     logPath,
                     label,
+                    maxTurns,
                     onLine:(line) => d.log(line),
                 })
                 return { ticket:t, result }
@@ -1087,6 +1091,7 @@ export async function runWavesIsolated (opts:{
     conflictStrategy:MergeConflictStrategy
     display?:Display
     testCmd?:string|null
+    maxTurns?:number
 }):Promise<{ allDone:boolean }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
@@ -1203,6 +1208,7 @@ export async function runWavesIsolated (opts:{
                     logPath,
                     cwd:worktrees[i].worktreePath,
                     label,
+                    maxTurns:opts.maxTurns,
                     onLine:(line) => d.log(line),
                 })
             })
@@ -1385,6 +1391,7 @@ export async function runWavesIsolated (opts:{
                                 timeout:opts.timeout,
                                 logsDir:opts.logsDir,
                                 testCmd:opts.testCmd,
+                                maxTurns:opts.maxTurns,
                                 onLine:(msg) => d.log(msg),
                             }) :
                             false
