@@ -1223,3 +1223,30 @@ matching git commit). This session re-verified the working tree
 matches the description above -- build, lint, targeted display/
 integration bundles, and the full suite all pass with zero failures
 -- then set passes:true and committed.
+
+## 2026-09-03 - US-007: Backoff between retries
+
+Completed. The full implementation was already present in the working
+tree from a prior session that left it uncommitted (prd.json still
+showed passes:false, no matching git commit). All acceptance criteria
+verified against the current code:
+
+1. DEFAULT_RETRY_DELAY exported as 30 (src/orchestrator.ts:1101)
+2. retryDelayFor(base, attempt) returns base * 2^(attempt-2)
+   (src/orchestrator.ts:1103-1104)
+3. retryDelayFor(30,2)=30, retryDelayFor(30,3)=60,
+   retryDelayFor(0,3)=0 -- tested in test/orchestrator.test.ts
+4. runWavesIsolated and runWaves accept a retryDelay option
+5. CLI has --retry-delay flag defaulting to DEFAULT_RETRY_DELAY
+   (src/index.ts:148-154)
+6. dryRunIsolated prints the retry delay -- tested in
+   test/integration.test.ts
+7. Existing CLI tests exercising retries pass --retry-delay 0
+   (test/integration.test.ts lines 2628, 3058)
+8. A sleep() helper gates retry attempts so provider outages are
+   waited out instead of burning attempts back to back
+9. runWaves has an equivalent delay test confirming elapsed time
+   (test/orchestrator.test.ts:2024)
+
+Build, lint, and full suite all pass with zero failures. Set
+passes:true and committed.
