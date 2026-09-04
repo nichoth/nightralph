@@ -1053,3 +1053,68 @@ targeted `test/integration.test.ts` bundle, and the full suite.
 All 610 tests pass (setup: 79, orchestrator: 156, worktree: 25,
 progress: 57, merge: 40, display: 82, testcmd: 13, integration: 158).
 Lint clean.
+
+## 2026-09-03 - US-004: The timeout kill takes the agent's process group and always resolves
+
+Completed. Two related problems in `spawnAgent` (src/orchestrator.ts):
+
+1. The timeout handler called `proc.kill('SIGKILL')`, which only
+   kills the agent process itself. An agent that spawns a dev
+   server or watcher as a child leaves that child running as an
+   orphan after the timeout fires.
+2. `spawnAgent`'s promise only resolved on the `close` event, which
+   waits for stdout/stderr to close. If a grandchild inherited
+   those pipes and outlives (or briefly outlives) the agent, `close`
+   never fires and the whole ticket -- and the run -- hangs forever.
+
+Fix: spawn agents with `detached:true` so they become their own
+process group leader, and added an exported `killProcessGroup(pid)`
+helper that sends `SIGKILL` to `-pid` (the whole group) instead of
+just the agent. The timeout handler now calls this helper; it's
+exported so the upcoming SIGINT/SIGTERM handling (US-006) can reuse
+it. `spawnAgent`'s promise now also listens for `exit` (fires as
+soon as the process itself dies, independent of pipe state) and
+starts a 2000ms (`CLOSE_GRACE_MS`) grace timer; if `close` hasn't
+already resolved the promise by then, it force-destroys
+`proc.stdout`/`proc.stderr` and resolves anyway. A `settled` flag
+guards against `close` and the grace timer both trying to resolve.
+
+Added test/mock-agent-grandchild-hang.js: spawns a non-detached
+child (inheriting stdout/stderr, so same process group as the
+parent) that never exits on its own, writes the child's pid to
+`./grandchild.pid` (relative to the mock's cwd, which the test sets
+via spawnAgent's `cwd` option -- there's no existing mechanism to
+pass extra argv through spawnAgent, so cwd was the simplest way to
+hand the test a rendezvous path). Neither the mock nor its child
+reads stdin or exits, so only the orchestrator's timeout can end
+them.
+
+Added one test to test/integration.test.ts ("spawnAgent - timeout
+kills the process group..."): timeout:1, asserts `timedOut:true`,
+asserts the promise resolves in well under CLOSE_GRACE_MS + a
+comfortable buffer (elapsedMs < 6000; in practice ~1s, since
+same-process-group SIGKILL kills the grandchild immediately and
+`close` fires on its own -- the grace-timer fallback exists for the
+case where a grandchild has fully detached into its own group and
+survives the SIGKILL, which isn't reproduced here), and confirms via
+`process.kill(grandchildPid, 0)` throwing that the grandchild
+process is actually dead, not merely orphaned.
+
+Confirmed red first: against the pre-fix code (proc.kill('SIGKILL')
++ resolve only on 'close'), the new test hung indefinitely --
+running the full integration bundle with a 15s wrapper timeout
+exited 124 partway through, well before reaching later tests, with
+no output for the new test at all.
+
+Gotcha: the mock script needs its executable bit set (`chmod +x`)
+or spawnAgent's underlying `spawn()` call fails with EACCES, which
+surfaces as `proc.on('error', ...)` and a false-looking failure
+("result reports the timeout" not ok) that has nothing to do with
+the process-group logic being tested.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/integration.test.ts` bundle, and the full suite.
+
+All 613 tests pass (setup: 79, orchestrator: 156, worktree: 25,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 161).
+Lint clean.

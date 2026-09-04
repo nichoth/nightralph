@@ -584,6 +584,27 @@ export type AgentResult = {
     timedOut:boolean
 }
 
+// How long to wait after the process exits before giving up on a
+// graceful pipe close and forcing the streams shut. A grandchild
+// (dev server, watcher) that inherited the agent's stdout can keep
+// the pipe open after the agent itself has been killed, which would
+// otherwise leave spawnAgent's promise pending forever.
+const CLOSE_GRACE_MS = 2000
+
+// Agents are spawned with detached:true so they become their own
+// process group leader; this lets us kill the whole tree (agent +
+// any children it spawned, like dev servers) with one signal to
+// -pid instead of leaving orphans behind. Exported for reuse by
+// signal handling (Ctrl-C / SIGTERM).
+export function killProcessGroup (pid:number|undefined):void {
+    if (pid === undefined) return
+    try {
+        process.kill(-pid, 'SIGKILL')
+    } catch {
+        // Process group is already gone.
+    }
+}
+
 export function spawnAgent (opts:{
     prompt:string
     agentCmd:string
@@ -630,6 +651,7 @@ export function spawnAgent (opts:{
     const proc = spawn(opts.agentCmd, args, {
         stdio:['pipe', 'pipe', 'pipe'],
         cwd:opts.cwd,
+        detached:true,
     })
 
     proc.stdout.pipe(logStream)
@@ -708,7 +730,7 @@ export function spawnAgent (opts:{
         } else {
             console.warn(`${prefix}${msg}`)
         }
-        proc.kill('SIGKILL')
+        killProcessGroup(proc.pid)
     }, opts.timeout * 1000)
 
     // An agent that exits before draining stdin (bad flags,
@@ -728,8 +750,14 @@ export function spawnAgent (opts:{
     proc.stdin.end()
 
     return new Promise<AgentResult>(resolve => {
-        proc.on('close', code => {
+        let settled = false
+        let graceTimer:ReturnType<typeof setTimeout>|undefined
+
+        function finish (exitCode:number):void {
+            if (settled) return
+            settled = true
             clearTimeout(timeout)
+            if (graceTimer) clearTimeout(graceTimer)
             if (piFormatter) {
                 for (const line of piFormatter.flush()) {
                     collectCompleted(line)
@@ -745,13 +773,29 @@ export function spawnAgent (opts:{
             rlErr.close()
             logStream.end()
             if (promptFile) cleanupPromptFile(promptFile)
-            resolve({
-                exitCode:code ?? 1,
-                completedItems,
-                timedOut,
-            })
+            resolve({ exitCode, completedItems, timedOut })
+        }
+
+        // The process itself has exited, but 'close' waits for its
+        // stdio streams to close too -- a grandchild that inherited
+        // stdout/stderr can hold those pipes open indefinitely. Give
+        // it a grace period, then destroy the streams ourselves so
+        // the run does not hang forever on someone else's fd.
+        proc.on('exit', code => {
+            graceTimer = setTimeout(() => {
+                proc.stdout.destroy()
+                proc.stderr.destroy()
+                finish(code ?? 1)
+            }, CLOSE_GRACE_MS)
+        })
+
+        proc.on('close', code => {
+            finish(code ?? 1)
         })
         proc.on('error', err => {
+            if (settled) return
+            settled = true
+            if (graceTimer) clearTimeout(graceTimer)
             clearTimeout(timeout)
             rl.close()
             rlErr.close()

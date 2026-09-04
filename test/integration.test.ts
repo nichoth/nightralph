@@ -543,6 +543,9 @@ const MOCK_HANG = join(
 const MOCK_COMMIT_THEN_HANG = join(
     process.cwd(), 'test', 'mock-agent-commit-then-hang.js'
 )
+const MOCK_GRANDCHILD_HANG = join(
+    process.cwd(), 'test', 'mock-agent-grandchild-hang.js'
+)
 const MOCK_FAIL_TICKET_01 = join(
     process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
 )
@@ -2395,6 +2398,56 @@ test('spawnAgent - an agent that exits before reading ' +
         t.equal(
             result.timedOut, false,
             'this is not a timeout'
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('spawnAgent - timeout kills the process group, ' +
+    'so spawnAgent still resolves promptly when a ' +
+    'grandchild holds the stdout pipe open', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-grandchild-log-')
+    )
+    try {
+        const logPath = join(logDir, 'grandchild.log')
+        const pidFile = join(logDir, 'grandchild.pid')
+        const start = Date.now()
+        const result = await spawnAgent({
+            prompt:'test prompt',
+            agentCmd:MOCK_GRANDCHILD_HANG,
+            model:null,
+            timeout:1,
+            logPath,
+            cwd:logDir,
+        })
+        const elapsedMs = Date.now() - start
+
+        t.equal(
+            result.timedOut, true,
+            'result reports the timeout'
+        )
+        t.ok(
+            elapsedMs < 6000,
+            'spawnAgent resolves within a few seconds of ' +
+            'the timeout even though a grandchild holds ' +
+            `the pipe open (took ${elapsedMs}ms)`
+        )
+
+        const grandchildPid = Number(
+            readFileSync(pidFile, 'utf8').trim()
+        )
+        let grandchildAlive = true
+        try {
+            process.kill(grandchildPid, 0)
+        } catch {
+            grandchildAlive = false
+        }
+        t.equal(
+            grandchildAlive, false,
+            'the grandchild process was killed along with ' +
+            'the agent'
         )
     } finally {
         rmSync(logDir, { recursive:true, force:true })
