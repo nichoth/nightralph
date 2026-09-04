@@ -605,6 +605,17 @@ export function killProcessGroup (pid:number|undefined):void {
     }
 }
 
+// Tracks every agent process spawnAgent currently has running, so
+// a Ctrl-C or SIGTERM to the orchestrator itself can kill them all
+// instead of leaving them running after the orchestrator exits.
+const runningAgents = new Set<number>()
+
+export function killRunningAgents ():void {
+    for (const pid of runningAgents) {
+        killProcessGroup(pid)
+    }
+}
+
 export function spawnAgent (opts:{
     prompt:string
     agentCmd:string
@@ -653,6 +664,8 @@ export function spawnAgent (opts:{
         cwd:opts.cwd,
         detached:true,
     })
+
+    if (proc.pid !== undefined) runningAgents.add(proc.pid)
 
     proc.stdout.pipe(logStream)
 
@@ -758,6 +771,9 @@ export function spawnAgent (opts:{
             settled = true
             clearTimeout(timeout)
             if (graceTimer) clearTimeout(graceTimer)
+            if (proc.pid !== undefined) {
+                runningAgents.delete(proc.pid)
+            }
             if (piFormatter) {
                 for (const line of piFormatter.flush()) {
                     collectCompleted(line)
@@ -797,6 +813,9 @@ export function spawnAgent (opts:{
             settled = true
             if (graceTimer) clearTimeout(graceTimer)
             clearTimeout(timeout)
+            if (proc.pid !== undefined) {
+                runningAgents.delete(proc.pid)
+            }
             rl.close()
             rlErr.close()
             logStream.end()

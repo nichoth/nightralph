@@ -135,7 +135,6 @@ export class StatusDisplay implements Display {
     private config:DisplayConfig
     private viewportStart:number = 0
     private resizeListener:(() => void)|null = null
-    private signalHandler:(() => void)|null = null
 
     constructor (config?:Readonly<Partial<DisplayConfig>>) {
         this.config = {
@@ -189,15 +188,6 @@ export class StatusDisplay implements Display {
             )
         }
 
-        // Register signal handler to restore cursor on interruption
-        if (this.signalHandler) {
-            process.removeListener('SIGINT', this.signalHandler)
-            process.removeListener('SIGTERM', this.signalHandler)
-        }
-        this.signalHandler = () => this.cleanup()
-        process.on('SIGINT', this.signalHandler)
-        process.on('SIGTERM', this.signalHandler)
-
         this.render()
     }
 
@@ -242,11 +232,6 @@ export class StatusDisplay implements Display {
         // Remove resize listener if it exists
         if (this.resizeListener && this.config.stream.isTTY) {
             this.config.stream.removeListener('resize', this.resizeListener)
-        }
-        // Remove signal handlers
-        if (this.signalHandler) {
-            process.removeListener('SIGINT', this.signalHandler)
-            process.removeListener('SIGTERM', this.signalHandler)
         }
         this.config.stream.write(ansi.cursorShow())
     }

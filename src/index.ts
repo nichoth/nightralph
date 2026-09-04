@@ -15,6 +15,7 @@ import {
     stripSpecSection,
     THINKING_LEVELS,
     DEFAULT_RETRIES,
+    killRunningAgents,
     type ThinkingLevel,
 } from './orchestrator.js'
 import { detectTestCmd } from './testcmd.js'
@@ -281,6 +282,15 @@ async function runExecute (argv:{
     }
 
     const display = createDisplay()
+
+    function onSignal (exitCode:number):void {
+        killRunningAgents()
+        display.cleanup()
+        process.exit(exitCode)
+    }
+    process.on('SIGINT', () => onSignal(130))
+    process.on('SIGTERM', () => onSignal(143))
+
     let result:{ allDone:boolean }
 
     if (isGitRepo()) {

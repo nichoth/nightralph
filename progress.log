@@ -1155,3 +1155,71 @@ targeted `test/worktree.test.ts` bundle, and the full suite.
 All 663 tests pass (setup: 79, orchestrator: 156, worktree: 75,
 progress: 57, merge: 40, display: 82, testcmd: 13, integration: 161).
 Lint clean.
+
+## 2026-09-03 - US-006: Ctrl-C and SIGTERM stop the run and kill agents
+
+Completed. StatusDisplay no longer installs process-level SIGINT/
+SIGTERM handlers -- removed the `signalHandler` field and both
+`process.on`/`removeListener` call sites from `startWave` and
+`cleanup` in `src/display.ts`. Those handlers only ever restored
+the cursor; they never touched running agents, and having the
+display module reach for global process state was the wrong layer
+for signal handling anyway.
+
+Added a module-level `runningAgents` registry (`Set<number>` of
+pids) in `src/orchestrator.ts`, alongside the existing
+`killProcessGroup` helper from US-004. `spawnAgent` adds `proc.pid`
+to the set right after `spawn()` and removes it in both places a
+run settles (`finish()` and the `proc.on('error', ...)` handler).
+Exported `killRunningAgents()` iterates the set and calls
+`killProcessGroup` on each pid -- it does not clear the set itself;
+that happens naturally as each killed process's `finish()`/`error`
+handler fires.
+
+`src/index.ts` now installs `SIGINT`/`SIGTERM` handlers right after
+`createDisplay()` in `runExecute`, before the run starts. Both call
+a shared `onSignal(exitCode)` that calls `killRunningAgents()`,
+`display.cleanup()`, then `process.exit()` with 130 (SIGINT) or 143
+(SIGTERM). These are only installed once per CLI invocation, so
+there's no listener-accumulation concern.
+
+Tests: `test/display.test.ts` gained two tests asserting
+`process.listenerCount('SIGINT'|'SIGTERM')` is unchanged across
+`startWave` and `cleanup`. `test/integration.test.ts` gained a unit
+test spawning a hanging agent (`mock-agent-hang.js`) via
+`spawnAgent`, calling `killRunningAgents()`, and asserting the
+promise resolves promptly with a nonzero exit code and
+`timedOut:false` (to distinguish the kill path from the timeout
+path); a no-op test for an empty registry; and a full CLI subprocess
+test that spawns the built CLI with `mock-agent-grandchild-hang.js`
+as the provider, waits for the agent's grandchild pid file to
+appear, sends `SIGINT` to the CLI process, and asserts both that the
+CLI exits 130 and that the grandchild process is actually dead (not
+just orphaned).
+
+Confirmed red first: with the orchestrator/display changes in place
+but the `src/index.ts` signal-handler wiring temporarily removed,
+the CLI-subprocess test failed both assertions. `not ok 137 CLI
+exits 130 on SIGINT` (expected 130, actual -1) -- with no installed
+handler, Node terminates the process via the signal itself rather
+than calling `process.exit(130)`, so the `exit` event fires with
+`code:null`. `not ok 138 the agent's child process was killed too`
+(expected false, actual true) -- nothing sent a signal to the
+agent's process group, so the grandchild was still alive after the
+CLI died. Re-adding the handler wiring in `src/index.ts` turned both
+green.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/display.test.ts` and `test/integration.test.ts`
+bundles, and the full suite.
+
+All 674 tests pass (setup: 79, orchestrator: 156, worktree: 75,
+progress: 57, merge: 40, display: 86, testcmd: 13, integration: 168).
+Lint clean.
+
+Note: as with US-002 earlier, this implementation was left uncommitted
+by the session that wrote it (prd.json still showed passes:false, no
+matching git commit). This session re-verified the working tree
+matches the description above -- build, lint, targeted display/
+integration bundles, and the full suite all pass with zero failures
+-- then set passes:true and committed.

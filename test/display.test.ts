@@ -1376,3 +1376,46 @@ test(
         )
     }
 )
+
+test('StatusDisplay - startWave does not install ' +
+    'SIGINT/SIGTERM handlers', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const sigintBefore = process.listenerCount('SIGINT')
+    const sigtermBefore = process.listenerCount('SIGTERM')
+
+    display.startWave(1, 1, createTestTickets())
+
+    t.equal(
+        process.listenerCount('SIGINT'), sigintBefore,
+        'startWave adds no SIGINT listener'
+    )
+    t.equal(
+        process.listenerCount('SIGTERM'), sigtermBefore,
+        'startWave adds no SIGTERM listener'
+    )
+
+    display.cleanup()
+})
+
+test('StatusDisplay - cleanup does not touch ' +
+    'process signal listeners', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+    display.startWave(1, 1, createTestTickets())
+
+    const sigintBefore = process.listenerCount('SIGINT')
+    const sigtermBefore = process.listenerCount('SIGTERM')
+
+    display.cleanup()
+
+    t.equal(
+        process.listenerCount('SIGINT'), sigintBefore,
+        'cleanup leaves SIGINT listeners untouched'
+    )
+    t.equal(
+        process.listenerCount('SIGTERM'), sigtermBefore,
+        'cleanup leaves SIGTERM listeners untouched'
+    )
+})

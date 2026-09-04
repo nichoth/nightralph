@@ -6,7 +6,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { execFile, execSync } from 'node:child_process'
+import { execFile, execSync, spawn } from 'node:child_process'
 import {
     findFeatureDirs,
     resolveIssuesDir,
@@ -17,6 +17,7 @@ import {
     runWavesIsolated,
     scanTickets,
     spawnAgent,
+    killRunningAgents,
 } from '../src/orchestrator.js'
 
 function tmp ():string {
@@ -2454,6 +2455,62 @@ test('spawnAgent - timeout kills the process group, ' +
     }
 })
 
+test('killRunningAgents - kills a tracked agent\'s ' +
+    'process group and lets spawnAgent resolve', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-killrunning-log-')
+    )
+    try {
+        const logPath = join(logDir, 'hang.log')
+        const resultPromise = spawnAgent({
+            prompt:'test prompt',
+            agentCmd:MOCK_HANG,
+            model:null,
+            timeout:30,
+            logPath,
+        })
+
+        // Give the process a moment to actually spawn and
+        // register itself before we try to kill it.
+        await new Promise(r => setTimeout(r, 300))
+
+        killRunningAgents()
+
+        const start = Date.now()
+        const result = await resultPromise
+        const elapsedMs = Date.now() - start
+
+        t.ok(
+            result.exitCode !== 0,
+            'a killed agent does not count as exit 0'
+        )
+        t.equal(
+            result.timedOut, false,
+            'killRunningAgents is not the timeout path'
+        )
+        t.ok(
+            elapsedMs < 6000,
+            `spawnAgent resolved promptly (${elapsedMs}ms)`
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('killRunningAgents - is a no-op when no agents ' +
+    'are running', t => {
+    let threw = false
+    try {
+        killRunningAgents()
+    } catch {
+        threw = true
+    }
+    t.equal(
+        threw, false,
+        'calling with an empty registry does not throw'
+    )
+})
+
 test('spawnAgent - unknown provider passes through ' +
     'with no extra args', async t => {
     const logDir = mkdtempSync(
@@ -2489,6 +2546,67 @@ test('spawnAgent - unknown provider passes through ' +
 })
 
 // -- exit code tests --
+
+test('CLI subprocess - SIGINT kills the running ' +
+    'agent and its child processes', async t => {
+    const projectDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+
+        writeFileSync(
+            join(issuesDir, '01-hang.md'),
+            makeTicketBody({ status:'ready-for-agent' }),
+        )
+
+        const child = spawn(process.execPath, [
+            CLI, MOCK_GRANDCHILD_HANG,
+            '--spec', FEAT,
+            '--timeout', '30',
+        ], { cwd:projectDir })
+
+        const pidFile = join(projectDir, 'grandchild.pid')
+        const deadline = Date.now() + 15_000
+        while (
+            !existsSync(pidFile) &&
+            Date.now() < deadline
+        ) {
+            await new Promise(r => setTimeout(r, 100))
+        }
+        t.ok(
+            existsSync(pidFile),
+            'agent\'s grandchild process started'
+        )
+        const grandchildPid = Number(
+            readFileSync(pidFile, 'utf8').trim()
+        )
+
+        child.kill('SIGINT')
+
+        const exitCode:number = await new Promise(resolve => {
+            child.on('exit', code => resolve(code ?? -1))
+        })
+
+        t.equal(
+            exitCode, 130,
+            'CLI exits 130 on SIGINT'
+        )
+
+        let grandchildAlive = true
+        try {
+            process.kill(grandchildPid, 0)
+        } catch {
+            grandchildAlive = false
+        }
+        t.equal(
+            grandchildAlive, false,
+            'the agent\'s child process was killed too'
+        )
+    } finally {
+        rmSync(projectDir, {
+            recursive:true, force:true,
+        })
+    }
+})
 
 test('CLI subprocess exits 1 when agent fails',
     async t => {
