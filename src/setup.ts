@@ -13,6 +13,7 @@ import { execSync } from 'node:child_process'
 export const SKILL_DIRS = [
     'grill', 'grilling', 'domain-modeling',
     'to-spec', 'to-tickets', 'tdd',
+    'codebase-design',
 ] as const
 
 export const DOC_TEMPLATES = [
