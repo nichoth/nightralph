@@ -1391,3 +1391,200 @@ AGENTS.md updates:
     process-level signal handlers
 
 Typecheck, TOC generation, and lint all clean.
+
+## 2026-09-04 - US-001: Fix dry-run retry delay default
+
+Completed. `dryRunIsolated` in src/orchestrator.ts printed
+`Retry delay:  30s` when `retryDelay` was omitted, using
+`opts.retryDelay ?? DEFAULT_RETRY_DELAY` (30). But
+`runWavesIsolated` defaults omitted `retryDelay` to `0`, so
+the dry-run output misrepresented the actual behavior.
+
+Changed line 943 from `opts.retryDelay ?? DEFAULT_RETRY_DELAY`
+to `opts.retryDelay ?? 0`, matching what `runWavesIsolated`
+actually uses.
+
+Added 1 new test to test/orchestrator.test.ts: calls
+`dryRunIsolated` without a `retryDelay` option, captures
+`console.log` output, and asserts it includes `Retry delay:  0s`.
+Assertion is placed after the `finally` block that restores
+`console.log`, so it appears in test output (the existing
+dryRunIsolated tests have assertions swallowed by the mock).
+
+All 705 tests pass (setup: 87, orchestrator: 167, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 178).
+Lint clean.
+
+## 2026-09-04 - US-002: Add worktree restriction to merge prompt
+
+Completed. `renderMergePrompt` in src/orchestrator.ts lacked the
+worktree confinement rule that `renderPrompt` already had, so a
+respawned agent resolving a merge conflict could reach sibling
+worktrees via `../`.
+
+Added `'Do NOT read or modify files outside your current directory
+(the worktree).'` to the instructions array in `renderMergePrompt`,
+between the existing 'Do NOT re-implement' and 'Do NOT run git push'
+lines.
+
+Added 1 new test to test/orchestrator.test.ts: asserts
+`renderMergePrompt` output includes 'current directory'.
+
+All 706 tests pass (setup: 87, orchestrator: 168, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 178).
+Lint clean.
+
+## 2026-09-04 - US-003: Kill process group on grace timeout
+
+Completed. In `spawnAgent` (src/orchestrator.ts), the grace timer
+callback that fires when the agent exits but a grandchild holds
+the stdout pipe open previously only destroyed the streams and
+resolved the promise. Now it calls `killProcessGroup(proc.pid)`
+before destroying streams, so dev servers and watchers spawned by
+the agent do not survive indefinitely.
+
+Created test/mock-agent-grandchild-exit.js: spawns a long-lived
+grandchild sharing stdout via `stdio:['ignore', 'inherit',
+'inherit']`, writes the grandchild pid to `./grandchild.pid`,
+then calls `process.exit(0)`. Unlike the existing
+mock-agent-grandchild-hang.js (which never exits and exercises
+the timeout path), this mock exercises the grace timer path where
+the agent exits voluntarily but the grandchild keeps the pipe.
+
+Added 1 new test to test/integration.test.ts: verifies spawnAgent
+resolves within 10s, exitCode is 0, timedOut is false, and the
+grandchild process is no longer alive after the grace timer fires.
+
+Gotcha: SIGKILL is delivered immediately but the grandchild
+becomes a zombie until init reaps it. `process.kill(pid, 0)`
+returns success for zombies, so the test needs a short delay
+(200ms) between spawnAgent resolving and the alive check to avoid
+a false positive.
+
+All 710 tests pass (setup: 87, orchestrator: 168, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 182).
+Lint clean.
+
+## 2026-09-04 - US-004: Track test-gate processes in signal registry
+
+Completed. `runTestCmd` in src/testcmd.ts now accepts an optional
+`registry?:Set<number>` parameter. When provided, the child pid is
+added to the registry immediately after spawn and removed in both
+the `close` and `error` handlers, so SIGINT during the test-gate
+phase can also kill test processes via `killRunningAgents()`.
+
+`runTestGate` in src/orchestrator.ts now accepts an optional
+`registry?:Set<number>` and forwards it to `runTestCmd`. Both call
+sites in `runTicketAttempt` (post-agent test gate) and in the
+respawn path pass `runningAgents` as the registry.
+
+Added 3 new tests to test/testcmd.test.ts:
+- pid is removed from registry after command completes
+- pid is present in registry during execution and removed after
+- pid is removed from registry on spawn error (bad cwd)
+
+All 716 tests pass (setup: 87, orchestrator: 168, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 19,
+integration: 182).
+Lint clean.
+
+## 2026-09-04 - US-005: Serialize worktree removal through module queue
+
+Completed. `removeWorktree` in src/worktree.ts was a standalone async
+function that called `git worktree remove` directly, bypassing the
+`worktreeQueue` promise chain that `createWorktree` uses for
+serialization. Concurrent create + remove calls could race on
+`.git/worktrees` metadata.
+
+Extracted the existing `removeWorktree` body into a private
+`removeWorktreeNow`, and replaced the public `removeWorktree` with a
+wrapper that chains through `worktreeQueue` using the same pattern as
+`createWorktree`: `.then()` off the queue tail, replace the tail with
+a `.catch(() => {})`'d copy so a rejected removal doesn't wedge the
+queue for later callers. The public signature is unchanged.
+
+Added 1 new test to test/worktree.test.ts: creates worktree A, then
+concurrently removes A and creates B via Promise.all; asserts A is
+gone and B exists. As with the createWorktree serialization test
+(US-005 from the earlier PRD), this machine's git handles the
+concurrent operations without corruption even without serialization,
+so the test is a regression guard, not a demonstrated repro of the
+original race.
+
+All 719 tests pass (setup: 87, orchestrator: 168, worktree: 80,
+progress: 57, merge: 40, display: 86, testcmd: 19,
+integration: 182).
+Lint clean.
+
+## 2026-09-04 - US-006: Carry worktree info in failure outcomes and clean up
+
+Completed. Two changes to `TicketOutcome` in src/orchestrator.ts:
+
+1. The `'no-commits'` variant now carries `worktreePath:string` and
+   `branchName:string`, so downstream handlers (US-007) can record
+   which branch/worktree was involved.
+2. The `'error'` variant now carries optional `worktreePath?:string`
+   and `branchName?:string`, so errors that occur after worktree
+   creation can forward that info.
+
+In `runTicketAttempt`, the `no-commits` return path now calls
+`removeWorktreeQuietly` before returning, so leftover worktrees
+from agents that exit 0 but make no changes are cleaned up instead
+of leaking on disk. The return value includes `worktreePath` and
+`branchName` from the just-removed worktree.
+
+The default `outcome` in `runTicketAttempts` was updated to include
+empty-string `worktreePath`/`branchName` to satisfy the new type
+(this default is unreachable since `maxAttempts >= 1`).
+
+Updated the existing integration test ("agent exits 0 but makes no
+commits") from asserting worktree is preserved to asserting it is
+cleaned up (removed from disk).
+
+All 719 tests pass (setup: 87, orchestrator: 168, worktree: 80,
+progress: 57, merge: 40, display: 86, testcmd: 19,
+integration: 182).
+Lint clean.
+
+## 2026-09-04 - US-007: Record all terminal failures in progress.md and update AGENTS.md
+
+Completed. Three outcome handlers in `runWavesIsolated`
+(src/orchestrator.ts) previously logged failures to the display but
+did not persist them to progress.md:
+
+1. `worktree-error`: now calls `checkTicket` with branch:'',
+   exitCode:-1, done:false, then `saveProgress`.
+2. `error`: now calls `checkTicket` with
+   `outcome.branchName ?? ''`, exitCode:-1, done:false, then
+   `saveProgress`.
+3. `no-commits`: now calls `checkTicket` with
+   `outcome.branchName`, exitCode:0, done:false, then
+   `saveProgress`.
+
+The `failed` handler already had this pattern from US-002; these
+three were the remaining gaps.
+
+Added 1 new integration test to test/integration.test.ts: runs
+mock-agent-noop.js to trigger a no-commits outcome, then asserts
+progress.md exists, contains an unchecked ticket (`- [ ]`), and
+records `exit: 0`.
+
+Updated AGENTS.md contracts:
+- testcmd: documented `registry?:Set<number>` parameter on
+  `runTestCmd`
+- worktree: documented `removeWorktree` serialization through the
+  module queue
+- spawnAgent: documented grace-timer `killProcessGroup` call
+- orchestrator: added `TicketOutcome` type entry documenting
+  `no-commits` and `error` variant fields
+- runWavesIsolated guarantees: documented that all terminal failures
+  (worktree-error, error, no-commits, failed) are recorded in
+  progress.md
+
+All 722 tests pass (setup: 87, orchestrator: 168, worktree: 80,
+progress: 57, merge: 40, display: 86, testcmd: 19,
+integration: 185).
+Lint clean.

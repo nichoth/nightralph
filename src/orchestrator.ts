@@ -297,6 +297,8 @@ export function renderMergePrompt (
         '3. Commit the resolved files.',
         '',
         'Do NOT re-implement the ticket from scratch.',
+        'Do NOT read or modify files outside your ' +
+            'current directory (the worktree).',
         'Do NOT run git push.',
     ].join('\n')
 }
@@ -803,6 +805,7 @@ export function spawnAgent (opts:{
         // the run does not hang forever on someone else's fd.
         proc.on('exit', code => {
             graceTimer = setTimeout(() => {
+                killProcessGroup(proc.pid)
                 proc.stdout.destroy()
                 proc.stderr.destroy()
                 finish(code ?? 1)
@@ -940,7 +943,7 @@ export function dryRunIsolated (opts:{
     )
     console.log(
         'Retry delay:  ' +
-        `${opts.retryDelay ?? DEFAULT_RETRY_DELAY}s`
+        `${opts.retryDelay ?? 0}s`
     )
     console.log(
         `\nMerge strategy: ${strategyDesc}`
@@ -959,11 +962,13 @@ async function runTestGate (opts:{
     logsDir:string
     attempt?:number
     log:(msg:string) => void
+    registry?:Set<number>
 }):Promise<boolean> {
     const result = await runTestCmd({
         cmd:opts.testCmd,
         cwd:opts.worktreePath,
         timeout:opts.timeout,
+        registry:opts.registry,
     })
     const testLogPath = attemptLogPath(
         opts.logsDir, opts.ticket, opts.attempt ?? 1,
@@ -1063,6 +1068,7 @@ async function respawnAndRetryMerge (opts:{
             timeout:opts.timeout,
             logsDir:opts.logsDir,
             log,
+            registry:runningAgents,
         })
         if (!passed) {
             log(
@@ -1128,8 +1134,17 @@ function attemptLogPath (
 
 type TicketOutcome =
     | { kind:'worktree-error'; error:unknown }
-    | { kind:'error'; error:unknown }
-    | { kind:'no-commits' }
+    | {
+        kind:'error'
+        error:unknown
+        worktreePath?:string
+        branchName?:string
+    }
+    | {
+        kind:'no-commits'
+        worktreePath:string
+        branchName:string
+    }
     | {
         kind:'failed'
         reason:'exit'|'tests'
@@ -1239,7 +1254,12 @@ async function runTicketAttempt (
     if (!hasNewCommits(
         opts.repoRoot, opts.baseBranch, worktree.branchName
     )) {
-        return { kind:'no-commits' }
+        await removeWorktreeQuietly(worktree.worktreePath, d)
+        return {
+            kind:'no-commits',
+            worktreePath:worktree.worktreePath,
+            branchName:worktree.branchName,
+        }
     }
 
     if (opts.testCmd) {
@@ -1251,6 +1271,7 @@ async function runTicketAttempt (
             logsDir:opts.logsDir,
             attempt:opts.attempt,
             log:(msg) => d.log(msg),
+            registry:runningAgents,
         })
         if (!passed) {
             await removeWorktreeQuietly(
@@ -1284,7 +1305,9 @@ async function runTicketAttempts (
     const maxAttempts = opts.retries + 1
     const isPi = basename(opts.agentCmd) === 'pi'
     let thinking = opts.thinking
-    let outcome:TicketOutcome = { kind:'no-commits' }
+    let outcome:TicketOutcome = {
+        kind:'no-commits', worktreePath:'', branchName:'',
+    }
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         if (attempt === 1) {
@@ -1641,6 +1664,19 @@ export async function runWavesIsolated (opts:{
                     `  ${ticket.filename}: failed to create ` +
                     `worktree: ${formatErrorMessage(outcome.error)}`
                 )
+                checkTicket(progress, ticket.num, {
+                    branch:'',
+                    exitCode:-1,
+                    done:false,
+                })
+                await saveProgress(
+                    repoRoot,
+                    progressPath,
+                    progress,
+                    `nightralph: ${ticket.filename} ` +
+                    'worktree error',
+                    d,
+                )
                 continue
             }
 
@@ -1650,6 +1686,18 @@ export async function runWavesIsolated (opts:{
                 d.log(
                     `  ${ticket.filename}: attempt error: ` +
                     formatErrorMessage(outcome.error)
+                )
+                checkTicket(progress, ticket.num, {
+                    branch:outcome.branchName ?? '',
+                    exitCode:-1,
+                    done:false,
+                })
+                await saveProgress(
+                    repoRoot,
+                    progressPath,
+                    progress,
+                    `nightralph: ${ticket.filename} error`,
+                    d,
                 )
                 continue
             }
@@ -1661,6 +1709,19 @@ export async function runWavesIsolated (opts:{
                     `  ${ticket.filename}: agent exited 0 ` +
                     'but made no changes; leaving ticket ' +
                     'ready-for-agent'
+                )
+                checkTicket(progress, ticket.num, {
+                    branch:outcome.branchName,
+                    exitCode:0,
+                    done:false,
+                })
+                await saveProgress(
+                    repoRoot,
+                    progressPath,
+                    progress,
+                    `nightralph: ${ticket.filename} ` +
+                    'no commits',
+                    d,
                 )
                 continue
             }

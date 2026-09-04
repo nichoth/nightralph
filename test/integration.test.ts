@@ -547,6 +547,9 @@ const MOCK_COMMIT_THEN_HANG = join(
 const MOCK_GRANDCHILD_HANG = join(
     process.cwd(), 'test', 'mock-agent-grandchild-hang.js'
 )
+const MOCK_GRANDCHILD_EXIT = join(
+    process.cwd(), 'test', 'mock-agent-grandchild-exit.js'
+)
 const MOCK_FAIL_TICKET_01 = join(
     process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
 )
@@ -934,7 +937,7 @@ test('runWavesIsolated - passing test command runs in the ' +
 })
 
 test('runWavesIsolated - agent exits 0 but makes no commits, ' +
-    'ticket stays ready-for-agent and worktree is preserved',
+    'ticket stays ready-for-agent and worktree is cleaned up',
 async t => {
     const projectDir = initTempGitRepo()
     try {
@@ -976,9 +979,10 @@ async t => {
                 projectDir, '..',
                 `${repoName}.01-noop`
             )
-            t.ok(
+            t.equal(
                 existsSync(worktreePath),
-                'worktree preserved when agent made no commits'
+                false,
+                'worktree cleaned up when agent made no commits'
             )
         } finally {
             process.chdir(originalCwd)
@@ -3317,6 +3321,134 @@ test('runWavesIsolated - agent that deletes its worktree ' +
         }
     } finally {
         cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('spawnAgent - grace timer kills process group ' +
+    'when agent exits but grandchild holds stdout', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-grandchild-exit-')
+    )
+    try {
+        const logPath = join(logDir, 'exit.log')
+        const pidFile = join(logDir, 'grandchild.pid')
+        const start = Date.now()
+        const result = await spawnAgent({
+            prompt:'test prompt',
+            agentCmd:MOCK_GRANDCHILD_EXIT,
+            model:null,
+            timeout:30,
+            logPath,
+            cwd:logDir,
+        })
+        const elapsedMs = Date.now() - start
+
+        t.equal(
+            result.exitCode, 0,
+            'agent exited 0'
+        )
+        t.equal(
+            result.timedOut, false,
+            'not a timeout -- agent exited voluntarily'
+        )
+        t.ok(
+            elapsedMs < 10000,
+            'spawnAgent resolves within 10s ' +
+            `(took ${elapsedMs}ms)`
+        )
+
+        const grandchildPid = Number(
+            readFileSync(pidFile, 'utf8').trim()
+        )
+        // Small delay to let SIGKILL fully propagate
+        await new Promise(r => setTimeout(r, 200))
+        let grandchildAlive = true
+        try {
+            process.kill(grandchildPid, 0)
+        } catch {
+            grandchildAlive = false
+        }
+        t.equal(
+            grandchildAlive, false,
+            'grandchild process is no longer alive'
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - no-commits outcome is recorded ' +
+    'in progress.md with exit code 0',
+async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-noop.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const progressPath = join(
+            projectDir, 'progress.md'
+        )
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_NOOP,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                existsSync(progressPath),
+                true,
+                'progress.md exists after no-commits outcome'
+            )
+
+            const content = readFileSync(
+                progressPath, 'utf8'
+            )
+            t.ok(
+                content.includes('- [ ]'),
+                'progress.md has unchecked ticket'
+            )
+            t.ok(
+                content.includes('exit: 0'),
+                'progress.md records exit code 0'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
         rmSync(projectDir, { recursive:true, force:true })
     }
 })

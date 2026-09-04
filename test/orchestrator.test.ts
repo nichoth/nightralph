@@ -861,6 +861,18 @@ test('renderMergePrompt contains git push rule', t => {
     )
 })
 
+test('renderMergePrompt contains current directory rule', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderMergePrompt('spec body', ticket)
+    t.ok(
+        prompt.toLowerCase().includes('current directory'),
+        'merge prompt mentions current directory'
+    )
+})
+
 // -- spawnAgent --
 
 test('spawnAgent with cwd option runs in that directory',
@@ -1567,6 +1579,42 @@ test('dryRunIsolated handles multiple tickets per wave', t => {
         console.log = originalLog
     }
 })
+
+test('dryRunIsolated prints 0s retry delay when omitted',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-test.md',
+                status:'ready-for-agent',
+                blockers:[],
+            }),
+        ]
+
+        const output:Array<string> = []
+        const originalLog = console.log
+        console.log = function (msg:unknown) {
+            output.push(String(msg))
+        }
+
+        try {
+            dryRunIsolated({
+                tickets,
+                specBody:'test spec body',
+                repoName:'myapp',
+                conflictStrategy:'respawn',
+                progressPath:'.scratch/f/progress.md',
+            })
+        } finally {
+            console.log = originalLog
+        }
+
+        const fullOutput = output.join('\n')
+        t.ok(
+            fullOutput.includes('Retry delay:  0s'),
+            'prints 0s when retryDelay is omitted'
+        )
+    })
 
 // -- US-003: provider adapter argument construction --
 
