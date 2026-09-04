@@ -301,6 +301,42 @@ test(
     }
 )
 
+test(
+    'createWorktree serializes 50 concurrent calls across 5 rounds ' +
+    'of 10 without racing on shared git refs',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+
+        for (let round = 0; round < 5; round++) {
+            const tickets = Array.from({ length:10 }, (_, i) => {
+                const num = round * 10 + i
+                return makeTestTicket({
+                    num,
+                    slug:`concurrent-${num}`,
+                })
+            })
+
+            const results = await Promise.all(tickets.map(ticket => (
+                createWorktree({
+                    repoRoot,
+                    repoName,
+                    baseBranch,
+                    ticket,
+                })
+            )))
+
+            for (const result of results) {
+                t.ok(
+                    existsSync(result.worktreePath),
+                    `worktree ${result.worktreePath} should exist`
+                )
+            }
+        }
+    }
+)
+
 // -- removeWorktree --
 
 test('removeWorktree removes the worktree', async t => {

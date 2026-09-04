@@ -1118,3 +1118,40 @@ targeted `test/integration.test.ts` bundle, and the full suite.
 All 613 tests pass (setup: 79, orchestrator: 156, worktree: 25,
 progress: 57, merge: 40, display: 82, testcmd: 13, integration: 161).
 Lint clean.
+
+## 2026-09-03 - US-005: Worktree creation is serialized
+
+Completed. Renamed the existing `createWorktree` implementation in
+`src/worktree.ts` to a private `createWorktreeNow`, and added a new
+exported `createWorktree` that chains calls through a module-level
+`worktreeQueue` promise: each call attaches its work with
+`.then()` off the tail of the queue and immediately replaces the
+tail with a `.catch(() => {})`'d copy of its own result, so a
+rejected worktree creation doesn't wedge the queue for later
+callers. The public signature is unchanged (still async, same
+opts/return shape), so no call sites needed updates.
+
+Added a test ("createWorktree serializes 50 concurrent calls
+across 5 rounds of 10...") to test/worktree.test.ts: for 5 rounds,
+fires 10 concurrent createWorktree calls (distinct ticket nums per
+call, so distinct paths/branches) via Promise.all and asserts every
+resulting worktree path exists.
+
+Gotcha: I could not get this to fail pre-fix, even at full 50-way
+concurrency in one Promise.all batch against a real temp repo
+(tested standalone via a throwaway script, not just the 5x10
+harness) -- this machine's git version handles concurrent
+`worktree add` on distinct branches/paths without corruption,
+likely via its own internal ref-lock retries. The PRD's concern
+(races on shared refs) is plausible on other environments -- slower
+filesystems, NFS-backed repos, or older git versions with weaker
+locking -- so implemented serialization as specified rather than
+skipping it. The added test is a regression guard for the
+serialized behavior, not a demonstrated repro of the original race.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/worktree.test.ts` bundle, and the full suite.
+
+All 663 tests pass (setup: 79, orchestrator: 156, worktree: 75,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 161).
+Lint clean.

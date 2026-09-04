@@ -44,7 +44,7 @@ async function branchExists (
     }
 }
 
-export async function createWorktree (
+async function createWorktreeNow (
     opts:{
         repoRoot:string
         repoName:string
@@ -110,6 +110,21 @@ export async function createWorktree (
     )
 
     return { worktreePath, branchName }
+}
+
+let worktreeQueue:Promise<unknown> = Promise.resolve()
+
+export function createWorktree (
+    opts:{
+        repoRoot:string
+        repoName:string
+        baseBranch:string
+        ticket:Ticket
+    }
+):Promise<{ worktreePath:string; branchName:string }> {
+    const result = worktreeQueue.then(() => createWorktreeNow(opts))
+    worktreeQueue = result.catch(() => {})
+    return result
 }
 
 export async function removeWorktree (
