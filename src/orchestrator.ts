@@ -65,7 +65,7 @@ async function removeWorktreeQuietly (
     d:Display
 ):Promise<void> {
     try {
-        await removeWorktree(worktreePath)
+        await removeWorktree(worktreePath, { force:true })
     } catch (err) {
         d.log(
             '  Failed to remove worktree ' +
@@ -257,6 +257,9 @@ export function renderPrompt (
             'via web search. Use the spec and ticket ' +
             'body as your sole reference for API shapes.',
         ...testRules,
+        '- Do NOT read or modify files outside ' +
+            'your current directory (the worktree).',
+        '- Do NOT run git push.',
         '- Commit your work when finished.',
         '- After completing each checklist item in the ' +
             'ticket, print a line: [x] <item text> ' +
@@ -294,6 +297,7 @@ export function renderMergePrompt (
         '3. Commit the resolved files.',
         '',
         'Do NOT re-implement the ticket from scratch.',
+        'Do NOT run git push.',
     ].join('\n')
 }
 
@@ -584,6 +588,38 @@ export type AgentResult = {
     timedOut:boolean
 }
 
+// How long to wait after the process exits before giving up on a
+// graceful pipe close and forcing the streams shut. A grandchild
+// (dev server, watcher) that inherited the agent's stdout can keep
+// the pipe open after the agent itself has been killed, which would
+// otherwise leave spawnAgent's promise pending forever.
+const CLOSE_GRACE_MS = 2000
+
+// Agents are spawned with detached:true so they become their own
+// process group leader; this lets us kill the whole tree (agent +
+// any children it spawned, like dev servers) with one signal to
+// -pid instead of leaving orphans behind. Exported for reuse by
+// signal handling (Ctrl-C / SIGTERM).
+export function killProcessGroup (pid:number|undefined):void {
+    if (pid === undefined) return
+    try {
+        process.kill(-pid, 'SIGKILL')
+    } catch {
+        // Process group is already gone.
+    }
+}
+
+// Tracks every agent process spawnAgent currently has running, so
+// a Ctrl-C or SIGTERM to the orchestrator itself can kill them all
+// instead of leaving them running after the orchestrator exits.
+const runningAgents = new Set<number>()
+
+export function killRunningAgents ():void {
+    for (const pid of runningAgents) {
+        killProcessGroup(pid)
+    }
+}
+
 export function spawnAgent (opts:{
     prompt:string
     agentCmd:string
@@ -630,7 +666,10 @@ export function spawnAgent (opts:{
     const proc = spawn(opts.agentCmd, args, {
         stdio:['pipe', 'pipe', 'pipe'],
         cwd:opts.cwd,
+        detached:true,
     })
+
+    if (proc.pid !== undefined) runningAgents.add(proc.pid)
 
     proc.stdout.pipe(logStream)
 
@@ -708,8 +747,19 @@ export function spawnAgent (opts:{
         } else {
             console.warn(`${prefix}${msg}`)
         }
-        proc.kill('SIGKILL')
+        killProcessGroup(proc.pid)
     }, opts.timeout * 1000)
+
+    // An agent that exits before draining stdin (bad flags,
+    // auth failure) closes its end of the pipe; writing to it
+    // then raises EPIPE on proc.stdin. Without a listener that
+    // is an uncaught 'error' event that kills the orchestrator.
+    proc.stdin.on('error', err => {
+        logStream.write(
+            'nightralph: stdin write failed: ' +
+            `${formatErrorMessage(err)}\n`
+        )
+    })
 
     if (!promptFile) {
         proc.stdin.write(opts.prompt)
@@ -717,8 +767,17 @@ export function spawnAgent (opts:{
     proc.stdin.end()
 
     return new Promise<AgentResult>(resolve => {
-        proc.on('close', code => {
+        let settled = false
+        let graceTimer:ReturnType<typeof setTimeout>|undefined
+
+        function finish (exitCode:number):void {
+            if (settled) return
+            settled = true
             clearTimeout(timeout)
+            if (graceTimer) clearTimeout(graceTimer)
+            if (proc.pid !== undefined) {
+                runningAgents.delete(proc.pid)
+            }
             if (piFormatter) {
                 for (const line of piFormatter.flush()) {
                     collectCompleted(line)
@@ -734,14 +793,33 @@ export function spawnAgent (opts:{
             rlErr.close()
             logStream.end()
             if (promptFile) cleanupPromptFile(promptFile)
-            resolve({
-                exitCode:code ?? 1,
-                completedItems,
-                timedOut,
-            })
+            resolve({ exitCode, completedItems, timedOut })
+        }
+
+        // The process itself has exited, but 'close' waits for its
+        // stdio streams to close too -- a grandchild that inherited
+        // stdout/stderr can hold those pipes open indefinitely. Give
+        // it a grace period, then destroy the streams ourselves so
+        // the run does not hang forever on someone else's fd.
+        proc.on('exit', code => {
+            graceTimer = setTimeout(() => {
+                proc.stdout.destroy()
+                proc.stderr.destroy()
+                finish(code ?? 1)
+            }, CLOSE_GRACE_MS)
+        })
+
+        proc.on('close', code => {
+            finish(code ?? 1)
         })
         proc.on('error', err => {
+            if (settled) return
+            settled = true
+            if (graceTimer) clearTimeout(graceTimer)
             clearTimeout(timeout)
+            if (proc.pid !== undefined) {
+                runningAgents.delete(proc.pid)
+            }
             rl.close()
             rlErr.close()
             logStream.end()
@@ -802,6 +880,7 @@ export function dryRunIsolated (opts:{
     testCmd?:string|null
     thinking?:ThinkingLevel
     retries?:number
+    retryDelay?:number
 }):void {
     listTickets(opts.tickets)
 
@@ -858,6 +937,10 @@ export function dryRunIsolated (opts:{
     )
     console.log(
         `Retries:      ${opts.retries ?? DEFAULT_RETRIES}`
+    )
+    console.log(
+        'Retry delay:  ' +
+        `${opts.retryDelay ?? DEFAULT_RETRY_DELAY}s`
     )
     console.log(
         `\nMerge strategy: ${strategyDesc}`
@@ -1016,6 +1099,19 @@ async function respawnAndRetryMerge (opts:{
 
 export const DEFAULT_RETRIES = 2
 
+// Seconds to wait before the first retry; each later retry
+// doubles the wait so a provider outage is waited out instead
+// of burning every attempt back to back.
+export const DEFAULT_RETRY_DELAY = 30
+
+export function retryDelayFor (base:number, attempt:number):number {
+    return base * 2 ** (attempt - 2)
+}
+
+function sleep (ms:number):Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 // Log file for one attempt: the first attempt keeps the
 // plain name so existing tooling still finds it, later
 // attempts get their own file instead of overwriting it.
@@ -1032,6 +1128,7 @@ function attemptLogPath (
 
 type TicketOutcome =
     | { kind:'worktree-error'; error:unknown }
+    | { kind:'error'; error:unknown }
     | { kind:'no-commits' }
     | {
         kind:'failed'
@@ -1181,7 +1278,7 @@ async function runTicketAttempt (
 // retry cap is hit. Each retry starts from a fresh worktree
 // and, for pi, a higher thinking level.
 async function runTicketAttempts (
-    opts:TicketAttemptOpts&{ retries:number }
+    opts:TicketAttemptOpts&{ retries:number; retryDelay:number }
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
     const maxAttempts = opts.retries + 1
@@ -1194,16 +1291,27 @@ async function runTicketAttempts (
             d.log(`  Starting ${ticket.filename}`)
         } else {
             thinking = escalateThinking(thinking)
+            const delay = retryDelayFor(opts.retryDelay, attempt)
             d.log(
                 `  ${ticket.filename}: retrying ` +
                 `(attempt ${attempt}/${maxAttempts}` +
                 (isPi ? `, thinking ${thinking}` : '') +
+                (delay > 0 ? `, waiting ${delay}s` : '') +
                 ')'
             )
+            if (delay > 0) await sleep(delay * 1000)
         }
-        outcome = await runTicketAttempt({
-            ...opts, attempt, thinking,
-        })
+        try {
+            outcome = await runTicketAttempt({
+                ...opts, attempt, thinking,
+            })
+        } catch (error) {
+            d.log(
+                `  ${ticket.filename}: attempt ${attempt} ` +
+                `threw: ${formatErrorMessage(error)}`
+            )
+            return { kind:'error', error }
+        }
         if (
             outcome.kind === 'ready' ||
             outcome.kind === 'worktree-error'
@@ -1212,6 +1320,27 @@ async function runTicketAttempts (
         }
     }
     return outcome
+}
+
+// Wraps writeProgress + commitProgress so callers do not each
+// need to guard against a commit failure (e.g. a git lock held
+// by a concurrent process) crashing the run.
+async function saveProgress (
+    repoRoot:string,
+    progressPath:string,
+    progress:ProgressData,
+    message:string,
+    d:Display
+):Promise<void> {
+    writeProgress(progressPath, progress)
+    try {
+        await commitProgress(repoRoot, progressPath, message)
+    } catch (err) {
+        d.log(
+            '  Failed to commit progress: ' +
+            formatErrorMessage(err)
+        )
+    }
 }
 
 function runProgress (tickets:ReadonlyArray<Ticket>):RunProgress {
@@ -1232,20 +1361,25 @@ export async function runWaves (
     maxTurns?:number,
     thinking?:ThinkingLevel,
     retries?:number,
+    retryDelay?:number,
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
     const d = display ?? createDisplay()
     const maxAttempts = (retries ?? DEFAULT_RETRIES) + 1
+    const delayBase = retryDelay ?? 0
     const isPi = basename(agentCmd) === 'pi'
     let totalWaves = 0
     for (const _ of simulateWaves(tickets)) totalWaves++
 
     let totalCompleted = 0
     let waveNum = 0
+    const failedNums = new Set<number>()
 
     while (true) {
-        const ready = findReadyTickets(tickets)
+        const ready = findReadyTickets(tickets).filter(
+            t => !failedNums.has(t.num)
+        )
         if (ready.length === 0) break
 
         waveNum++
@@ -1299,13 +1433,16 @@ export async function runWaves (
                     attempt++
                 ) {
                     level = escalateThinking(level)
+                    const delay = retryDelayFor(delayBase, attempt)
                     d.log(
                         `  ${t.filename}: agent exited ` +
                         `${result.exitCode}; retrying ` +
                         `(attempt ${attempt}/${maxAttempts}` +
                         (isPi ? `, thinking ${level}` : '') +
+                        (delay > 0 ? `, waiting ${delay}s` : '') +
                         ')'
                     )
+                    if (delay > 0) await sleep(delay * 1000)
                     result = await spawnAgent({
                         prompt,
                         agentCmd,
@@ -1329,6 +1466,7 @@ export async function runWaves (
             if (r.status === 'rejected') continue
             const { ticket, result } = r.value
             if (result.exitCode !== 0) {
+                failedNums.add(ticket.num)
                 d.setTicketStatus(ticket.num, 'failed')
                 d.log(
                     `  ${ticket.filename}: ` +
@@ -1363,6 +1501,9 @@ export async function runWaves (
         `\nFinished: ${totalCompleted} completed` +
         (remaining.length > 0 ?
             `, ${remaining.length} remaining` :
+            '') +
+        (failedNums.size > 0 ?
+            `, ${failedNums.size} failed` :
             '')
     )
     d.cleanup()
@@ -1386,11 +1527,14 @@ export async function runWavesIsolated (opts:{
     thinking?:ThinkingLevel
     // extra attempts per ticket after a failure; default 2
     retries?:number
+    // seconds to wait before the first retry; default 30
+    retryDelay?:number
 }):Promise<{ allDone:boolean }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
     const d = opts.display ?? createDisplay()
     const retries = opts.retries ?? DEFAULT_RETRIES
+    const retryDelay = opts.retryDelay ?? 0
     let totalWaves = 0
     for (const _ of simulateWaves(opts.tickets)) totalWaves++
 
@@ -1412,11 +1556,12 @@ export async function runWavesIsolated (opts:{
         generateProgress(opts.featureName, opts.tickets),
         readProgress(progressPath)
     )
-    writeProgress(progressPath, progress)
-    await commitProgress(
+    await saveProgress(
         repoRoot,
         progressPath,
-        `nightralph: start ${opts.featureName}`
+        progress,
+        `nightralph: start ${opts.featureName}`,
+        d,
     )
 
     if (!opts.testCmd) {
@@ -1425,9 +1570,12 @@ export async function runWavesIsolated (opts:{
 
     let totalCompleted = 0
     let waveNum = 0
+    const failedNums = new Set<number>()
 
     while (true) {
-        const ready = findReadyTickets(opts.tickets)
+        const ready = findReadyTickets(opts.tickets).filter(
+            t => !failedNums.has(t.num)
+        )
         if (ready.length === 0) break
 
         waveNum++
@@ -1468,6 +1616,7 @@ export async function runWavesIsolated (opts:{
                 maxTurns:opts.maxTurns,
                 thinking:opts.thinking,
                 retries,
+                retryDelay,
                 d,
             }))
         )
@@ -1486,6 +1635,7 @@ export async function runWavesIsolated (opts:{
             const ticket = ready[i]
 
             if (outcome.kind === 'worktree-error') {
+                failedNums.add(ticket.num)
                 d.setTicketStatus(ticket.num, 'failed')
                 d.log(
                     `  ${ticket.filename}: failed to create ` +
@@ -1494,7 +1644,18 @@ export async function runWavesIsolated (opts:{
                 continue
             }
 
+            if (outcome.kind === 'error') {
+                failedNums.add(ticket.num)
+                d.setTicketStatus(ticket.num, 'failed')
+                d.log(
+                    `  ${ticket.filename}: attempt error: ` +
+                    formatErrorMessage(outcome.error)
+                )
+                continue
+            }
+
             if (outcome.kind === 'no-commits') {
+                failedNums.add(ticket.num)
                 d.setTicketStatus(ticket.num, 'failed')
                 d.log(
                     `  ${ticket.filename}: agent exited 0 ` +
@@ -1505,6 +1666,7 @@ export async function runWavesIsolated (opts:{
             }
 
             if (outcome.kind === 'failed') {
+                failedNums.add(ticket.num)
                 d.setTicketStatus(ticket.num, 'failed')
                 if (outcome.reason === 'exit') {
                     checkItems(ticket, outcome.completedItems)
@@ -1517,14 +1679,15 @@ export async function runWavesIsolated (opts:{
                     exitCode:outcome.exitCode,
                     done:false,
                 })
-                writeProgress(progressPath, progress)
-                await commitProgress(
+                await saveProgress(
                     repoRoot,
                     progressPath,
+                    progress,
                     `nightralph: ${ticket.filename} ` +
                     (outcome.reason === 'tests' ?
                         'tests failed' :
-                        'failed')
+                        'failed'),
+                    d,
                 )
                 continue
             }
@@ -1571,11 +1734,12 @@ export async function runWavesIsolated (opts:{
                         branch:branchResult.branch,
                         exitCode:0,
                     })
-                    writeProgress(progressPath, progress)
-                    await commitProgress(
+                    await saveProgress(
                         repoRoot,
                         progressPath,
-                        `nightralph: ${ticket.filename} done`
+                        progress,
+                        `nightralph: ${ticket.filename} done`,
+                        d,
                     )
 
                     const worktreePath = worktreePathsByNum.get(
@@ -1623,17 +1787,21 @@ export async function runWavesIsolated (opts:{
                             branch:branchResult.branch,
                             exitCode:0,
                         })
-                        writeProgress(progressPath, progress)
-                        await commitProgress(
+                        await saveProgress(
                             repoRoot,
                             progressPath,
+                            progress,
                             `nightralph: ${ticket.filename} ` +
-                            'done (respawn)'
+                            'done (respawn)',
+                            d,
                         )
 
                         if (worktreePath) {
                             try {
-                                await removeWorktree(worktreePath)
+                                await removeWorktree(
+                                    worktreePath,
+                                    { force:true }
+                                )
                             } catch (err) {
                                 d.log(
                                     '  Failed to remove worktree ' +
@@ -1658,12 +1826,13 @@ export async function runWavesIsolated (opts:{
                             exitCode:0,
                             done:false,
                         })
-                        writeProgress(progressPath, progress)
-                        await commitProgress(
+                        await saveProgress(
                             repoRoot,
                             progressPath,
+                            progress,
                             `nightralph: ${ticket.filename} ` +
-                            'merge failed'
+                            'merge failed',
+                            d,
                         )
                     }
                 }
@@ -1679,7 +1848,10 @@ export async function runWavesIsolated (opts:{
                     const ticket = ticketsByNum.get(sb.ticketNum)
                     if (ticket && ticket.status === 'done') continue
                     try {
-                        await removeWorktree(sb.worktreePath)
+                        await removeWorktree(
+                            sb.worktreePath,
+                            { force:true }
+                        )
                     } catch (err) {
                         d.log(
                             '  Failed to remove worktree ' +
@@ -1709,6 +1881,9 @@ export async function runWavesIsolated (opts:{
         `\nFinished: ${totalCompleted} completed` +
         (remaining.length > 0 ?
             `, ${remaining.length} remaining` :
+            '') +
+        (failedNums.size > 0 ?
+            `, ${failedNums.size} failed` :
             '')
     )
     d.cleanup()

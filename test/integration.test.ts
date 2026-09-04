@@ -6,7 +6,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { execFile, execSync } from 'node:child_process'
+import { execFile, execSync, spawn } from 'node:child_process'
 import {
     findFeatureDirs,
     resolveIssuesDir,
@@ -17,6 +17,7 @@ import {
     runWavesIsolated,
     scanTickets,
     spawnAgent,
+    killRunningAgents,
 } from '../src/orchestrator.js'
 
 function tmp ():string {
@@ -543,6 +544,18 @@ const MOCK_HANG = join(
 const MOCK_COMMIT_THEN_HANG = join(
     process.cwd(), 'test', 'mock-agent-commit-then-hang.js'
 )
+const MOCK_GRANDCHILD_HANG = join(
+    process.cwd(), 'test', 'mock-agent-grandchild-hang.js'
+)
+const MOCK_FAIL_TICKET_01 = join(
+    process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
+)
+const MOCK_DELETE_WORKTREE_01 = join(
+    process.cwd(), 'test', 'mock-agent-delete-worktree-01.js'
+)
+const MOCK_DIRTY_THEN_FAIL = join(
+    process.cwd(), 'test', 'mock-agent-dirty-then-fail.js'
+)
 
 const GIT_ENV = {
     ...process.env,
@@ -668,6 +681,101 @@ test('runWavesIsolated - two independent tickets ' +
             )
         } finally {
             process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - a failed ticket is not re-run ' +
+    'in a later wave', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-fail.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-pass.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '03-dependent.md'),
+            makeTicketBody({
+                status:'ready-for-agent',
+                blockers:[2],
+            })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+        const invocationLog = join(
+            projectDir, 'invocations.log'
+        )
+
+        const originalCwd = process.cwd()
+        const originalEnv = process.env.MOCK_INVOCATION_LOG
+        process.env.MOCK_INVOCATION_LOG = invocationLog
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_FAIL_TICKET_01,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-no-rerun',
+                conflictStrategy:'respawn',
+                retries:0,
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'failed ticket stays ready-for-agent'
+            )
+            t.equal(
+                tickets[2].status,
+                'done',
+                'dependent ticket ran in a later wave'
+            )
+
+            const invocations = existsSync(invocationLog) ?
+                readFileSync(invocationLog, 'utf8')
+                    .split('\n').filter(Boolean).length :
+                0
+            t.equal(
+                invocations, 1,
+                'failed ticket was only attempted once ' +
+                'across the whole run'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            if (originalEnv === undefined) {
+                delete process.env.MOCK_INVOCATION_LOG
+            } else {
+                process.env.MOCK_INVOCATION_LOG = originalEnv
+            }
         }
     } finally {
         try {
@@ -1373,6 +1481,89 @@ test('runWavesIsolated - failed ticket worktree is cleaned up',
             rmSync(projectDir, { recursive:true, force:true })
         }
     })
+
+test('runWavesIsolated - dirty worktree from failed agent is ' +
+    'cleaned up', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-dirty-fail.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        writeFileSync(
+            join(issuesDir, '02-clean-pass.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_DIRTY_THEN_FAIL,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-dirty-fail',
+                conflictStrategy:'respawn',
+                retryDelay:0,
+                retries:0,
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'failed dirty ticket keeps ready status'
+            )
+
+            t.equal(
+                tickets[1].status,
+                'done',
+                'clean ticket still completes'
+            )
+
+            const repoName = projectDir
+                .split('/').pop()
+            const worktreePath = join(
+                projectDir, '..',
+                `${repoName}.01-dirty-fail`
+            )
+            t.equal(
+                existsSync(worktreePath),
+                false,
+                'dirty worktree removed after failed agent'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
 
 test('runWavesIsolated - re-run after a prior failed run does not ' +
     'crash when the branch already exists', async t => {
@@ -2266,6 +2457,149 @@ test('spawnAgent - agent that never exits is killed at ' +
     }
 })
 
+test('spawnAgent - an agent that exits before reading ' +
+    'stdin does not crash the run', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-epipe-log-')
+    )
+    const MOCK_EXIT_BEFORE_READING = join(
+        process.cwd(), 'test',
+        'mock-agent-exit-before-reading.js'
+    )
+    try {
+        const logPath = join(logDir, 'epipe.log')
+        // Large enough that the OS pipe buffer cannot
+        // absorb it in one write, so the writer observes
+        // EPIPE once the reader has exited and closed its
+        // end of the pipe.
+        const bigPrompt = 'x'.repeat(2 * 1024 * 1024)
+        const result = await spawnAgent({
+            prompt:bigPrompt,
+            agentCmd:MOCK_EXIT_BEFORE_READING,
+            model:null,
+            timeout:10,
+            logPath,
+        })
+
+        t.equal(
+            result.exitCode, 1,
+            'resolves with the process exit code, not a crash'
+        )
+        t.equal(
+            result.timedOut, false,
+            'this is not a timeout'
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('spawnAgent - timeout kills the process group, ' +
+    'so spawnAgent still resolves promptly when a ' +
+    'grandchild holds the stdout pipe open', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-grandchild-log-')
+    )
+    try {
+        const logPath = join(logDir, 'grandchild.log')
+        const pidFile = join(logDir, 'grandchild.pid')
+        const start = Date.now()
+        const result = await spawnAgent({
+            prompt:'test prompt',
+            agentCmd:MOCK_GRANDCHILD_HANG,
+            model:null,
+            timeout:1,
+            logPath,
+            cwd:logDir,
+        })
+        const elapsedMs = Date.now() - start
+
+        t.equal(
+            result.timedOut, true,
+            'result reports the timeout'
+        )
+        t.ok(
+            elapsedMs < 6000,
+            'spawnAgent resolves within a few seconds of ' +
+            'the timeout even though a grandchild holds ' +
+            `the pipe open (took ${elapsedMs}ms)`
+        )
+
+        const grandchildPid = Number(
+            readFileSync(pidFile, 'utf8').trim()
+        )
+        let grandchildAlive = true
+        try {
+            process.kill(grandchildPid, 0)
+        } catch {
+            grandchildAlive = false
+        }
+        t.equal(
+            grandchildAlive, false,
+            'the grandchild process was killed along with ' +
+            'the agent'
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('killRunningAgents - kills a tracked agent\'s ' +
+    'process group and lets spawnAgent resolve', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-killrunning-log-')
+    )
+    try {
+        const logPath = join(logDir, 'hang.log')
+        const resultPromise = spawnAgent({
+            prompt:'test prompt',
+            agentCmd:MOCK_HANG,
+            model:null,
+            timeout:30,
+            logPath,
+        })
+
+        // Give the process a moment to actually spawn and
+        // register itself before we try to kill it.
+        await new Promise(r => setTimeout(r, 300))
+
+        killRunningAgents()
+
+        const start = Date.now()
+        const result = await resultPromise
+        const elapsedMs = Date.now() - start
+
+        t.ok(
+            result.exitCode !== 0,
+            'a killed agent does not count as exit 0'
+        )
+        t.equal(
+            result.timedOut, false,
+            'killRunningAgents is not the timeout path'
+        )
+        t.ok(
+            elapsedMs < 6000,
+            `spawnAgent resolved promptly (${elapsedMs}ms)`
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('killRunningAgents - is a no-op when no agents ' +
+    'are running', t => {
+    let threw = false
+    try {
+        killRunningAgents()
+    } catch {
+        threw = true
+    }
+    t.equal(
+        threw, false,
+        'calling with an empty registry does not throw'
+    )
+})
+
 test('spawnAgent - unknown provider passes through ' +
     'with no extra args', async t => {
     const logDir = mkdtempSync(
@@ -2302,6 +2636,67 @@ test('spawnAgent - unknown provider passes through ' +
 
 // -- exit code tests --
 
+test('CLI subprocess - SIGINT kills the running ' +
+    'agent and its child processes', async t => {
+    const projectDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+
+        writeFileSync(
+            join(issuesDir, '01-hang.md'),
+            makeTicketBody({ status:'ready-for-agent' }),
+        )
+
+        const child = spawn(process.execPath, [
+            CLI, MOCK_GRANDCHILD_HANG,
+            '--spec', FEAT,
+            '--timeout', '30',
+        ], { cwd:projectDir })
+
+        const pidFile = join(projectDir, 'grandchild.pid')
+        const deadline = Date.now() + 15_000
+        while (
+            !existsSync(pidFile) &&
+            Date.now() < deadline
+        ) {
+            await new Promise(r => setTimeout(r, 100))
+        }
+        t.ok(
+            existsSync(pidFile),
+            'agent\'s grandchild process started'
+        )
+        const grandchildPid = Number(
+            readFileSync(pidFile, 'utf8').trim()
+        )
+
+        child.kill('SIGINT')
+
+        const exitCode:number = await new Promise(resolve => {
+            child.on('exit', code => resolve(code ?? -1))
+        })
+
+        t.equal(
+            exitCode, 130,
+            'CLI exits 130 on SIGINT'
+        )
+
+        let grandchildAlive = true
+        try {
+            process.kill(grandchildPid, 0)
+        } catch {
+            grandchildAlive = false
+        }
+        t.equal(
+            grandchildAlive, false,
+            'the agent\'s child process was killed too'
+        )
+    } finally {
+        rmSync(projectDir, {
+            recursive:true, force:true,
+        })
+    }
+})
+
 test('CLI subprocess exits 1 when agent fails',
     async t => {
         const projectDir = tmp()
@@ -2319,6 +2714,7 @@ test('CLI subprocess exits 1 when agent fails',
                 MOCK_AGENT_FAIL,
                 '--spec', FEAT,
                 '--timeout', '10',
+                '--retry-delay', '0',
             ], { cwd:projectDir })
 
             t.ok(
@@ -2488,6 +2884,7 @@ test('runWavesIsolated - a failed pi agent is retried with ' +
                 featureName:'test-feature',
                 conflictStrategy:'respawn',
                 retries:2,
+                retryDelay:0,
             })
 
             t.equal(result.allDone, true, 'run reports all done')
@@ -2569,6 +2966,59 @@ test('runWavesIsolated - retries:0 disables the retry so the ' +
                 existsSync(join(logsDir, '01-flaky.attempt2.log')),
                 false,
                 'no second attempt was made'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(binDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - omitting retryDelay does not ' +
+    'wait between retries', async t => {
+    const projectDir = initTempGitRepo()
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-test-')
+    )
+    try {
+        symlinkSync(MOCK_FAIL_THEN_PASS, join(binDir, 'pi'))
+        chmodSync(join(binDir, 'pi'), 0o755)
+
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-flaky.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            const started = Date.now()
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:join(binDir, 'pi'),
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                retries:2,
+            })
+            const elapsed = Date.now() - started
+
+            t.equal(result.allDone, true, 'run reports all done')
+            t.ok(
+                elapsed < 10_000,
+                'retried without the CLI default delay ' +
+                `(elapsed ${elapsed}ms)`
             )
         } finally {
             process.chdir(originalCwd)
@@ -2694,9 +3144,10 @@ test('CLI subprocess - default retries recover a flaky pi agent',
                 join(binDir, 'pi'),
                 '--spec', FEAT,
                 '--timeout', '10',
+                '--retry-delay', '0',
             ], { cwd:projectDir })
 
-            t.equal(code, 0, 'run succeeds without flags')
+            t.equal(code, 0, 'run succeeds with default retries')
             t.ok(
                 existsSync(join(logsDir, '01-flaky.attempt2.log')),
                 'second attempt ran'
@@ -2724,6 +3175,7 @@ test('CLI subprocess - --dry-run in a git repo prints thinking ' +
             '--dry-run',
             '--thinking', 'low',
             '--retries', '3',
+            '--retry-delay', '15',
         ], { cwd:projectDir })
 
         t.equal(code, 0, 'exit code 0')
@@ -2734,6 +3186,10 @@ test('CLI subprocess - --dry-run in a git repo prints thinking ' +
         t.ok(
             /Retries:\s+3/.test(stdout),
             'prints the retry cap'
+        )
+        t.ok(
+            /Retry delay:\s+15s/.test(stdout),
+            'prints the retry delay'
         )
     } finally {
         rmSync(projectDir, { recursive:true, force:true })
@@ -2776,6 +3232,7 @@ test('runWavesIsolated - a red test gate on the first attempt ' +
                 conflictStrategy:'respawn',
                 testCmd,
                 retries:1,
+                retryDelay:0,
             })
 
             t.equal(result.allDone, true, 'run reports all done')
@@ -2797,5 +3254,69 @@ test('runWavesIsolated - a red test gate on the first attempt ' +
         cleanupWorktrees(projectDir)
         rmSync(projectDir, { recursive:true, force:true })
         rmSync(markerDir, { recursive:true, force:true })
+    }
+})
+
+// -- US-008: A throw inside an attempt fails that attempt, not the wave --
+
+test('runWavesIsolated - agent that deletes its worktree ' +
+    'fails its ticket but the other ticket succeeds', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-doomed.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-survivor.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_DELETE_WORKTREE_01,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                retries:0,
+                retryDelay:0,
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'ticket 01 stays ready-for-agent ' +
+                '(error failed the ticket, not the wave)'
+            )
+            t.equal(
+                tickets[1].status,
+                'done',
+                'ticket 02 completes successfully'
+            )
+            t.equal(
+                result.allDone,
+                false,
+                'run reports not all done'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
     }
 })

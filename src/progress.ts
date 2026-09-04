@@ -187,16 +187,28 @@ export async function commitProgress (
     repoRoot:string,
     progressPath:string,
     message:string
-):Promise<void> {
+):Promise<boolean> {
     await execFileAsync(
         'git',
         ['add', '--force', progressPath],
         { cwd:repoRoot }
     )
 
+    try {
+        await execFileAsync(
+            'git',
+            ['diff', '--cached', '--quiet', '--', progressPath],
+            { cwd:repoRoot }
+        )
+        return false
+    } catch {
+        // non-zero exit means the staged file differs from HEAD
+    }
+
     await execFileAsync(
         'git',
         ['commit', '-m', message, '--', progressPath],
         { cwd:repoRoot }
     )
+    return true
 }

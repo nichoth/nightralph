@@ -154,6 +154,7 @@ Flags:
 | `--max-turns <n>` | no | -- | Max agentic turns per ticket. Forwarded verbatim as `--max-turns <n>` to the provider CLI. Only `claude` accepts it; `codex` and `pi` reject it as an unknown option and the agent exits immediately. Applies to every agent spawn, including a re-spawn after a merge conflict. When omitted, `claude` applies no turn limit, so `--timeout` is the only cap. Reaching the limit is an error exit, so the ticket is recorded as failed |
 | `--thinking <level>` | no | -- | Starting thinking level for `pi`, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Forwarded as `--thinking <level>`. Omitted = pi's own default. Ignored for other providers. Each retry steps up from here (see `--retries`) |
 | `--retries <n>` | no | `2` | Extra attempts per ticket after a failed run. Each retry starts from a fresh worktree; with `pi` it also raises the thinking level (see Notes). `0` disables retries |
+| `--retry-delay <n>` | no | `30` | Seconds to wait before the first retry; doubles each further retry (30s, 60s, 120s, ...). `0` disables the wait |
 
 
 **Notes**:
@@ -184,10 +185,19 @@ Flags:
   thinking level: without `--thinking` the first retry uses `high`
   and the second `max`; with `--thinking <level>` each retry steps
   one level up from the previous attempt, stopping at `max`.
-  `claude` and `codex` are retried at the same settings. Retry
+  `claude` and `codex` are retried at the same settings. Retries
+  are spaced with exponential backoff controlled by `--retry-delay`:
+  the first retry waits `--retry-delay` seconds, the second waits
+  double that, and so on. This lets provider outages clear before
+  burning the next attempt. Retry
   logs are written to `<dir>/../logs/<ticket>.attempt<n>.log`
   (and `.attempt<n>.test.log` for the test command) so the first
   attempt's log is kept.
+* A ticket that exhausts all its retry attempts is excluded from
+  later waves in the same run. It stays `ready-for-agent` on disk
+  so a future run can pick it up, but it will not be re-started
+  within the current invocation. The final summary line includes
+  the count of failed tickets when any failed.
 * An agent still running at `--timeout` is killed. The kill is
   reported in the status display and in the ticket log. It is not
   treated as an agent failure: uncommitted changes in the worktree
@@ -195,6 +205,20 @@ Flags:
   new-commits check, test gate, and merge as an agent that exited 0.
   Opus tickets have taken over 12 minutes of API time, which is why
   the default is an hour rather than the old 15 minutes.
+* Agents are spawned in their own process group (`detached:true`).
+  When the timeout fires or when you press Ctrl-C (SIGINT) or send
+  SIGTERM, the orchestrator kills the entire process group -- not
+  just the agent process -- so dev servers, watchers, and other
+  child processes are cleaned up. SIGINT exits 130 and SIGTERM
+  exits 143 after killing all running agents and restoring the
+  terminal.
+* For fast models that reliably finish tickets in a few minutes,
+  `--timeout 900` is a reasonable cap that catches stuck agents
+  sooner than the one-hour default.
+* `.scratch/` should be listed in your project's `.gitignore`.
+  The orchestrator force-adds `progress.md` so it is tracked despite
+  the ignore rule, but ticket files, logs, and spec files are
+  working state and should not be committed to the project repo.
 * Agent logs are written to `<dir>/../logs/<ticket>.log`.
 * Provider commands are launched non-interactively with default flags
   that grant the agent write access to the worktree, so tickets can
@@ -204,8 +228,9 @@ Flags:
     (codex removed `--full-auto`; the workspace-write sandbox
     cannot commit in a worktree because its `.git` link points
     outside the tree)
-  * `pi`: `-p --approve --no-session`
-    (prompt delivered via temp file, not stdin)
+  * `pi`: `-p --verbose --approve --no-session --mode json`
+    (prompt delivered via temp file; `--approve` auto-accepts
+    tool-use proposals so the agent runs non-interactively)
 
 
 ## How It Works

@@ -914,3 +914,480 @@ and the full suite.
 All 380 tests pass (setup: 79, orchestrator: 86, worktree: 20,
 progress: 52, merge: 38, integration: 105).
 Lint clean.
+
+## 2026-09-03 - US-001: commitProgress skips an unchanged file
+
+Completed. `commitProgress` in src/progress.ts previously always ran
+`git commit`, which throws when the staged progress file is
+identical to HEAD (git exits non-zero with "nothing to commit").
+Since retries and merge-failure paths in runWavesIsolated call
+commitProgress with content that may be unchanged from the prior
+commit, a second failure on the same ticket could crash the run.
+
+Changed commitProgress to return `Promise<boolean>`: after staging
+the file, it runs `git diff --cached --quiet -- <path>`; a zero
+exit (no diff) short-circuits to `return false` without committing;
+a non-zero exit (there is a diff) falls through to the existing
+`git commit` call and returns `true`.
+
+Added two tests to test/progress.test.ts: one asserting the return
+value is `true` on a normal commit, and one asserting a second call
+with identical content returns `false`, throws nothing, and does not
+create a new commit (checked via `git rev-list --count HEAD`
+before/after).
+
+Existing callers in src/orchestrator.ts do not yet consume the
+return value -- wiring failedNums/saveProgress semantics around this
+boolean is scoped to US-002, not touched here.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/progress.test.ts` bundle, and the full suite.
+
+All 602 tests pass (setup: 79, orchestrator: 153, worktree: 25,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 153).
+Lint clean.
+
+## 2026-09-03 - US-002: A failed ticket is recorded once and not re-run this run
+
+Completed. Both `runWaves` and `runWavesIsolated` in
+src/orchestrator.ts now track a per-run `failedNums:Set<number>`.
+`findReadyTickets(...)` results are filtered against it before each
+wave, so a ticket that exhausted its attempts (and is not merge-
+blocked) cannot be picked up again in a later wave of the same run.
+
+`failedNums` is populated only on outcomes that mean the retry
+budget is spent: a non-zero exit after all in-place retries
+(`runWaves`), and `worktree-error` / `no-commits` / `failed`
+outcomes from `runTicketAttempts` (`runWavesIsolated`). A merge
+failure (branch didn't merge and, for `respawn`, the respawn also
+failed to resolve it) does NOT add to `failedNums` -- that ticket
+stays eligible and gets a fresh worktree/attempt in the next wave,
+per the acceptance criteria.
+
+Added a `saveProgress(repoRoot, progressPath, progress, message, d)`
+helper that wraps `writeProgress` + `commitProgress` and logs
+(instead of throwing) if the commit fails, e.g. a transient git lock
+held by a concurrent process. Replaced all five
+writeProgress+commitProgress call sites in `runWavesIsolated` with
+it.
+
+The final `Finished: ...` summary line in both functions now appends
+`, N failed` when `failedNums.size > 0`.
+
+Added test/mock-agent-fail-ticket-01.js: fails (and records each
+invocation to `MOCK_INVOCATION_LOG` if set) only when the prompt
+names ticket `01-*.md`; any other ticket succeeds like
+mock-agent-pass.js. This lets one agentCmd drive a multi-ticket,
+multi-wave scenario where one ticket keeps failing while an
+independent ticket succeeds and unblocks a third, dependent ticket
+in wave 2.
+
+Added one test per entry point (test/orchestrator.test.ts for
+`runWaves`, test/integration.test.ts for `runWavesIsolated`): three
+tickets, 01 always fails, 02 is independent and passes, 03 is
+blocked by 02. Asserts 01 stays `ready-for-agent`, 03 reaches `done`
+in wave 2, and 01's mock agent was invoked exactly once across the
+whole run (previously it was invoked again in every subsequent
+wave). Both tests were confirmed red against the pre-fix code before
+implementing the filter.
+
+Gotcha: the mock's ticket-identification regex needs a `\b` word
+boundary, not a literal `/` or `\` prefix -- the rendered prompt puts
+the ticket filename on its own line (preceded by `\n`), so a naive
+`(^|[/\\])01-...` pattern never matches.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/orchestrator.test.ts` and `test/integration.test.ts`
+bundles, and the full suite.
+
+All 608 tests pass (setup: 79, orchestrator: 156, worktree: 25,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 156).
+Lint clean.
+
+Note: the implementation above was left uncommitted by the session
+that wrote it (prd.json still showed passes:false and there was no
+matching git commit). This session re-verified the working tree
+matches the description -- build, lint, targeted orchestrator/
+integration bundles, and the full suite all pass with zero failures
+-- then set passes:true and committed.
+
+## 2026-09-03 - US-003: An agent that exits before reading stdin cannot crash the run
+
+Completed. `spawnAgent` in src/orchestrator.ts wrote the prompt
+directly to `proc.stdin` with no error listener. When an agent CLI
+exits immediately (bad flags, auth failure) before draining stdin,
+Node's write to the now-closed pipe raises EPIPE as an uncaught
+`error` event on the stdin stream, which crashes the whole
+orchestrator process -- taking down every other ticket's wave with
+it.
+
+Added a `proc.stdin.on('error', ...)` listener, installed before the
+write, that logs the failure into the ticket's log file via
+`formatErrorMessage` instead of letting it propagate. No other
+behavior changes: the agent's own exit code (1, in the reproduction
+case) still flows through `proc.on('close', ...)` as before, so
+`spawnAgent` resolves normally with `exitCode:1, timedOut:false`.
+
+Added test/mock-agent-exit-before-reading.js: calls `process.exit(1)`
+immediately without ever registering a stdin listener, so the parent
+process's write is guaranteed to hit a closed pipe.
+
+Added one test to test/integration.test.ts
+("spawnAgent - an agent that exits before reading stdin does not
+crash the run") using a 2MB prompt, large enough that the OS pipe
+buffer cannot absorb it in a single write so the EPIPE is reliably
+triggered. Confirmed red first: running the bundled integration
+suite against the pre-fix code crashed the whole test process with
+an uncaught `Error: write EPIPE`, not just a single failing
+assertion.
+
+Gotcha: manually re-bundling a single test file with esbuild needs
+`--packages=external` (matching the `npm test` script) -- omitting
+it produces a bundle that tries to `require('stream')` at runtime
+and fails immediately with a confusing "Dynamic require... not
+supported" error that looks unrelated to the change under test.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/integration.test.ts` bundle, and the full suite.
+
+All 610 tests pass (setup: 79, orchestrator: 156, worktree: 25,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 158).
+Lint clean.
+
+## 2026-09-03 - US-004: The timeout kill takes the agent's process group and always resolves
+
+Completed. Two related problems in `spawnAgent` (src/orchestrator.ts):
+
+1. The timeout handler called `proc.kill('SIGKILL')`, which only
+   kills the agent process itself. An agent that spawns a dev
+   server or watcher as a child leaves that child running as an
+   orphan after the timeout fires.
+2. `spawnAgent`'s promise only resolved on the `close` event, which
+   waits for stdout/stderr to close. If a grandchild inherited
+   those pipes and outlives (or briefly outlives) the agent, `close`
+   never fires and the whole ticket -- and the run -- hangs forever.
+
+Fix: spawn agents with `detached:true` so they become their own
+process group leader, and added an exported `killProcessGroup(pid)`
+helper that sends `SIGKILL` to `-pid` (the whole group) instead of
+just the agent. The timeout handler now calls this helper; it's
+exported so the upcoming SIGINT/SIGTERM handling (US-006) can reuse
+it. `spawnAgent`'s promise now also listens for `exit` (fires as
+soon as the process itself dies, independent of pipe state) and
+starts a 2000ms (`CLOSE_GRACE_MS`) grace timer; if `close` hasn't
+already resolved the promise by then, it force-destroys
+`proc.stdout`/`proc.stderr` and resolves anyway. A `settled` flag
+guards against `close` and the grace timer both trying to resolve.
+
+Added test/mock-agent-grandchild-hang.js: spawns a non-detached
+child (inheriting stdout/stderr, so same process group as the
+parent) that never exits on its own, writes the child's pid to
+`./grandchild.pid` (relative to the mock's cwd, which the test sets
+via spawnAgent's `cwd` option -- there's no existing mechanism to
+pass extra argv through spawnAgent, so cwd was the simplest way to
+hand the test a rendezvous path). Neither the mock nor its child
+reads stdin or exits, so only the orchestrator's timeout can end
+them.
+
+Added one test to test/integration.test.ts ("spawnAgent - timeout
+kills the process group..."): timeout:1, asserts `timedOut:true`,
+asserts the promise resolves in well under CLOSE_GRACE_MS + a
+comfortable buffer (elapsedMs < 6000; in practice ~1s, since
+same-process-group SIGKILL kills the grandchild immediately and
+`close` fires on its own -- the grace-timer fallback exists for the
+case where a grandchild has fully detached into its own group and
+survives the SIGKILL, which isn't reproduced here), and confirms via
+`process.kill(grandchildPid, 0)` throwing that the grandchild
+process is actually dead, not merely orphaned.
+
+Confirmed red first: against the pre-fix code (proc.kill('SIGKILL')
++ resolve only on 'close'), the new test hung indefinitely --
+running the full integration bundle with a 15s wrapper timeout
+exited 124 partway through, well before reaching later tests, with
+no output for the new test at all.
+
+Gotcha: the mock script needs its executable bit set (`chmod +x`)
+or spawnAgent's underlying `spawn()` call fails with EACCES, which
+surfaces as `proc.on('error', ...)` and a false-looking failure
+("result reports the timeout" not ok) that has nothing to do with
+the process-group logic being tested.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/integration.test.ts` bundle, and the full suite.
+
+All 613 tests pass (setup: 79, orchestrator: 156, worktree: 25,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 161).
+Lint clean.
+
+## 2026-09-03 - US-005: Worktree creation is serialized
+
+Completed. Renamed the existing `createWorktree` implementation in
+`src/worktree.ts` to a private `createWorktreeNow`, and added a new
+exported `createWorktree` that chains calls through a module-level
+`worktreeQueue` promise: each call attaches its work with
+`.then()` off the tail of the queue and immediately replaces the
+tail with a `.catch(() => {})`'d copy of its own result, so a
+rejected worktree creation doesn't wedge the queue for later
+callers. The public signature is unchanged (still async, same
+opts/return shape), so no call sites needed updates.
+
+Added a test ("createWorktree serializes 50 concurrent calls
+across 5 rounds of 10...") to test/worktree.test.ts: for 5 rounds,
+fires 10 concurrent createWorktree calls (distinct ticket nums per
+call, so distinct paths/branches) via Promise.all and asserts every
+resulting worktree path exists.
+
+Gotcha: I could not get this to fail pre-fix, even at full 50-way
+concurrency in one Promise.all batch against a real temp repo
+(tested standalone via a throwaway script, not just the 5x10
+harness) -- this machine's git version handles concurrent
+`worktree add` on distinct branches/paths without corruption,
+likely via its own internal ref-lock retries. The PRD's concern
+(races on shared refs) is plausible on other environments -- slower
+filesystems, NFS-backed repos, or older git versions with weaker
+locking -- so implemented serialization as specified rather than
+skipping it. The added test is a regression guard for the
+serialized behavior, not a demonstrated repro of the original race.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/worktree.test.ts` bundle, and the full suite.
+
+All 663 tests pass (setup: 79, orchestrator: 156, worktree: 75,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 161).
+Lint clean.
+
+## 2026-09-03 - US-006: Ctrl-C and SIGTERM stop the run and kill agents
+
+Completed. StatusDisplay no longer installs process-level SIGINT/
+SIGTERM handlers -- removed the `signalHandler` field and both
+`process.on`/`removeListener` call sites from `startWave` and
+`cleanup` in `src/display.ts`. Those handlers only ever restored
+the cursor; they never touched running agents, and having the
+display module reach for global process state was the wrong layer
+for signal handling anyway.
+
+Added a module-level `runningAgents` registry (`Set<number>` of
+pids) in `src/orchestrator.ts`, alongside the existing
+`killProcessGroup` helper from US-004. `spawnAgent` adds `proc.pid`
+to the set right after `spawn()` and removes it in both places a
+run settles (`finish()` and the `proc.on('error', ...)` handler).
+Exported `killRunningAgents()` iterates the set and calls
+`killProcessGroup` on each pid -- it does not clear the set itself;
+that happens naturally as each killed process's `finish()`/`error`
+handler fires.
+
+`src/index.ts` now installs `SIGINT`/`SIGTERM` handlers right after
+`createDisplay()` in `runExecute`, before the run starts. Both call
+a shared `onSignal(exitCode)` that calls `killRunningAgents()`,
+`display.cleanup()`, then `process.exit()` with 130 (SIGINT) or 143
+(SIGTERM). These are only installed once per CLI invocation, so
+there's no listener-accumulation concern.
+
+Tests: `test/display.test.ts` gained two tests asserting
+`process.listenerCount('SIGINT'|'SIGTERM')` is unchanged across
+`startWave` and `cleanup`. `test/integration.test.ts` gained a unit
+test spawning a hanging agent (`mock-agent-hang.js`) via
+`spawnAgent`, calling `killRunningAgents()`, and asserting the
+promise resolves promptly with a nonzero exit code and
+`timedOut:false` (to distinguish the kill path from the timeout
+path); a no-op test for an empty registry; and a full CLI subprocess
+test that spawns the built CLI with `mock-agent-grandchild-hang.js`
+as the provider, waits for the agent's grandchild pid file to
+appear, sends `SIGINT` to the CLI process, and asserts both that the
+CLI exits 130 and that the grandchild process is actually dead (not
+just orphaned).
+
+Confirmed red first: with the orchestrator/display changes in place
+but the `src/index.ts` signal-handler wiring temporarily removed,
+the CLI-subprocess test failed both assertions. `not ok 137 CLI
+exits 130 on SIGINT` (expected 130, actual -1) -- with no installed
+handler, Node terminates the process via the signal itself rather
+than calling `process.exit(130)`, so the `exit` event fires with
+`code:null`. `not ok 138 the agent's child process was killed too`
+(expected false, actual true) -- nothing sent a signal to the
+agent's process group, so the grandchild was still alive after the
+CLI died. Re-adding the handler wiring in `src/index.ts` turned both
+green.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/display.test.ts` and `test/integration.test.ts`
+bundles, and the full suite.
+
+All 674 tests pass (setup: 79, orchestrator: 156, worktree: 75,
+progress: 57, merge: 40, display: 86, testcmd: 13, integration: 168).
+Lint clean.
+
+Note: as with US-002 earlier, this implementation was left uncommitted
+by the session that wrote it (prd.json still showed passes:false, no
+matching git commit). This session re-verified the working tree
+matches the description above -- build, lint, targeted display/
+integration bundles, and the full suite all pass with zero failures
+-- then set passes:true and committed.
+
+## 2026-09-03 - US-007: Backoff between retries
+
+Completed. The full implementation was already present in the working
+tree from a prior session that left it uncommitted (prd.json still
+showed passes:false, no matching git commit). All acceptance criteria
+verified against the current code:
+
+1. DEFAULT_RETRY_DELAY exported as 30 (src/orchestrator.ts:1101)
+2. retryDelayFor(base, attempt) returns base * 2^(attempt-2)
+   (src/orchestrator.ts:1103-1104)
+3. retryDelayFor(30,2)=30, retryDelayFor(30,3)=60,
+   retryDelayFor(0,3)=0 -- tested in test/orchestrator.test.ts
+4. runWavesIsolated and runWaves accept a retryDelay option
+5. CLI has --retry-delay flag defaulting to DEFAULT_RETRY_DELAY
+   (src/index.ts:148-154)
+6. dryRunIsolated prints the retry delay -- tested in
+   test/integration.test.ts
+7. Existing CLI tests exercising retries pass --retry-delay 0
+   (test/integration.test.ts lines 2628, 3058)
+8. A sleep() helper gates retry attempts so provider outages are
+   waited out instead of burning attempts back to back
+9. runWaves has an equivalent delay test confirming elapsed time
+   (test/orchestrator.test.ts:2024)
+
+Build, lint, and full suite all pass with zero failures. Set
+passes:true and committed.
+
+## 2026-09-03 - US-008: A throw inside an attempt fails that attempt, not the wave
+
+Completed. `runTicketAttempt` in src/orchestrator.ts could throw
+when a ticket's worktree is destroyed mid-run (e.g. by the agent
+deleting its own cwd). The `isDirty` / `hasNewCommits` calls use
+`execFileSync` which throws ENOENT when the directory no longer
+exists, and since `runTicketAttempts` had no try/catch around its
+`runTicketAttempt` call, the rejection propagated through
+`Promise.all` in `runWavesIsolated` and crashed the entire wave.
+
+Changes:
+1. Added `'error'` kind to the `TicketOutcome` discriminated union
+   (src/orchestrator.ts:1127) with an `error:unknown` field.
+2. Wrapped the `runTicketAttempt` call in `runTicketAttempts` with
+   try/catch (src/orchestrator.ts:1304-1311). A caught error returns
+   `{ kind:'error', error }` immediately -- no retry, since the
+   error is structural (missing directory), not a transient agent
+   failure.
+3. Added `'error'` handling in `runWavesIsolated`'s outcome loop
+   (src/orchestrator.ts:1649-1657): adds the ticket to `failedNums`,
+   sets display status to `'failed'`, logs the error, and continues
+   to the next ticket.
+
+Created test/mock-agent-delete-worktree-01.js: for ticket 01-*,
+deletes its own cwd (the worktree directory) then exits 0. For
+all other tickets, behaves like mock-agent-pass.js.
+
+Added 1 new integration test to test/integration.test.ts: two
+independent tickets in one wave, ticket 01 uses the
+delete-worktree mock. Asserts ticket 01 stays ready-for-agent
+(error failed the ticket), ticket 02 reaches done (wave survived),
+and result.allDone is false.
+
+All 687 tests pass (setup: 79, orchestrator: 163, worktree: 75,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 174).
+Lint clean.
+
+## 2026-09-03 - US-009: The prompt confines the agent to its worktree
+
+Completed. Added two confinement rules to `renderPrompt` in
+src/orchestrator.ts: agents are told not to read or modify files
+outside their current directory (the worktree), and not to run
+`git push`. Added a `git push` prohibition to `renderMergePrompt`
+as well.
+
+Added 3 new tests to test/orchestrator.test.ts:
+- renderPrompt output contains a rule mentioning 'git push'
+- renderPrompt output contains a rule mentioning 'current directory'
+- renderMergePrompt output contains a rule mentioning 'git push'
+
+All 690 tests pass (setup: 79, orchestrator: 166, worktree: 75,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 174).
+Lint clean.
+
+## 2026-09-03 - US-010: A failed attempt's worktree is removed even when dirty
+
+Completed. `removeWorktree` in src/worktree.ts previously ran
+`git worktree remove` without `--force`, which fails when the
+worktree contains modified or untracked files (git exits 128
+with "contains modified or untracked files, use --force to
+delete it"). Since failed agents often leave dirty files behind
+(partial writes, untracked artifacts), the orchestrator's cleanup
+calls silently failed and left worktree directories accumulating
+as sibling directories.
+
+Changed `removeWorktree` to accept an optional second parameter
+`opts?:{ force?:boolean }`. When `opts.force` is true, `--force`
+is inserted into the git args before the worktree path. The
+public signature is backward-compatible (existing callers that
+pass no second arg behave identically).
+
+Updated all cleanup call sites in src/orchestrator.ts to pass
+`force:true`:
+- `removeWorktreeQuietly` (used after failed agent exits and
+  failed test gates)
+- The respawn-recovery path's direct `removeWorktree` call
+- The `stoppedAt` cleanup loop's direct `removeWorktree` call
+
+Created test/mock-agent-dirty-then-fail.js: writes an untracked
+file into its cwd then exits 1 for ticket 01-*; any other ticket
+succeeds like mock-agent-pass.js.
+
+Added 2 new tests to test/worktree.test.ts:
+- removeWorktree with force removes a dirty worktree
+- removeWorktree without force fails on a dirty worktree
+
+Added 1 new integration test to test/integration.test.ts:
+- dirty worktree from failed agent is cleaned up: two tickets,
+  01 writes dirty files and exits 1, 02 passes. Asserts 01 stays
+  ready-for-agent, 02 reaches done, and 01's worktree directory
+  is gone.
+
+All 695 tests pass (setup: 79, orchestrator: 166, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 177).
+Lint clean.
+
+## 2026-09-04 - US-011: Documentation updates for robustness features
+
+Documentation-only change. No new tests -- docs are not tested.
+
+README.md updates:
+1. Flags table: added `--retry-delay` with description and default
+2. Notes: described retry backoff behavior (exponential, controlled
+   by `--retry-delay`) and failed-ticket exclusion from later waves
+3. Notes: described process group kills (`detached:true`, SIGKILL to
+   `-pid`) and signal handling (SIGINT exits 130, SIGTERM exits 143,
+   both kill all running agents)
+4. Notes: recommended `--timeout 900` for fast models
+5. Notes: added `.scratch/` `.gitignore` guidance (force-added
+   progress.md is still tracked)
+6. Pi provider bullet: corrected to show full flags
+   (`-p --verbose --approve --no-session --mode json`) and
+   clarified `--approve` auto-accepts tool-use proposals
+
+AGENTS.md updates:
+1. Last verified date updated to 2026-09-04
+2. orchestrator exports: added `DEFAULT_RETRY_DELAY`,
+   `retryDelayFor`, `killProcessGroup`, `killRunningAgents`
+3. spawnAgent contract: documented `detached:true`, process group
+   kills, `proc.stdin` error listener (EPIPE resilience),
+   `CLOSE_GRACE_MS` grace timer for grandchild pipe hangs
+4. Added `retryDelayFor` and `killProcessGroup`/`killRunningAgents`
+   contract entries
+5. `runWaves`/`runWavesIsolated`: added `retryDelay` option,
+   `failedNums` exclusion, error outcome handling, dirty worktree
+   force-cleanup, prompt confinement rules
+6. `dryRunIsolated`: added `retryDelay` to printed opts
+7. CLI: added `--retry-delay` flag
+8. worktree module: documented `createWorktree` serialization and
+   stale cleanup; `removeWorktree` `force` option
+9. progress module: added `readProgress`, `mergeProgress` exports;
+   documented `commitProgress` returning `Promise<boolean>` and
+   `git add --force` for gitignored paths
+10. display module: noted `StatusDisplay` no longer installs
+    process-level signal handlers
+
+Typecheck, TOC generation, and lint all clean.

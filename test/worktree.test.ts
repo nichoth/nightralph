@@ -301,6 +301,42 @@ test(
     }
 )
 
+test(
+    'createWorktree serializes 50 concurrent calls across 5 rounds ' +
+    'of 10 without racing on shared git refs',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+
+        for (let round = 0; round < 5; round++) {
+            const tickets = Array.from({ length:10 }, (_, i) => {
+                const num = round * 10 + i
+                return makeTestTicket({
+                    num,
+                    slug:`concurrent-${num}`,
+                })
+            })
+
+            const results = await Promise.all(tickets.map(ticket => (
+                createWorktree({
+                    repoRoot,
+                    repoName,
+                    baseBranch,
+                    ticket,
+                })
+            )))
+
+            for (const result of results) {
+                t.ok(
+                    existsSync(result.worktreePath),
+                    `worktree ${result.worktreePath} should exist`
+                )
+            }
+        }
+    }
+)
+
 // -- removeWorktree --
 
 test('removeWorktree removes the worktree', async t => {
@@ -375,6 +411,74 @@ test('listWorktrees returns all worktree paths', async t => {
         'should include second worktree'
     )
 })
+
+test(
+    'removeWorktree with force removes a dirty worktree',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+        const ticket = makeTestTicket({
+            num:7, slug:'force-dirty',
+        })
+
+        const result = await createWorktree({
+            repoRoot,
+            repoName,
+            baseBranch,
+            ticket,
+        })
+
+        writeFileSync(
+            join(result.worktreePath, 'untracked.txt'),
+            'dirty content'
+        )
+
+        await removeWorktree(result.worktreePath, {
+            force:true,
+        })
+
+        t.equal(
+            existsSync(result.worktreePath),
+            false,
+            'dirty worktree removed with force'
+        )
+    }
+)
+
+test(
+    'removeWorktree without force fails on a dirty worktree',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+        const ticket = makeTestTicket({
+            num:8, slug:'no-force-dirty',
+        })
+
+        const result = await createWorktree({
+            repoRoot,
+            repoName,
+            baseBranch,
+            ticket,
+        })
+
+        writeFileSync(
+            join(result.worktreePath, 'untracked.txt'),
+            'dirty content'
+        )
+
+        try {
+            await removeWorktree(result.worktreePath)
+            t.fail('should have thrown for dirty worktree')
+        } catch (error) {
+            t.ok(
+                error instanceof Error,
+                'throws on dirty worktree without force'
+            )
+        }
+    }
+)
 
 // -- error paths --
 

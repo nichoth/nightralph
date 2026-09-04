@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-09-03
+Last verified: 2026-09-04
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -68,6 +68,9 @@ Small orchestrator that runs a single-agent session per issue.
 - `--retries <n>` -- extra attempts per ticket after a
   failed run; default `DEFAULT_RETRIES` (2); `0`
   disables retries
+- `--retry-delay <n>` -- seconds to wait before the
+  first retry; doubles each further retry; default
+  `DEFAULT_RETRY_DELAY` (30); `0` disables the wait
 - `--dry-run` -- shows wave order without running;
   auto-detects git repo and shows worktree/branch
   layout when inside one
@@ -79,7 +82,8 @@ Small orchestrator that runs a single-agent session per issue.
 ### orchestrator (`src/orchestrator.ts`)
 - **Exposes**: `Ticket`, `AgentResult`,
   `COMPLETED_RE`, `THINKING_LEVELS`, `ThinkingLevel`,
-  `DEFAULT_RETRIES`, `escalateThinking(level?)`,
+  `DEFAULT_RETRIES`, `DEFAULT_RETRY_DELAY`,
+  `escalateThinking(level?)`, `retryDelayFor(base, attempt)`,
   `scanTickets(dir)`,
   `findReadyTickets(tickets)`, `checkItems(ticket, items)`,
   `markDone(ticket)`,
@@ -87,6 +91,7 @@ Small orchestrator that runs a single-agent session per issue.
   `stripSpecSection(specBody, heading)`,
   `renderMergePrompt(specBody, ticket)`,
   `spawnAgent(opts)`, `createPiStreamFormatter()`,
+  `killProcessGroup(pid)`, `killRunningAgents()`,
   `dryRun(tickets, specBody)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
   `runWavesIsolated(opts)`
@@ -109,23 +114,41 @@ Small orchestrator that runs a single-agent session per issue.
   -- returned by `spawnAgent`; `timedOut` is true when
   the orchestrator killed the agent at the timeout, and
   `exitCode` is non-zero in that case
-- **spawnAgent(opts)**: returns `AgentResult`; kills the
-  agent after `timeout` seconds and reports that through
-  `onLine` (or `console.warn` when no `onLine`) and as a
-  line in the ticket log, never only to the console, since
-  `StatusDisplay` repaints over bare console output; collects
+- **DEFAULT_RETRY_DELAY**: exported as `30` (seconds)
+- **retryDelayFor(base, attempt)**: returns
+  `base * 2^(attempt-2)` -- e.g. `retryDelayFor(30,2)`
+  is 30, `retryDelayFor(30,3)` is 60,
+  `retryDelayFor(0,3)` is 0
+- **killProcessGroup(pid)**: sends `SIGKILL` to `-pid`
+  (the whole process group); used by the timeout
+  handler and signal handling
+- **killRunningAgents()**: iterates the module-level
+  `runningAgents` set and calls `killProcessGroup` on
+  each tracked pid; agents are added on spawn and
+  removed on exit
+- **spawnAgent(opts)**: returns `AgentResult`; spawns
+  agents with `detached:true` so they become their own
+  process group leader; kills the agent's process group
+  after `timeout` seconds via `killProcessGroup` and
+  reports that through `onLine` (or `console.warn` when
+  no `onLine`) and as a line in the ticket log, never
+  only to the console, since `StatusDisplay` repaints
+  over bare console output; installs a `proc.stdin`
+  error listener so an agent that exits before reading
+  its prompt (EPIPE) does not crash the run; collects
   `[x] <text>` lines from agent stdout via
-  `COMPLETED_RE`; accepts optional `cwd` to run
-  the agent process in a specific directory (used for
-  worktree isolation); accepts optional `maxTurns`
-  forwarded as `--max-turns` to the agent CLI;
-  accepts optional `thinking` forwarded as
-  `--thinking <level>` only when the provider is `pi`;
-  accepts optional `onLine` callback to redirect
-  output lines (used by Display integration); for
-  `pi`, writes prompt to a temp file and passes
-  `@path` as a positional arg instead of piping to
-  stdin
+  `COMPLETED_RE`; resolves within `CLOSE_GRACE_MS`
+  (2s) of exit even when a grandchild holds the stdout
+  pipe; accepts optional `cwd` to run the agent process
+  in a specific directory (used for worktree isolation);
+  accepts optional `maxTurns` forwarded as
+  `--max-turns` to the agent CLI; accepts optional
+  `thinking` forwarded as `--thinking <level>` only
+  when the provider is `pi`; accepts optional `onLine`
+  callback to redirect output lines (used by Display
+  integration); for `pi`, writes prompt to a temp file
+  and passes `@path` as a positional arg instead of
+  piping to stdin
 - **renderPrompt(specBody, ticket, opts?)**: `opts.testCmd`
   adds test-first rules to the prompt and names the
   command the orchestrator will run after the agent exits
@@ -136,9 +159,12 @@ Small orchestrator that runs a single-agent session per issue.
 - **runWaves(...)**: accepts optional `display`
   parameter (`Display` interface); defaults to
   `createDisplay()` when omitted; trailing optional
-  `thinking` and `retries` -- a non-zero exit is
-  retried up to `retries` times with an escalated
-  level (timeouts are not retried)
+  `thinking`, `retries`, and `retryDelay` -- a
+  non-zero exit is retried up to `retries` times
+  with an escalated level and exponential backoff
+  (timeouts are not retried); a per-run `failedNums`
+  set excludes tickets that exhausted their attempts
+  from later waves
 - **renderMergePrompt(specBody, ticket)**: prompt for
   a respawned agent resolving a merge conflict; tells
   the agent to resolve conflict markers, not re-implement
@@ -146,22 +172,30 @@ Small orchestrator that runs a single-agent session per issue.
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
   updates; accepts optional `display`, `testCmd`,
-  `thinking`, and `retries` in opts
+  `thinking`, `retries`, and `retryDelay` in opts
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; a failed attempt
   (non-zero exit, exit 0 with no new commits, or a red
   test gate) is retried up to `retries` times, each
   from a fresh worktree via `createWorktree` and, for
   `pi`, with `escalateThinking` applied to the previous
-  level; only the final attempt's outcome is recorded
-  in progress.md; retry logs are
+  level, with exponential backoff between retries
+  (`retryDelayFor`); only the final attempt's outcome
+  is recorded in progress.md; retry logs are
   `<logsDir>/<ticket>.attempt<n>.log` and
   `<ticket>.attempt<n>.test.log`, the first attempt
   keeps the unsuffixed names; a timed-out agent
   (`timedOut:true`) is not treated as a failed agent:
   its worktree is kept, dirty changes are auto-committed,
   and the branch goes through the new-commits check,
-  test gate, and merge exactly like an exit 0; merge failures
+  test gate, and merge exactly like an exit 0; a throw
+  inside a ticket attempt (e.g. agent deletes its own
+  worktree) fails that ticket with an `'error'` outcome
+  but does not crash the wave -- other tickets continue;
+  a per-run `failedNums` set excludes tickets that
+  exhausted their attempts from later waves; failed
+  and stopped worktrees are removed with `force:true`
+  so dirty files do not prevent cleanup; merge failures
   are recorded in progress.md with `done:false`;
   respawned agents receive `renderMergePrompt`
   instead of `renderPrompt`; when `testCmd` is set, a
@@ -169,11 +203,14 @@ Small orchestrator that runs a single-agent session per issue.
   `done:false`, writes
   `<logsDir>/<ticket>.test.log`, and never queues the
   branch for merge -- this holds both after the first
-  agent run and after a merge-conflict respawn
+  agent run and after a merge-conflict respawn;
+  `renderPrompt` and `renderMergePrompt` confine the
+  agent to its worktree directory and prohibit
+  `git push`
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; accepts
-  `testCmd`, `thinking`, and `retries` in opts and
-  prints them
+  `testCmd`, `thinking`, `retries`, and `retryDelay`
+  in opts and prints them
 
 ### testcmd module (`src/testcmd.ts`)
 - **Exposes**: `TestResult`,
@@ -227,18 +264,32 @@ Small orchestrator that runs a single-agent session per issue.
 - **createDisplay()**: factory that returns
   `StatusDisplay` when stdout is a TTY,
   `PlainDisplay` otherwise
-- **Guarantees**: `StatusDisplay.cleanup()` restores
-  cursor and clears ANSI state; resize listener is
-  removed on cleanup
+- **Guarantees**: `StatusDisplay` does not install
+  process-level signal handlers (SIGINT/SIGTERM are
+  handled by the CLI in `src/index.ts` via
+  `killRunningAgents`); `StatusDisplay.cleanup()`
+  restores cursor and clears ANSI state; resize
+  listener is removed on cleanup
 
 ### worktree module (`src/worktree.ts`)
 - **Exposes**: `getRepoRoot()`, `getRepoName()`,
   `getCurrentBranch()`, `createWorktree(opts)`,
-  `removeWorktree(path)`, `listWorktrees(repoRoot)`
+  `removeWorktree(path, opts?)`,
+  `listWorktrees(repoRoot)`
 - **createWorktree**: creates a git worktree in a
   sibling directory named
   `<repo>.<num>-<slug>` on branch
-  `<repo>/<num>-<slug>`
+  `<repo>/<num>-<slug>`; calls are serialized
+  module-wide via a promise chain so concurrent
+  invocations do not race on shared git refs;
+  before creating, cleans up any stale worktree at
+  the target path and deletes any leftover branch of
+  the same name, so re-running after a failed run is
+  safe
+- **removeWorktree(path, opts?)**: accepts optional
+  `{ force?:boolean }`; when `force` is `true`,
+  passes `--force` to `git worktree remove` so dirty
+  worktrees (modified or untracked files) are removed
 - **Guarantees**: all functions are synchronous except
   `createWorktree`, `removeWorktree`, and
   `listWorktrees`
@@ -248,10 +299,25 @@ Small orchestrator that runs a single-agent session per issue.
   `generateProgress(feature, tickets)`,
   `renderProgress(data)`, `checkTicket(data, num, result)`,
   `writeProgress(path, data)`,
-  `commitProgress(repoRoot, path, message)`
+  `commitProgress(repoRoot, path, message)`,
+  `readProgress(progressPath)`,
+  `mergeProgress(fresh, existing)`
+- **commitProgress**: returns `Promise<boolean>` --
+  `true` when a commit was made, `false` when the
+  staged file matched HEAD (no-op). Uses `git add
+  --force` so gitignored paths (e.g. under `.scratch/`)
+  are staged regardless
+- **readProgress(progressPath)**: parses an existing
+  progress.md back into a `ProgressData` object, or
+  returns `null` if the file does not exist
+- **mergeProgress(fresh, existing)**: returns a new
+  `ProgressData` whose tickets are the fresh set, except
+  tickets that were `done:true` in `existing` are
+  replaced with the existing (completed) record; returns
+  `fresh` unchanged when `existing` is `null`
 - **Guarantees**: `renderProgress` produces a markdown
-  checklist; `commitProgress` stages and commits the
-  progress file
+  checklist; `commitProgress` never throws on a no-op
+  (identical content)
 
 ### merge module (`src/merge.ts`)
 - **Exposes**: `GitOpResult`, `MergeConflictStrategy`,
@@ -289,3 +355,19 @@ See `docs/agents/triage-labels.md`.
 ### Domain docs
 
 Single-context layout. See `docs/agents/domain.md`.
+
+<!-- nightralph:start -->
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as local markdown files under `.scratch/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout. See `docs/agents/domain.md`.
+<!-- nightralph:end -->

@@ -15,6 +15,8 @@ import {
     stripSpecSection,
     THINKING_LEVELS,
     DEFAULT_RETRIES,
+    DEFAULT_RETRY_DELAY,
+    killRunningAgents,
     type ThinkingLevel,
 } from './orchestrator.js'
 import { detectTestCmd } from './testcmd.js'
@@ -142,6 +144,13 @@ yargs(hideBin(process.argv))
                     'after a failed run, each with a ' +
                     'higher thinking level (pi). 0 ' +
                     'disables retries.',
+            })
+            .option('retry-delay', {
+                type:'number',
+                default:DEFAULT_RETRY_DELAY,
+                describe:'Seconds to wait before the ' +
+                    'first retry; doubles each further ' +
+                    'retry. 0 disables the wait.',
             }),
         async argv => {
             await runExecute({
@@ -159,6 +168,8 @@ yargs(hideBin(process.argv))
                 thinking:argv.thinking as
                     ThinkingLevel|undefined,
                 retries:argv.retries as
+                    number|undefined,
+                retryDelay:argv.retryDelay as
                     number|undefined,
             })
         }
@@ -200,6 +211,7 @@ async function runExecute (argv:{
     maxTurns?:number
     thinking?:ThinkingLevel
     retries?:number
+    retryDelay?:number
 }):Promise<void> {
     const { dir, spec } = await resolveIssuesDir(
         argv.spec
@@ -273,6 +285,7 @@ async function runExecute (argv:{
                 testCmd,
                 thinking:argv.thinking,
                 retries:argv.retries,
+                retryDelay:argv.retryDelay,
             })
         } else {
             dryRun(tickets, specBody)
@@ -281,6 +294,15 @@ async function runExecute (argv:{
     }
 
     const display = createDisplay()
+
+    function onSignal (exitCode:number):void {
+        killRunningAgents()
+        display.cleanup()
+        process.exit(exitCode)
+    }
+    process.on('SIGINT', () => onSignal(130))
+    process.on('SIGTERM', () => onSignal(143))
+
     let result:{ allDone:boolean }
 
     if (isGitRepo()) {
@@ -298,6 +320,7 @@ async function runExecute (argv:{
             maxTurns:argv.maxTurns,
             thinking:argv.thinking,
             retries:argv.retries,
+            retryDelay:argv.retryDelay,
         })
     } else {
         result = await runWaves(
@@ -309,6 +332,7 @@ async function runExecute (argv:{
             argv.maxTurns,
             argv.thinking,
             argv.retries,
+            argv.retryDelay,
         )
     }
 

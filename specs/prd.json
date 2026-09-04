@@ -1,149 +1,191 @@
 {
   "project": "nightralph",
-  "branchName": "ralph/audit-fixes",
-  "description": "Fix verified bugs and practical issues from the AUDIT.md review",
+  "branchName": "ralph/overnight-robustness",
+  "description": "Make unattended overnight runs survive repeated failures, timed-out agents, EPIPE, worktree races, Ctrl-C, and provider outages",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Treat only explicit done status as complete for blocker resolution",
-      "description": "As an operator, I want blocker resolution to require an explicit done status so that tickets with missing, claimed, or in-progress statuses are not treated as completed.",
+      "title": "commitProgress skips an unchanged file",
+      "description": "As an operator, I want commitProgress to return false instead of throwing when the progress file has not changed since the last commit, so that a ticket failing twice does not crash the run.",
       "acceptanceCriteria": [
-        "findReadyTickets builds doneNums from tickets with status === 'done' instead of status !== 'ready-for-agent'",
-        "simulateWaves uses the same done-only logic for its doneNums set",
-        "detectDeadlocks uses the same done-only logic for its initial doneNums set",
-        "A ticket with status '' (no Status line) does not unblock dependents",
-        "A ticket with status 'claimed' or 'resolved' does not unblock dependents",
-        "A ticket with status 'done' still unblocks dependents",
-        "Tests cover empty-status, claimed, resolved, and done scenarios",
+        "commitProgress returns Promise<boolean> -- true when a commit was made, false when the staged file matched HEAD",
+        "A second commitProgress call with identical content resolves false and does not create a commit",
+        "No 'nothing to commit' error is thrown",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Three functions in orchestrator.ts share the same inverted logic: findReadyTickets (line 106), simulateWaves (line 169), detectDeadlocks (line 196). All must change from !== 'ready-for-agent' to === 'done'."
+      "notes": "Modify src/progress.ts:186-202. Test in test/progress.test.ts. Use git diff --cached --quiet to detect no-op before committing."
     },
     {
       "id": "US-002",
-      "title": "Handle existing branches when re-creating worktrees",
-      "description": "As an operator re-running after a failed ticket, I want createWorktree to handle pre-existing branches so that the CLI does not crash.",
+      "title": "A failed ticket is recorded once and not re-run this run",
+      "description": "As an operator, I want a ticket that exhausted its retry attempts to be excluded from later waves of the same run, so that it does not repeat the same failure and crash the orchestrator.",
       "acceptanceCriteria": [
-        "createWorktree detects an existing branch and deletes it (git branch -D) before creating the worktree, or reuses the existing worktree if it is still present",
-        "If a worktree already exists at the target path, it is removed (git worktree remove) before re-creating",
-        "runWavesIsolated wraps worktree creation so a single ticket failure is reported per-ticket instead of crashing the entire Promise.all",
-        "Tests cover the re-run scenario where a branch from a prior failed run already exists",
+        "A per-run failedNums set tracks tickets that used up their attempts",
+        "findReadyTickets results are filtered by failedNums in both runWaves and runWavesIsolated",
+        "A saveProgress helper wraps writeProgress + commitProgress and catches commit errors",
+        "The final summary line includes the failed count when > 0",
+        "A ticket that fails in wave 1 is not started again in wave 2",
+        "A ticket whose merge failed is still re-run (not excluded)",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "worktree.ts line 50: git worktree add -b fails when the branch exists. Check for existing branch/worktree first, or catch the error and clean up."
+      "notes": "Modify src/orchestrator.ts (runWaves and runWavesIsolated). Create test/mock-agent-fail-ticket-01.js. Test in test/integration.test.ts. Depends on US-001 for the boolean return from commitProgress."
     },
     {
       "id": "US-003",
-      "title": "Handle gitignored progress path in commitProgress",
-      "description": "As an operator with .scratch/ in .gitignore, I want the CLI to handle progress commits gracefully instead of crashing.",
+      "title": "An agent that exits before reading stdin cannot crash the run",
+      "description": "As an operator, I want the orchestrator to survive EPIPE from an agent that exits before reading its prompt, so that auth errors or bad flags do not take the whole run down.",
       "acceptanceCriteria": [
-        "commitProgress uses git add --force so that gitignored paths are still staged",
-        "Alternatively, runWavesIsolated catches commitProgress errors and logs a warning instead of crashing",
-        "A run with .scratch/ in .gitignore completes without throwing",
-        "Tests cover the gitignored-path scenario",
+        "spawnAgent installs a proc.stdin error listener that logs to the agent log file",
+        "An agent that exits immediately with a 2MB prompt does not cause an uncaught EPIPE",
+        "spawnAgent resolves with exitCode 1 and timedOut false",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "progress.ts line 108: git add <path> fails on gitignored paths. Either use git add --force or wrap calls in try/catch with a warning."
+      "notes": "Modify src/orchestrator.ts:714-717. Create test/mock-agent-exit-before-reading.js. Test in test/integration.test.ts."
     },
     {
       "id": "US-004",
-      "title": "Add permission flags to provider argument maps",
-      "description": "As a user running nightralph claude, I want the spawned agent to have write permissions so that tickets can actually be implemented.",
+      "title": "The timeout kill takes the agent's process group and always resolves",
+      "description": "As an operator, I want the timeout kill to stop the agent and all its children (dev servers, watchers), and for spawnAgent to always resolve instead of hanging when a grandchild holds the stdout pipe.",
       "acceptanceCriteria": [
-        "claude provider args include a permission flag that allows file writes (e.g. --dangerously-skip-permissions)",
-        "codex provider args include a sandbox flag that allows workspace writes (e.g. --full-auto)",
-        "The README documents the default flags applied for each provider",
-        "Tests verify the updated argument lists for both providers",
+        "Agents are spawned with detached:true",
+        "The timeout sends SIGKILL to the process group (-pid), not just the agent",
+        "A killProcessGroup helper is defined for reuse by signal handling",
+        "stdout and stderr are destroyed CLOSE_GRACE_MS (2000ms) after exit as a fallback",
+        "spawnAgent resolves within a few seconds of the timeout even when a grandchild holds the pipe",
+        "The grandchild process is killed",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "orchestrator.ts lines 225-228: PROVIDER_ARGS maps claude to ['--print'] and codex to ['exec'] with no permission flags. Add appropriate flags for non-interactive file-writing operation."
+      "notes": "Modify src/orchestrator.ts (spawn call, timeout, promise). Create test/mock-agent-grandchild-hang.js. Test in test/integration.test.ts."
     },
     {
       "id": "US-005",
-      "title": "Clean up worktrees for failed and skipped tickets",
-      "description": "As an operator, I want worktrees to be cleaned up after failed or skipped tickets so that they do not accumulate as sibling directories.",
+      "title": "Worktree creation is serialized",
+      "description": "As an operator running many tickets in parallel, I want worktree creation to be serialized so that concurrent git operations do not race on shared refs.",
       "acceptanceCriteria": [
-        "After a ticket's agent exits non-zero, its worktree is removed",
-        "After mergeWave stops (stoppedAt), remaining worktrees for un-merged branches are removed",
-        "Worktree removal errors are caught and logged, not thrown",
-        "Tests verify cleanup occurs on failure and stop scenarios",
+        "createWorktree calls are queued module-wide via a promise chain",
+        "50 concurrent createWorktree calls all succeed (run 5 rounds of 10)",
+        "The public signature of createWorktree is unchanged",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "orchestrator.ts: worktrees are only removed on merged (line 722) and recovered (line 773) paths. Add cleanup after the failed-agent block (line 683) and after the stoppedAt break (line 799)."
+      "notes": "Modify src/worktree.ts:47-113. Rename existing function to createWorktreeNow, add enqueue wrapper. Test in test/worktree.test.ts."
     },
     {
       "id": "US-006",
-      "title": "Preserve progress file when resuming a partial run",
-      "description": "As an operator resuming after a partial run, I want the progress file to reflect prior ticket completions so that history is not lost.",
+      "title": "Ctrl-C and SIGTERM stop the run and kill agents",
+      "description": "As an operator, I want Ctrl-C and SIGTERM to kill all running agents and exit cleanly, instead of leaving agents running after the orchestrator is interrupted.",
       "acceptanceCriteria": [
-        "runWavesIsolated reads an existing progress.md before calling generateProgress",
-        "If the file exists, completed tickets (done: true) in the existing data are carried forward into the new progress object",
-        "If no progress file exists, behavior is unchanged (fresh generation)",
-        "Tests cover resume with a pre-existing progress file",
+        "StatusDisplay no longer installs process signal handlers",
+        "A runningAgents registry in the orchestrator tracks spawned agents",
+        "killRunningAgents() is exported and kills every tracked agent's process group",
+        "The CLI installs SIGINT and SIGTERM handlers that call killRunningAgents, cleanup the display, and exit 130 or 143",
+        "Sending SIGINT to the CLI process kills the agent's child processes",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "orchestrator.ts line 570: generateProgress always creates fresh all-unchecked data. Add a readProgress helper in progress.ts that parses an existing file and merges completed state."
+      "notes": "Modify src/orchestrator.ts, src/display.ts, src/index.ts. Test in test/display.test.ts and test/integration.test.ts. Depends on killProcessGroup from US-004."
     },
     {
       "id": "US-007",
-      "title": "Remove unreachable hasNewCommits check in runWaves",
-      "description": "As a maintainer, I want dead code removed so that the non-isolated execution path is correct and readable.",
+      "title": "Backoff between retries",
+      "description": "As an operator, I want retries to wait with exponential backoff so that a provider outage is waited out instead of burning every attempt at once.",
       "acceptanceCriteria": [
-        "The hasNewCommits guard in runWaves (the non-isolated path) is removed or replaced with logic that works outside a git repo",
-        "The baseSha variable and its git rev-parse call are removed if no longer used",
+        "DEFAULT_RETRY_DELAY is exported as 30",
+        "retryDelayFor(base, attempt) returns base * 2^(attempt-2)",
+        "retryDelayFor(30, 2) is 30, retryDelayFor(30, 3) is 60, retryDelayFor(0, 3) is 0",
+        "runWavesIsolated and runWaves accept a retryDelay option",
+        "The CLI has a --retry-delay flag defaulting to DEFAULT_RETRY_DELAY",
+        "dryRunIsolated prints the retry delay",
+        "Existing CLI tests that exercise retries pass --retry-delay 0 to stay fast",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 7,
       "passes": true,
-      "notes": "orchestrator.ts lines 471-476 and 510-519: runWaves only runs outside a git repo, so repoRoot is always null, making the hasNewCommits check unreachable. Remove the dead branch."
+      "notes": "Modify src/orchestrator.ts and src/index.ts. Test in test/orchestrator.test.ts and test/integration.test.ts. Add --retry-delay 0 to existing retry-exercising CLI tests."
     },
     {
       "id": "US-008",
-      "title": "Fix cosmetic issues: completedAt stamp and npm package contents",
-      "description": "As a maintainer, I want checkTicket to not stamp completedAt on failed tickets and test files excluded from the npm package.",
+      "title": "A throw inside an attempt fails that attempt, not the wave",
+      "description": "As an operator, I want an error inside a ticket attempt (e.g. the agent deleted its own worktree) to fail just that ticket, not crash the entire wave.",
       "acceptanceCriteria": [
-        "checkTicket only sets completedAt when the ticket is marked done (result.done is true or defaults to true)",
-        "package.json includes a files field that excludes dist/test/ from the published package",
-        "npm pack --dry-run does not list any dist/test/ files",
+        "TicketOutcome gains an 'error' kind with an error field",
+        "runTicketAttempts wraps each attempt in try/catch and returns the error outcome",
+        "The outcome loop in runWavesIsolated handles the error kind by adding to failedNums and continuing",
+        "An agent that deletes its own worktree fails its ticket but the other ticket in the wave succeeds",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 8,
       "passes": true,
-      "notes": "progress.ts line 90: completedAt is set unconditionally. Guard with if (result.done !== false). package.json: add a files field like [\"dist/**\", \"!dist/test\"]."
+      "notes": "Modify src/orchestrator.ts. Create test/mock-agent-delete-worktree-01.js. Test in test/integration.test.ts. Depends on failedNums from US-002."
     },
     {
       "id": "US-009",
-      "title": "Fix doc inconsistencies in AGENTS.md and README",
-      "description": "As a user reading the docs, I want AGENTS.md and README to match the actual code behavior.",
+      "title": "The prompt confines the agent to its worktree",
+      "description": "As an operator, I want the prompt to tell agents not to read or modify files outside their worktree and not to run git push, so that agents cannot reach the live checkout or push unreviewed code.",
       "acceptanceCriteria": [
-        "AGENTS.md says Node >= 24 instead of Node >= 18",
-        "README explains that success requires exit 0, new commits, and a clean worktree (not just exit 0)",
-        "README provider examples mention the permission flags applied by default",
-        "Typecheck passes"
+        "renderPrompt output contains a rule mentioning 'git push'",
+        "renderPrompt output contains a rule mentioning 'current directory'",
+        "renderMergePrompt output contains a rule mentioning 'git push'",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 9,
       "passes": true,
-      "notes": "AGENTS.md line 'Node >= 18' should match package.json engines '>=24'. README success description needs the full set of checks. Update after US-004 lands so flag docs are accurate."
+      "notes": "Modify src/orchestrator.ts (renderPrompt rules and renderMergePrompt). Test in test/orchestrator.test.ts."
+    },
+    {
+      "id": "US-010",
+      "title": "A failed attempt's worktree is removed even when dirty",
+      "description": "As an operator, I want worktrees from failed attempts to be removed even when they contain modified or untracked files, so that leftover directories do not accumulate.",
+      "acceptanceCriteria": [
+        "removeWorktree accepts an optional opts parameter with a force boolean",
+        "removeWorktree passes --force to git when opts.force is true",
+        "A worktree with untracked files is successfully removed when force is true",
+        "removeWorktreeQuietly in the orchestrator passes force:true",
+        "runWavesIsolated cleans up dirty worktrees after failed agents",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Modify src/worktree.ts and src/orchestrator.ts. Create test/mock-agent-dirty-then-fail.js. Test in test/worktree.test.ts and test/integration.test.ts."
+    },
+    {
+      "id": "US-011",
+      "title": "Documentation updates for robustness features",
+      "description": "As a user reading the docs, I want README and AGENTS.md to document the new flags, signal handling, process groups, and .scratch gitignore guidance.",
+      "acceptanceCriteria": [
+        "README flags table includes --retry-delay with description and default",
+        "README Notes describes retry backoff behavior and failed-ticket exclusion",
+        "README Notes describes process group kills and signal handling (SIGINT/SIGTERM)",
+        "README Notes recommends --timeout 900 for fast models",
+        "README Notes says .scratch should be in .gitignore",
+        "README pi provider bullet corrects --approve description",
+        "AGENTS.md contracts updated for commitProgress, createWorktree, removeWorktree, killRunningAgents, retryDelayFor, spawnAgent, and display signal handlers",
+        "AGENTS.md Last verified date updated",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Modify README.md and AGENTS.md. No tests -- docs are not tested. Run npm run toc && npm run lint."
     }
   ]
 }

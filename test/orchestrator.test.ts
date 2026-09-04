@@ -18,6 +18,7 @@ import {
     COMPLETED_RE,
     TOOL_USE_RE,
     renderPrompt,
+    renderMergePrompt,
     stripSpecSection,
     runWaves,
     spawnAgent,
@@ -27,6 +28,8 @@ import {
     formatStreamLine,
     createPiStreamFormatter,
     escalateThinking,
+    retryDelayFor,
+    DEFAULT_RETRY_DELAY,
     type Ticket,
 } from '../src/orchestrator.js'
 
@@ -819,6 +822,45 @@ test('renderPrompt omits test rules when no test command',
         )
     })
 
+test('renderPrompt contains git push rule', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderPrompt('spec body', ticket)
+    t.ok(
+        prompt.toLowerCase().includes('git push'),
+        'prompt mentions git push'
+    )
+})
+
+test('renderPrompt contains current directory rule',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderPrompt('spec body', ticket)
+        t.ok(
+            prompt.toLowerCase().includes(
+                'current directory'
+            ),
+            'prompt mentions current directory'
+        )
+    })
+
+test('renderMergePrompt contains git push rule', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderMergePrompt('spec body', ticket)
+    t.ok(
+        prompt.toLowerCase().includes('git push'),
+        'merge prompt mentions git push'
+    )
+})
+
 // -- spawnAgent --
 
 test('spawnAgent with cwd option runs in that directory',
@@ -1230,6 +1272,77 @@ test('runWaves returns allDone:false when agent fails',
             )
         } finally {
             process.chdir(originalCwd)
+        }
+    })
+
+const MOCK_FAIL_TICKET_01 = join(
+    process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
+)
+
+test('runWaves - a failed ticket is not re-run in a later wave',
+    async t => {
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-fail.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-pass.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '03-dependent.md'),
+            makeTicketBody({
+                status:'ready-for-agent',
+                blockers:[2],
+            })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        const invocationLog = join(base, 'invocations.log')
+
+        const originalCwd = process.cwd()
+        const originalEnv = process.env.MOCK_INVOCATION_LOG
+        process.env.MOCK_INVOCATION_LOG = invocationLog
+        process.chdir(base)
+        try {
+            await runWaves(
+                tickets, 'test spec',
+                MOCK_FAIL_TICKET_01, null, 10, logsDir,
+                undefined, undefined, undefined, 0,
+            )
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'failed ticket stays ready-for-agent'
+            )
+            t.equal(
+                tickets[2].status,
+                'done',
+                'dependent ticket ran in a later wave'
+            )
+
+            const invocations = existsSync(invocationLog) ?
+                readFileSync(invocationLog, 'utf8')
+                    .split('\n').filter(Boolean).length :
+                0
+            t.equal(
+                invocations, 1,
+                'failed ticket was only attempted once ' +
+                'across the whole run'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            if (originalEnv === undefined) {
+                delete process.env.MOCK_INVOCATION_LOG
+            } else {
+                process.env.MOCK_INVOCATION_LOG = originalEnv
+            }
         }
     })
 
@@ -1879,6 +1992,34 @@ test('escalateThinking - clamps at max', t => {
     t.equal(escalateThinking('max'), 'max', 'max stays max')
 })
 
+// -- retryDelayFor --
+
+test('retryDelayFor - doubles from the base each attempt', t => {
+    t.equal(
+        retryDelayFor(30, 2), 30,
+        'first retry waits the base delay'
+    )
+    t.equal(
+        retryDelayFor(30, 3), 60,
+        'second retry doubles the base delay'
+    )
+    t.equal(
+        retryDelayFor(30, 4), 120,
+        'third retry doubles again'
+    )
+})
+
+test('retryDelayFor - a zero base never waits', t => {
+    t.equal(
+        retryDelayFor(0, 3), 0,
+        'zero base stays zero at any attempt'
+    )
+})
+
+test('DEFAULT_RETRY_DELAY is 30', t => {
+    t.equal(DEFAULT_RETRY_DELAY, 30, 'default retry delay')
+})
+
 test('runWaves retries a failed agent with escalated thinking',
     async t => {
         const base = initTempGitRepo()
@@ -1906,7 +2047,7 @@ test('runWaves retries a failed agent with escalated thinking',
             const result = await runWaves(
                 tickets, 'test spec',
                 join(binDir, 'pi'), null, 10, logsDir,
-                undefined, undefined, undefined, 1,
+                undefined, undefined, undefined, 1, 0,
             )
             t.equal(result.allDone, true, 'all done after retry')
             t.equal(tickets[0].status, 'done', 'ticket done')
@@ -1919,3 +2060,44 @@ test('runWaves retries a failed agent with escalated thinking',
             rmSync(binDir, { recursive:true, force:true })
         }
     })
+
+test('runWaves waits retryDelay seconds before a retry', async t => {
+    const base = initTempGitRepo()
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-test-')
+    )
+    const issuesDir = join(base, 'issues')
+    const logsDir = join(base, 'logs')
+    mkdirSync(issuesDir)
+    writeFileSync(
+        join(issuesDir, '01-flaky.md'),
+        makeTicketBody({ status:'ready-for-agent' })
+    )
+    const tickets = scanTickets(issuesDir)
+
+    const MOCK_FAIL_THEN_PASS = join(
+        process.cwd(), 'test', 'mock-agent-fail-then-pass.js'
+    )
+    symlinkSync(MOCK_FAIL_THEN_PASS, join(binDir, 'pi'))
+    chmodSync(join(binDir, 'pi'), 0o755)
+
+    const originalCwd = process.cwd()
+    process.chdir(base)
+    try {
+        const start = Date.now()
+        const result = await runWaves(
+            tickets, 'test spec',
+            join(binDir, 'pi'), null, 10, logsDir,
+            undefined, undefined, undefined, 1, 1,
+        )
+        const elapsed = Date.now() - start
+        t.equal(result.allDone, true, 'all done after retry')
+        t.ok(
+            elapsed >= 1000,
+            `waited for the retry delay (elapsed ${elapsed}ms)`
+        )
+    } finally {
+        process.chdir(originalCwd)
+        rmSync(binDir, { recursive:true, force:true })
+    }
+})
