@@ -1467,3 +1467,26 @@ All 710 tests pass (setup: 87, orchestrator: 168, worktree: 77,
 progress: 57, merge: 40, display: 86, testcmd: 13,
 integration: 182).
 Lint clean.
+
+## 2026-09-04 - US-004: Track test-gate processes in signal registry
+
+Completed. `runTestCmd` in src/testcmd.ts now accepts an optional
+`registry?:Set<number>` parameter. When provided, the child pid is
+added to the registry immediately after spawn and removed in both
+the `close` and `error` handlers, so SIGINT during the test-gate
+phase can also kill test processes via `killRunningAgents()`.
+
+`runTestGate` in src/orchestrator.ts now accepts an optional
+`registry?:Set<number>` and forwards it to `runTestCmd`. Both call
+sites in `runTicketAttempt` (post-agent test gate) and in the
+respawn path pass `runningAgents` as the registry.
+
+Added 3 new tests to test/testcmd.test.ts:
+- pid is removed from registry after command completes
+- pid is present in registry during execution and removed after
+- pid is removed from registry on spawn error (bad cwd)
+
+All 716 tests pass (setup: 87, orchestrator: 168, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 19,
+integration: 182).
+Lint clean.

@@ -125,6 +125,78 @@ test('runTestCmd - kills the command after the timeout',
         }
     })
 
+test('runTestCmd - registers pid in registry during ' +
+    'execution and removes it after', async t => {
+    const dir = tmp()
+    try {
+        const registry = new Set<number>()
+        const result = await runTestCmd({
+            cmd:'sleep 0.5; echo done',
+            cwd:dir,
+            timeout:10,
+            registry,
+        })
+        // We can't inspect registry mid-run from outside
+        // the promise without a side channel; instead
+        // verify it's empty after completion.
+        t.equal(registry.size, 0, 'pid removed after close')
+        t.equal(result.exitCode, 0, 'exit 0')
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
+test('runTestCmd - pid is in registry during execution',
+    async t => {
+        const dir = tmp()
+        try {
+            const registry = new Set<number>()
+            // Run a command that sleeps so we can check
+            // the registry mid-execution.
+            const promise = runTestCmd({
+                cmd:'sleep 5',
+                cwd:dir,
+                timeout:10,
+                registry,
+            })
+            // Give the child time to spawn.
+            await new Promise(r => setTimeout(r, 200))
+            t.ok(
+                registry.size > 0,
+                'pid is in registry during execution'
+            )
+            const pid = [...registry][0]
+            // Kill the process so the test doesn't wait.
+            try { process.kill(-pid, 'SIGKILL') } catch {}
+            await promise
+            t.equal(
+                registry.size, 0,
+                'pid removed after close'
+            )
+        } finally {
+            rmSync(dir, { recursive:true, force:true })
+        }
+    })
+
+test('runTestCmd - pid removed from registry on spawn ' +
+    'error', async t => {
+    const dir = tmp()
+    const missing = join(dir, 'missing')
+    try {
+        const registry = new Set<number>()
+        const result = await runTestCmd({
+            cmd:'echo ok',
+            cwd:missing,
+            timeout:10,
+            registry,
+        })
+        t.equal(registry.size, 0, 'pid removed on error')
+        t.ok(result.exitCode !== 0, 'non-zero exit')
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
 test('runTestCmd - cwd does not exist', async t => {
     const dir = tmp()
     const missing = join(dir, 'missing')

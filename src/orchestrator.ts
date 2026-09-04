@@ -962,11 +962,13 @@ async function runTestGate (opts:{
     logsDir:string
     attempt?:number
     log:(msg:string) => void
+    registry?:Set<number>
 }):Promise<boolean> {
     const result = await runTestCmd({
         cmd:opts.testCmd,
         cwd:opts.worktreePath,
         timeout:opts.timeout,
+        registry:opts.registry,
     })
     const testLogPath = attemptLogPath(
         opts.logsDir, opts.ticket, opts.attempt ?? 1,
@@ -1066,6 +1068,7 @@ async function respawnAndRetryMerge (opts:{
             timeout:opts.timeout,
             logsDir:opts.logsDir,
             log,
+            registry:runningAgents,
         })
         if (!passed) {
             log(
@@ -1254,6 +1257,7 @@ async function runTicketAttempt (
             logsDir:opts.logsDir,
             attempt:opts.attempt,
             log:(msg) => d.log(msg),
+            registry:runningAgents,
         })
         if (!passed) {
             await removeWorktreeQuietly(

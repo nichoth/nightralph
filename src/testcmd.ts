@@ -28,6 +28,7 @@ export function runTestCmd (opts:{
     cmd:string
     cwd:string
     timeout:number
+    registry?:Set<number>
 }):Promise<TestResult> {
     return new Promise(resolve => {
         let settled = false
@@ -36,6 +37,11 @@ export function runTestCmd (opts:{
             stdio:['ignore', 'pipe', 'pipe'],
             detached:true,
         })
+
+        if (child.pid !== undefined && opts.registry) {
+            opts.registry.add(child.pid)
+        }
+
         const chunks:string[] = []
         child.stdout.on('data', d => chunks.push(String(d)))
         child.stderr.on('data', d => chunks.push(String(d)))
@@ -45,8 +51,6 @@ export function runTestCmd (opts:{
                 try {
                     process.kill(-child.pid, 'SIGKILL')
                 } catch {
-                    // No process group (or it already
-                    // exited); fall back to the child.
                     child.kill('SIGKILL')
                 }
             } else {
@@ -58,6 +62,9 @@ export function runTestCmd (opts:{
             if (settled) return
             settled = true
             clearTimeout(timer)
+            if (child.pid !== undefined && opts.registry) {
+                opts.registry.delete(child.pid)
+            }
             chunks.push(String(err))
             resolve({
                 exitCode:1,
@@ -69,6 +76,9 @@ export function runTestCmd (opts:{
             if (settled) return
             settled = true
             clearTimeout(timer)
+            if (child.pid !== undefined && opts.registry) {
+                opts.registry.delete(child.pid)
+            }
             resolve({
                 exitCode:code ?? 1,
                 output:chunks.join(''),
