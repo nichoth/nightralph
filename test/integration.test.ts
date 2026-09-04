@@ -2625,6 +2625,7 @@ test('CLI subprocess exits 1 when agent fails',
                 MOCK_AGENT_FAIL,
                 '--spec', FEAT,
                 '--timeout', '10',
+                '--retry-delay', '0',
             ], { cwd:projectDir })
 
             t.ok(
@@ -2794,6 +2795,7 @@ test('runWavesIsolated - a failed pi agent is retried with ' +
                 featureName:'test-feature',
                 conflictStrategy:'respawn',
                 retries:2,
+                retryDelay:0,
             })
 
             t.equal(result.allDone, true, 'run reports all done')
@@ -2875,6 +2877,59 @@ test('runWavesIsolated - retries:0 disables the retry so the ' +
                 existsSync(join(logsDir, '01-flaky.attempt2.log')),
                 false,
                 'no second attempt was made'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(binDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - omitting retryDelay does not ' +
+    'wait between retries', async t => {
+    const projectDir = initTempGitRepo()
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-test-')
+    )
+    try {
+        symlinkSync(MOCK_FAIL_THEN_PASS, join(binDir, 'pi'))
+        chmodSync(join(binDir, 'pi'), 0o755)
+
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-flaky.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            const started = Date.now()
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:join(binDir, 'pi'),
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                retries:2,
+            })
+            const elapsed = Date.now() - started
+
+            t.equal(result.allDone, true, 'run reports all done')
+            t.ok(
+                elapsed < 10_000,
+                'retried without the CLI default delay ' +
+                `(elapsed ${elapsed}ms)`
             )
         } finally {
             process.chdir(originalCwd)
@@ -3000,9 +3055,10 @@ test('CLI subprocess - default retries recover a flaky pi agent',
                 join(binDir, 'pi'),
                 '--spec', FEAT,
                 '--timeout', '10',
+                '--retry-delay', '0',
             ], { cwd:projectDir })
 
-            t.equal(code, 0, 'run succeeds without flags')
+            t.equal(code, 0, 'run succeeds with default retries')
             t.ok(
                 existsSync(join(logsDir, '01-flaky.attempt2.log')),
                 'second attempt ran'
@@ -3030,6 +3086,7 @@ test('CLI subprocess - --dry-run in a git repo prints thinking ' +
             '--dry-run',
             '--thinking', 'low',
             '--retries', '3',
+            '--retry-delay', '15',
         ], { cwd:projectDir })
 
         t.equal(code, 0, 'exit code 0')
@@ -3040,6 +3097,10 @@ test('CLI subprocess - --dry-run in a git repo prints thinking ' +
         t.ok(
             /Retries:\s+3/.test(stdout),
             'prints the retry cap'
+        )
+        t.ok(
+            /Retry delay:\s+15s/.test(stdout),
+            'prints the retry delay'
         )
     } finally {
         rmSync(projectDir, { recursive:true, force:true })
@@ -3082,6 +3143,7 @@ test('runWavesIsolated - a red test gate on the first attempt ' +
                 conflictStrategy:'respawn',
                 testCmd,
                 retries:1,
+                retryDelay:0,
             })
 
             t.equal(result.allDone, true, 'run reports all done')

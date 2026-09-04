@@ -876,6 +876,7 @@ export function dryRunIsolated (opts:{
     testCmd?:string|null
     thinking?:ThinkingLevel
     retries?:number
+    retryDelay?:number
 }):void {
     listTickets(opts.tickets)
 
@@ -932,6 +933,10 @@ export function dryRunIsolated (opts:{
     )
     console.log(
         `Retries:      ${opts.retries ?? DEFAULT_RETRIES}`
+    )
+    console.log(
+        'Retry delay:  ' +
+        `${opts.retryDelay ?? DEFAULT_RETRY_DELAY}s`
     )
     console.log(
         `\nMerge strategy: ${strategyDesc}`
@@ -1089,6 +1094,19 @@ async function respawnAndRetryMerge (opts:{
 }
 
 export const DEFAULT_RETRIES = 2
+
+// Seconds to wait before the first retry; each later retry
+// doubles the wait so a provider outage is waited out instead
+// of burning every attempt back to back.
+export const DEFAULT_RETRY_DELAY = 30
+
+export function retryDelayFor (base:number, attempt:number):number {
+    return base * 2 ** (attempt - 2)
+}
+
+function sleep (ms:number):Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
 
 // Log file for one attempt: the first attempt keeps the
 // plain name so existing tooling still finds it, later
@@ -1255,7 +1273,7 @@ async function runTicketAttempt (
 // retry cap is hit. Each retry starts from a fresh worktree
 // and, for pi, a higher thinking level.
 async function runTicketAttempts (
-    opts:TicketAttemptOpts&{ retries:number }
+    opts:TicketAttemptOpts&{ retries:number; retryDelay:number }
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
     const maxAttempts = opts.retries + 1
@@ -1268,12 +1286,15 @@ async function runTicketAttempts (
             d.log(`  Starting ${ticket.filename}`)
         } else {
             thinking = escalateThinking(thinking)
+            const delay = retryDelayFor(opts.retryDelay, attempt)
             d.log(
                 `  ${ticket.filename}: retrying ` +
                 `(attempt ${attempt}/${maxAttempts}` +
                 (isPi ? `, thinking ${thinking}` : '') +
+                (delay > 0 ? `, waiting ${delay}s` : '') +
                 ')'
             )
+            if (delay > 0) await sleep(delay * 1000)
         }
         outcome = await runTicketAttempt({
             ...opts, attempt, thinking,
@@ -1327,11 +1348,13 @@ export async function runWaves (
     maxTurns?:number,
     thinking?:ThinkingLevel,
     retries?:number,
+    retryDelay?:number,
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
     const d = display ?? createDisplay()
     const maxAttempts = (retries ?? DEFAULT_RETRIES) + 1
+    const delayBase = retryDelay ?? 0
     const isPi = basename(agentCmd) === 'pi'
     let totalWaves = 0
     for (const _ of simulateWaves(tickets)) totalWaves++
@@ -1397,13 +1420,16 @@ export async function runWaves (
                     attempt++
                 ) {
                     level = escalateThinking(level)
+                    const delay = retryDelayFor(delayBase, attempt)
                     d.log(
                         `  ${t.filename}: agent exited ` +
                         `${result.exitCode}; retrying ` +
                         `(attempt ${attempt}/${maxAttempts}` +
                         (isPi ? `, thinking ${level}` : '') +
+                        (delay > 0 ? `, waiting ${delay}s` : '') +
                         ')'
                     )
+                    if (delay > 0) await sleep(delay * 1000)
                     result = await spawnAgent({
                         prompt,
                         agentCmd,
@@ -1488,11 +1514,14 @@ export async function runWavesIsolated (opts:{
     thinking?:ThinkingLevel
     // extra attempts per ticket after a failure; default 2
     retries?:number
+    // seconds to wait before the first retry; default 30
+    retryDelay?:number
 }):Promise<{ allDone:boolean }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
     const d = opts.display ?? createDisplay()
     const retries = opts.retries ?? DEFAULT_RETRIES
+    const retryDelay = opts.retryDelay ?? 0
     let totalWaves = 0
     for (const _ of simulateWaves(opts.tickets)) totalWaves++
 
@@ -1574,6 +1603,7 @@ export async function runWavesIsolated (opts:{
                 maxTurns:opts.maxTurns,
                 thinking:opts.thinking,
                 retries,
+                retryDelay,
                 d,
             }))
         )
