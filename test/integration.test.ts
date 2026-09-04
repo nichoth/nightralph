@@ -3377,3 +3377,78 @@ test('spawnAgent - grace timer kills process group ' +
         rmSync(logDir, { recursive:true, force:true })
     }
 })
+
+test('runWavesIsolated - no-commits outcome is recorded ' +
+    'in progress.md with exit code 0',
+async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-noop.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const progressPath = join(
+            projectDir, 'progress.md'
+        )
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_NOOP,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                existsSync(progressPath),
+                true,
+                'progress.md exists after no-commits outcome'
+            )
+
+            const content = readFileSync(
+                progressPath, 'utf8'
+            )
+            t.ok(
+                content.includes('- [ ]'),
+                'progress.md has unchecked ticket'
+            )
+            t.ok(
+                content.includes('exit: 0'),
+                'progress.md records exit code 0'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})

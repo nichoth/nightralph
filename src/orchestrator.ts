@@ -1664,6 +1664,19 @@ export async function runWavesIsolated (opts:{
                     `  ${ticket.filename}: failed to create ` +
                     `worktree: ${formatErrorMessage(outcome.error)}`
                 )
+                checkTicket(progress, ticket.num, {
+                    branch:'',
+                    exitCode:-1,
+                    done:false,
+                })
+                await saveProgress(
+                    repoRoot,
+                    progressPath,
+                    progress,
+                    `nightralph: ${ticket.filename} ` +
+                    'worktree error',
+                    d,
+                )
                 continue
             }
 
@@ -1673,6 +1686,18 @@ export async function runWavesIsolated (opts:{
                 d.log(
                     `  ${ticket.filename}: attempt error: ` +
                     formatErrorMessage(outcome.error)
+                )
+                checkTicket(progress, ticket.num, {
+                    branch:outcome.branchName ?? '',
+                    exitCode:-1,
+                    done:false,
+                })
+                await saveProgress(
+                    repoRoot,
+                    progressPath,
+                    progress,
+                    `nightralph: ${ticket.filename} error`,
+                    d,
                 )
                 continue
             }
@@ -1684,6 +1709,19 @@ export async function runWavesIsolated (opts:{
                     `  ${ticket.filename}: agent exited 0 ` +
                     'but made no changes; leaving ticket ' +
                     'ready-for-agent'
+                )
+                checkTicket(progress, ticket.num, {
+                    branch:outcome.branchName,
+                    exitCode:0,
+                    done:false,
+                })
+                await saveProgress(
+                    repoRoot,
+                    progressPath,
+                    progress,
+                    `nightralph: ${ticket.filename} ` +
+                    'no commits',
+                    d,
                 )
                 continue
             }

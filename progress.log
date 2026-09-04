@@ -1548,3 +1548,43 @@ All 719 tests pass (setup: 87, orchestrator: 168, worktree: 80,
 progress: 57, merge: 40, display: 86, testcmd: 19,
 integration: 182).
 Lint clean.
+
+## 2026-09-04 - US-007: Record all terminal failures in progress.md and update AGENTS.md
+
+Completed. Three outcome handlers in `runWavesIsolated`
+(src/orchestrator.ts) previously logged failures to the display but
+did not persist them to progress.md:
+
+1. `worktree-error`: now calls `checkTicket` with branch:'',
+   exitCode:-1, done:false, then `saveProgress`.
+2. `error`: now calls `checkTicket` with
+   `outcome.branchName ?? ''`, exitCode:-1, done:false, then
+   `saveProgress`.
+3. `no-commits`: now calls `checkTicket` with
+   `outcome.branchName`, exitCode:0, done:false, then
+   `saveProgress`.
+
+The `failed` handler already had this pattern from US-002; these
+three were the remaining gaps.
+
+Added 1 new integration test to test/integration.test.ts: runs
+mock-agent-noop.js to trigger a no-commits outcome, then asserts
+progress.md exists, contains an unchecked ticket (`- [ ]`), and
+records `exit: 0`.
+
+Updated AGENTS.md contracts:
+- testcmd: documented `registry?:Set<number>` parameter on
+  `runTestCmd`
+- worktree: documented `removeWorktree` serialization through the
+  module queue
+- spawnAgent: documented grace-timer `killProcessGroup` call
+- orchestrator: added `TicketOutcome` type entry documenting
+  `no-commits` and `error` variant fields
+- runWavesIsolated guarantees: documented that all terminal failures
+  (worktree-error, error, no-commits, failed) are recorded in
+  progress.md
+
+All 722 tests pass (setup: 87, orchestrator: 168, worktree: 80,
+progress: 57, merge: 40, display: 86, testcmd: 19,
+integration: 185).
+Lint clean.

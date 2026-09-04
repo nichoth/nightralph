@@ -114,6 +114,12 @@ Small orchestrator that runs a single-agent session per issue.
   -- returned by `spawnAgent`; `timedOut` is true when
   the orchestrator killed the agent at the timeout, and
   `exitCode` is non-zero in that case
+- **TicketOutcome**: discriminated union returned by
+  `runTicketAttempts`; `'no-commits'` carries
+  `worktreePath:string` and `branchName:string`;
+  `'error'` carries optional `worktreePath?:string`
+  and `branchName?:string`; `'worktree-error'`
+  carries only `error:unknown`
 - **DEFAULT_RETRY_DELAY**: exported as `30` (seconds)
 - **retryDelayFor(base, attempt)**: returns
   `base * 2^(attempt-2)` -- e.g. `retryDelayFor(30,2)`
@@ -139,7 +145,11 @@ Small orchestrator that runs a single-agent session per issue.
   `[x] <text>` lines from agent stdout via
   `COMPLETED_RE`; resolves within `CLOSE_GRACE_MS`
   (2s) of exit even when a grandchild holds the stdout
-  pipe; accepts optional `cwd` to run the agent process
+  pipe; the grace-timer callback calls
+  `killProcessGroup(proc.pid)` before destroying
+  streams so grandchild processes sharing the pipe are
+  killed, not just orphaned; accepts optional `cwd`
+  to run the agent process
   in a specific directory (used for worktree isolation);
   accepts optional `maxTurns` forwarded as
   `--max-turns` to the agent CLI; accepts optional
@@ -195,8 +205,13 @@ Small orchestrator that runs a single-agent session per issue.
   a per-run `failedNums` set excludes tickets that
   exhausted their attempts from later waves; failed
   and stopped worktrees are removed with `force:true`
-  so dirty files do not prevent cleanup; merge failures
-  are recorded in progress.md with `done:false`;
+  so dirty files do not prevent cleanup; every
+  terminal failure -- `worktree-error` (exitCode:-1),
+  `error` (exitCode:-1, branchName when available),
+  `no-commits` (exitCode:0, branchName from outcome),
+  and `failed` -- is recorded in progress.md via
+  `checkTicket` + `saveProgress` with `done:false`;
+  merge failures are also recorded with `done:false`;
   respawned agents receive `renderMergePrompt`
   instead of `renderPrompt`; when `testCmd` is set, a
   red suite in the worktree records the ticket
@@ -220,8 +235,12 @@ Small orchestrator that runs a single-agent session per issue.
 - **detectTestCmd(projectDir)**: returns `'npm test'`
   when `<projectDir>/package.json` declares a `test`
   script, else `null`
-- **runTestCmd(opts)**: `{ cmd, cwd, timeout }` --
-  runs `cmd` via `sh -c` in its own process group
+- **runTestCmd(opts)**: `{ cmd, cwd, timeout,
+  registry? }` -- runs `cmd` via `sh -c` in its own
+  process group; when `registry` (`Set<number>`) is
+  provided, the child pid is added on spawn and
+  removed on close/error, so signal handlers can
+  kill test processes alongside agents
 - **Guarantees**: neither function throws; a spawn
   error resolves with `exitCode:1` and the error text
   in `output`; the timeout kills the whole process
@@ -289,7 +308,11 @@ Small orchestrator that runs a single-agent session per issue.
 - **removeWorktree(path, opts?)**: accepts optional
   `{ force?:boolean }`; when `force` is `true`,
   passes `--force` to `git worktree remove` so dirty
-  worktrees (modified or untracked files) are removed
+  worktrees (modified or untracked files) are removed;
+  calls are serialized through the same module-level
+  `worktreeQueue` as `createWorktree`, so concurrent
+  create + remove calls cannot race on `.git/worktrees`
+  metadata
 - **Guarantees**: all functions are synchronous except
   `createWorktree`, `removeWorktree`, and
   `listWorktrees`
