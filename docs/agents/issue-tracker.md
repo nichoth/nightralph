@@ -8,6 +8,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - The spec is `.scratch/<feature-slug>/spec.md`
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
+- Dependencies are recorded as a `**Blocked by:**` line near the top of each issue file, listing the numbers of the tickets that must complete first, or `None`
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 
 ## When a skill says "publish to the issue tracker"
@@ -18,13 +19,18 @@ Create a new file under `.scratch/<feature-slug>/` (creating the directory if ne
 
 Read the file at the referenced path. The user will normally pass the path or the issue number directly.
 
-## Wayfinding operations
+## Tickets are executed within hours, not weeks
 
-Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
+Tickets in this tracker are run by an autonomous agent shortly
+after they are written, with a fixed time budget and no
+interview. This changes one upstream rule:
 
-- **Map**: `.scratch/<effort>/map.md` (the Notes / Decisions-so-far / Fog body).
-- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:` line records the ticket type (`research`/`prototype`/`grilling`/`task`); a `Status:` line records `claimed`/`resolved`.
-- **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked when every file it lists is `resolved`.
-- **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
-- **Claim**: set `Status: claimed` and save before any work.
-- **Resolve**: append the answer under an `## Answer` heading, set `Status: resolved`, then append a context pointer (gist + link) to the map's Decisions-so-far in `map.md`.
+- Do include the file paths, module names, and exported symbols
+  the ticket touches. Put them on a `**Touches:**` line directly
+  under `**Blocked by:**`. The "avoid specific file paths" guidance
+  in `to-tickets` exists for long-lived human trackers and does not
+  apply here.
+- Keep the `- [ ]` acceptance criteria phrased as observable
+  behavior. The agent writes one failing test per criterion, so
+  each criterion should be testable at a seam named in the spec's
+  Testing Decisions.

@@ -1,0 +1,149 @@
+{
+  "project": "nightralph",
+  "branchName": "ralph/audit-fixes",
+  "description": "Fix verified bugs and practical issues from the AUDIT.md review",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Treat only explicit done status as complete for blocker resolution",
+      "description": "As an operator, I want blocker resolution to require an explicit done status so that tickets with missing, claimed, or in-progress statuses are not treated as completed.",
+      "acceptanceCriteria": [
+        "findReadyTickets builds doneNums from tickets with status === 'done' instead of status !== 'ready-for-agent'",
+        "simulateWaves uses the same done-only logic for its doneNums set",
+        "detectDeadlocks uses the same done-only logic for its initial doneNums set",
+        "A ticket with status '' (no Status line) does not unblock dependents",
+        "A ticket with status 'claimed' or 'resolved' does not unblock dependents",
+        "A ticket with status 'done' still unblocks dependents",
+        "Tests cover empty-status, claimed, resolved, and done scenarios",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Three functions in orchestrator.ts share the same inverted logic: findReadyTickets (line 106), simulateWaves (line 169), detectDeadlocks (line 196). All must change from !== 'ready-for-agent' to === 'done'."
+    },
+    {
+      "id": "US-002",
+      "title": "Handle existing branches when re-creating worktrees",
+      "description": "As an operator re-running after a failed ticket, I want createWorktree to handle pre-existing branches so that the CLI does not crash.",
+      "acceptanceCriteria": [
+        "createWorktree detects an existing branch and deletes it (git branch -D) before creating the worktree, or reuses the existing worktree if it is still present",
+        "If a worktree already exists at the target path, it is removed (git worktree remove) before re-creating",
+        "runWavesIsolated wraps worktree creation so a single ticket failure is reported per-ticket instead of crashing the entire Promise.all",
+        "Tests cover the re-run scenario where a branch from a prior failed run already exists",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "worktree.ts line 50: git worktree add -b fails when the branch exists. Check for existing branch/worktree first, or catch the error and clean up."
+    },
+    {
+      "id": "US-003",
+      "title": "Handle gitignored progress path in commitProgress",
+      "description": "As an operator with .scratch/ in .gitignore, I want the CLI to handle progress commits gracefully instead of crashing.",
+      "acceptanceCriteria": [
+        "commitProgress uses git add --force so that gitignored paths are still staged",
+        "Alternatively, runWavesIsolated catches commitProgress errors and logs a warning instead of crashing",
+        "A run with .scratch/ in .gitignore completes without throwing",
+        "Tests cover the gitignored-path scenario",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "progress.ts line 108: git add <path> fails on gitignored paths. Either use git add --force or wrap calls in try/catch with a warning."
+    },
+    {
+      "id": "US-004",
+      "title": "Add permission flags to provider argument maps",
+      "description": "As a user running nightralph claude, I want the spawned agent to have write permissions so that tickets can actually be implemented.",
+      "acceptanceCriteria": [
+        "claude provider args include a permission flag that allows file writes (e.g. --dangerously-skip-permissions)",
+        "codex provider args include a sandbox flag that allows workspace writes (e.g. --full-auto)",
+        "The README documents the default flags applied for each provider",
+        "Tests verify the updated argument lists for both providers",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "orchestrator.ts lines 225-228: PROVIDER_ARGS maps claude to ['--print'] and codex to ['exec'] with no permission flags. Add appropriate flags for non-interactive file-writing operation."
+    },
+    {
+      "id": "US-005",
+      "title": "Clean up worktrees for failed and skipped tickets",
+      "description": "As an operator, I want worktrees to be cleaned up after failed or skipped tickets so that they do not accumulate as sibling directories.",
+      "acceptanceCriteria": [
+        "After a ticket's agent exits non-zero, its worktree is removed",
+        "After mergeWave stops (stoppedAt), remaining worktrees for un-merged branches are removed",
+        "Worktree removal errors are caught and logged, not thrown",
+        "Tests verify cleanup occurs on failure and stop scenarios",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "orchestrator.ts: worktrees are only removed on merged (line 722) and recovered (line 773) paths. Add cleanup after the failed-agent block (line 683) and after the stoppedAt break (line 799)."
+    },
+    {
+      "id": "US-006",
+      "title": "Preserve progress file when resuming a partial run",
+      "description": "As an operator resuming after a partial run, I want the progress file to reflect prior ticket completions so that history is not lost.",
+      "acceptanceCriteria": [
+        "runWavesIsolated reads an existing progress.md before calling generateProgress",
+        "If the file exists, completed tickets (done: true) in the existing data are carried forward into the new progress object",
+        "If no progress file exists, behavior is unchanged (fresh generation)",
+        "Tests cover resume with a pre-existing progress file",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "orchestrator.ts line 570: generateProgress always creates fresh all-unchecked data. Add a readProgress helper in progress.ts that parses an existing file and merges completed state."
+    },
+    {
+      "id": "US-007",
+      "title": "Remove unreachable hasNewCommits check in runWaves",
+      "description": "As a maintainer, I want dead code removed so that the non-isolated execution path is correct and readable.",
+      "acceptanceCriteria": [
+        "The hasNewCommits guard in runWaves (the non-isolated path) is removed or replaced with logic that works outside a git repo",
+        "The baseSha variable and its git rev-parse call are removed if no longer used",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "orchestrator.ts lines 471-476 and 510-519: runWaves only runs outside a git repo, so repoRoot is always null, making the hasNewCommits check unreachable. Remove the dead branch."
+    },
+    {
+      "id": "US-008",
+      "title": "Fix cosmetic issues: completedAt stamp and npm package contents",
+      "description": "As a maintainer, I want checkTicket to not stamp completedAt on failed tickets and test files excluded from the npm package.",
+      "acceptanceCriteria": [
+        "checkTicket only sets completedAt when the ticket is marked done (result.done is true or defaults to true)",
+        "package.json includes a files field that excludes dist/test/ from the published package",
+        "npm pack --dry-run does not list any dist/test/ files",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "progress.ts line 90: completedAt is set unconditionally. Guard with if (result.done !== false). package.json: add a files field like [\"dist/**\", \"!dist/test\"]."
+    },
+    {
+      "id": "US-009",
+      "title": "Fix doc inconsistencies in AGENTS.md and README",
+      "description": "As a user reading the docs, I want AGENTS.md and README to match the actual code behavior.",
+      "acceptanceCriteria": [
+        "AGENTS.md says Node >= 24 instead of Node >= 18",
+        "README explains that success requires exit 0, new commits, and a clean worktree (not just exit 0)",
+        "README provider examples mention the permission flags applied by default",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "AGENTS.md line 'Node >= 18' should match package.json engines '>=24'. README success description needs the full set of checks. Update after US-004 lands so flag docs are accurate."
+    }
+  ]
+}
