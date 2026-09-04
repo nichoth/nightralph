@@ -861,6 +861,18 @@ test('renderMergePrompt contains git push rule', t => {
     )
 })
 
+test('renderMergePrompt contains current directory rule', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderMergePrompt('spec body', ticket)
+    t.ok(
+        prompt.toLowerCase().includes('current directory'),
+        'merge prompt mentions current directory'
+    )
+})
+
 // -- spawnAgent --
 
 test('spawnAgent with cwd option runs in that directory',

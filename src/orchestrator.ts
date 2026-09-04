@@ -297,6 +297,8 @@ export function renderMergePrompt (
         '3. Commit the resolved files.',
         '',
         'Do NOT re-implement the ticket from scratch.',
+        'Do NOT read or modify files outside your ' +
+            'current directory (the worktree).',
         'Do NOT run git push.',
     ].join('\n')
 }

@@ -1415,3 +1415,23 @@ All 705 tests pass (setup: 87, orchestrator: 167, worktree: 77,
 progress: 57, merge: 40, display: 86, testcmd: 13,
 integration: 178).
 Lint clean.
+
+## 2026-09-04 - US-002: Add worktree restriction to merge prompt
+
+Completed. `renderMergePrompt` in src/orchestrator.ts lacked the
+worktree confinement rule that `renderPrompt` already had, so a
+respawned agent resolving a merge conflict could reach sibling
+worktrees via `../`.
+
+Added `'Do NOT read or modify files outside your current directory
+(the worktree).'` to the instructions array in `renderMergePrompt`,
+between the existing 'Do NOT re-implement' and 'Do NOT run git push'
+lines.
+
+Added 1 new test to test/orchestrator.test.ts: asserts
+`renderMergePrompt` output includes 'current directory'.
+
+All 706 tests pass (setup: 87, orchestrator: 168, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 178).
+Lint clean.
