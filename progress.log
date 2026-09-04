@@ -1250,3 +1250,41 @@ verified against the current code:
 
 Build, lint, and full suite all pass with zero failures. Set
 passes:true and committed.
+
+## 2026-09-03 - US-008: A throw inside an attempt fails that attempt, not the wave
+
+Completed. `runTicketAttempt` in src/orchestrator.ts could throw
+when a ticket's worktree is destroyed mid-run (e.g. by the agent
+deleting its own cwd). The `isDirty` / `hasNewCommits` calls use
+`execFileSync` which throws ENOENT when the directory no longer
+exists, and since `runTicketAttempts` had no try/catch around its
+`runTicketAttempt` call, the rejection propagated through
+`Promise.all` in `runWavesIsolated` and crashed the entire wave.
+
+Changes:
+1. Added `'error'` kind to the `TicketOutcome` discriminated union
+   (src/orchestrator.ts:1127) with an `error:unknown` field.
+2. Wrapped the `runTicketAttempt` call in `runTicketAttempts` with
+   try/catch (src/orchestrator.ts:1304-1311). A caught error returns
+   `{ kind:'error', error }` immediately -- no retry, since the
+   error is structural (missing directory), not a transient agent
+   failure.
+3. Added `'error'` handling in `runWavesIsolated`'s outcome loop
+   (src/orchestrator.ts:1649-1657): adds the ticket to `failedNums`,
+   sets display status to `'failed'`, logs the error, and continues
+   to the next ticket.
+
+Created test/mock-agent-delete-worktree-01.js: for ticket 01-*,
+deletes its own cwd (the worktree directory) then exits 0. For
+all other tickets, behaves like mock-agent-pass.js.
+
+Added 1 new integration test to test/integration.test.ts: two
+independent tickets in one wave, ticket 01 uses the
+delete-worktree mock. Asserts ticket 01 stays ready-for-agent
+(error failed the ticket), ticket 02 reaches done (wave survived),
+and result.allDone is false.
+
+All 687 tests pass (setup: 79, orchestrator: 163, worktree: 75,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 174).
+Lint clean.

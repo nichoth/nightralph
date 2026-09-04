@@ -1124,6 +1124,7 @@ function attemptLogPath (
 
 type TicketOutcome =
     | { kind:'worktree-error'; error:unknown }
+    | { kind:'error'; error:unknown }
     | { kind:'no-commits' }
     | {
         kind:'failed'
@@ -1296,9 +1297,17 @@ async function runTicketAttempts (
             )
             if (delay > 0) await sleep(delay * 1000)
         }
-        outcome = await runTicketAttempt({
-            ...opts, attempt, thinking,
-        })
+        try {
+            outcome = await runTicketAttempt({
+                ...opts, attempt, thinking,
+            })
+        } catch (error) {
+            d.log(
+                `  ${ticket.filename}: attempt ${attempt} ` +
+                `threw: ${formatErrorMessage(error)}`
+            )
+            return { kind:'error', error }
+        }
         if (
             outcome.kind === 'ready' ||
             outcome.kind === 'worktree-error'
@@ -1627,6 +1636,16 @@ export async function runWavesIsolated (opts:{
                 d.log(
                     `  ${ticket.filename}: failed to create ` +
                     `worktree: ${formatErrorMessage(outcome.error)}`
+                )
+                continue
+            }
+
+            if (outcome.kind === 'error') {
+                failedNums.add(ticket.num)
+                d.setTicketStatus(ticket.num, 'failed')
+                d.log(
+                    `  ${ticket.filename}: attempt error: ` +
+                    formatErrorMessage(outcome.error)
                 )
                 continue
             }

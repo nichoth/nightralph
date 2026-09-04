@@ -133,7 +133,7 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Modify src/orchestrator.ts. Create test/mock-agent-delete-worktree-01.js. Test in test/integration.test.ts. Depends on failedNums from US-002."
     },
     {

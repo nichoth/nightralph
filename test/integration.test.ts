@@ -550,6 +550,9 @@ const MOCK_GRANDCHILD_HANG = join(
 const MOCK_FAIL_TICKET_01 = join(
     process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
 )
+const MOCK_DELETE_WORKTREE_01 = join(
+    process.cwd(), 'test', 'mock-agent-delete-worktree-01.js'
+)
 
 const GIT_ENV = {
     ...process.env,
@@ -3165,5 +3168,69 @@ test('runWavesIsolated - a red test gate on the first attempt ' +
         cleanupWorktrees(projectDir)
         rmSync(projectDir, { recursive:true, force:true })
         rmSync(markerDir, { recursive:true, force:true })
+    }
+})
+
+// -- US-008: A throw inside an attempt fails that attempt, not the wave --
+
+test('runWavesIsolated - agent that deletes its worktree ' +
+    'fails its ticket but the other ticket succeeds', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-doomed.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-survivor.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_DELETE_WORKTREE_01,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                retries:0,
+                retryDelay:0,
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'ticket 01 stays ready-for-agent ' +
+                '(error failed the ticket, not the wave)'
+            )
+            t.equal(
+                tickets[1].status,
+                'done',
+                'ticket 02 completes successfully'
+            )
+            t.equal(
+                result.allDone,
+                false,
+                'run reports not all done'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
     }
 })
