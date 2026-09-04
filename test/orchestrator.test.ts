@@ -1568,6 +1568,42 @@ test('dryRunIsolated handles multiple tickets per wave', t => {
     }
 })
 
+test('dryRunIsolated prints 0s retry delay when omitted',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-test.md',
+                status:'ready-for-agent',
+                blockers:[],
+            }),
+        ]
+
+        const output:Array<string> = []
+        const originalLog = console.log
+        console.log = function (msg:unknown) {
+            output.push(String(msg))
+        }
+
+        try {
+            dryRunIsolated({
+                tickets,
+                specBody:'test spec body',
+                repoName:'myapp',
+                conflictStrategy:'respawn',
+                progressPath:'.scratch/f/progress.md',
+            })
+        } finally {
+            console.log = originalLog
+        }
+
+        const fullOutput = output.join('\n')
+        t.ok(
+            fullOutput.includes('Retry delay:  0s'),
+            'prints 0s when retryDelay is omitted'
+        )
+    })
+
 // -- US-003: provider adapter argument construction --
 
 test('getProviderArgs - claude provider adds stream flags',

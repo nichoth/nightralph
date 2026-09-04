@@ -1391,3 +1391,27 @@ AGENTS.md updates:
     process-level signal handlers
 
 Typecheck, TOC generation, and lint all clean.
+
+## 2026-09-04 - US-001: Fix dry-run retry delay default
+
+Completed. `dryRunIsolated` in src/orchestrator.ts printed
+`Retry delay:  30s` when `retryDelay` was omitted, using
+`opts.retryDelay ?? DEFAULT_RETRY_DELAY` (30). But
+`runWavesIsolated` defaults omitted `retryDelay` to `0`, so
+the dry-run output misrepresented the actual behavior.
+
+Changed line 943 from `opts.retryDelay ?? DEFAULT_RETRY_DELAY`
+to `opts.retryDelay ?? 0`, matching what `runWavesIsolated`
+actually uses.
+
+Added 1 new test to test/orchestrator.test.ts: calls
+`dryRunIsolated` without a `retryDelay` option, captures
+`console.log` output, and asserts it includes `Retry delay:  0s`.
+Assertion is placed after the `finally` block that restores
+`console.log`, so it appears in test output (the existing
+dryRunIsolated tests have assertions swallowed by the mock).
+
+All 705 tests pass (setup: 87, orchestrator: 167, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 178).
+Lint clean.

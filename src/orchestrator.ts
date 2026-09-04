@@ -940,7 +940,7 @@ export function dryRunIsolated (opts:{
     )
     console.log(
         'Retry delay:  ' +
-        `${opts.retryDelay ?? DEFAULT_RETRY_DELAY}s`
+        `${opts.retryDelay ?? 0}s`
     )
     console.log(
         `\nMerge strategy: ${strategyDesc}`
