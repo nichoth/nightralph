@@ -495,6 +495,81 @@ test(
     }
 )
 
+test(
+    'commitProgress returns true when a commit was made',
+    async t => {
+        const repoRoot = initTempRepo()
+        const progressPath = 'progress.md'
+        const fullProgressPath = join(repoRoot, progressPath)
+
+        const tickets = [
+            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+        ]
+
+        const data = generateProgress('return-value-feature', tickets)
+        writeProgress(fullProgressPath, data)
+
+        const committed = await commitProgress(
+            repoRoot,
+            progressPath,
+            'Track progress on return-value-feature'
+        )
+
+        t.equal(committed, true, 'should return true')
+    }
+)
+
+test(
+    'commitProgress returns false and does not commit when unchanged',
+    async t => {
+        const repoRoot = initTempRepo()
+        const progressPath = 'progress.md'
+        const fullProgressPath = join(repoRoot, progressPath)
+
+        const tickets = [
+            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+        ]
+
+        const data = generateProgress('unchanged-feature', tickets)
+        writeProgress(fullProgressPath, data)
+
+        const first = await commitProgress(
+            repoRoot,
+            progressPath,
+            'Track progress on unchanged-feature'
+        )
+        t.equal(first, true, 'first call should commit')
+
+        const countBefore = execSync('git rev-list --count HEAD', {
+            cwd:repoRoot,
+        }).toString().trim()
+
+        let error:unknown = null
+        let second:boolean|undefined
+        try {
+            second = await commitProgress(
+                repoRoot,
+                progressPath,
+                'Track progress on unchanged-feature'
+            )
+        } catch (e) {
+            error = e
+        }
+
+        t.equal(error, null, 'should not throw on unchanged file')
+        t.equal(second, false, 'second call should return false')
+
+        const countAfter = execSync('git rev-list --count HEAD', {
+            cwd:repoRoot,
+        }).toString().trim()
+        t.equal(
+            countAfter,
+            countBefore,
+            'should not create a new commit'
+        )
+    }
+)
+
 // -- readProgress --
 
 test(

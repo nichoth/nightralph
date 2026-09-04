@@ -914,3 +914,35 @@ and the full suite.
 All 380 tests pass (setup: 79, orchestrator: 86, worktree: 20,
 progress: 52, merge: 38, integration: 105).
 Lint clean.
+
+## 2026-09-03 - US-001: commitProgress skips an unchanged file
+
+Completed. `commitProgress` in src/progress.ts previously always ran
+`git commit`, which throws when the staged progress file is
+identical to HEAD (git exits non-zero with "nothing to commit").
+Since retries and merge-failure paths in runWavesIsolated call
+commitProgress with content that may be unchanged from the prior
+commit, a second failure on the same ticket could crash the run.
+
+Changed commitProgress to return `Promise<boolean>`: after staging
+the file, it runs `git diff --cached --quiet -- <path>`; a zero
+exit (no diff) short-circuits to `return false` without committing;
+a non-zero exit (there is a diff) falls through to the existing
+`git commit` call and returns `true`.
+
+Added two tests to test/progress.test.ts: one asserting the return
+value is `true` on a normal commit, and one asserting a second call
+with identical content returns `false`, throws nothing, and does not
+create a new commit (checked via `git rev-list --count HEAD`
+before/after).
+
+Existing callers in src/orchestrator.ts do not yet consume the
+return value -- wiring failedNums/saveProgress semantics around this
+boolean is scoped to US-002, not touched here.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/progress.test.ts` bundle, and the full suite.
+
+All 602 tests pass (setup: 79, orchestrator: 153, worktree: 25,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 153).
+Lint clean.

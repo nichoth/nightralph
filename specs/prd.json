@@ -15,7 +15,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Modify src/progress.ts:186-202. Test in test/progress.test.ts. Use git diff --cached --quiet to detect no-op before committing."
     },
     {
