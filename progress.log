@@ -946,3 +946,67 @@ targeted `test/progress.test.ts` bundle, and the full suite.
 All 602 tests pass (setup: 79, orchestrator: 153, worktree: 25,
 progress: 57, merge: 40, display: 82, testcmd: 13, integration: 153).
 Lint clean.
+
+## 2026-09-03 - US-002: A failed ticket is recorded once and not re-run this run
+
+Completed. Both `runWaves` and `runWavesIsolated` in
+src/orchestrator.ts now track a per-run `failedNums:Set<number>`.
+`findReadyTickets(...)` results are filtered against it before each
+wave, so a ticket that exhausted its attempts (and is not merge-
+blocked) cannot be picked up again in a later wave of the same run.
+
+`failedNums` is populated only on outcomes that mean the retry
+budget is spent: a non-zero exit after all in-place retries
+(`runWaves`), and `worktree-error` / `no-commits` / `failed`
+outcomes from `runTicketAttempts` (`runWavesIsolated`). A merge
+failure (branch didn't merge and, for `respawn`, the respawn also
+failed to resolve it) does NOT add to `failedNums` -- that ticket
+stays eligible and gets a fresh worktree/attempt in the next wave,
+per the acceptance criteria.
+
+Added a `saveProgress(repoRoot, progressPath, progress, message, d)`
+helper that wraps `writeProgress` + `commitProgress` and logs
+(instead of throwing) if the commit fails, e.g. a transient git lock
+held by a concurrent process. Replaced all five
+writeProgress+commitProgress call sites in `runWavesIsolated` with
+it.
+
+The final `Finished: ...` summary line in both functions now appends
+`, N failed` when `failedNums.size > 0`.
+
+Added test/mock-agent-fail-ticket-01.js: fails (and records each
+invocation to `MOCK_INVOCATION_LOG` if set) only when the prompt
+names ticket `01-*.md`; any other ticket succeeds like
+mock-agent-pass.js. This lets one agentCmd drive a multi-ticket,
+multi-wave scenario where one ticket keeps failing while an
+independent ticket succeeds and unblocks a third, dependent ticket
+in wave 2.
+
+Added one test per entry point (test/orchestrator.test.ts for
+`runWaves`, test/integration.test.ts for `runWavesIsolated`): three
+tickets, 01 always fails, 02 is independent and passes, 03 is
+blocked by 02. Asserts 01 stays `ready-for-agent`, 03 reaches `done`
+in wave 2, and 01's mock agent was invoked exactly once across the
+whole run (previously it was invoked again in every subsequent
+wave). Both tests were confirmed red against the pre-fix code before
+implementing the filter.
+
+Gotcha: the mock's ticket-identification regex needs a `\b` word
+boundary, not a literal `/` or `\` prefix -- the rendered prompt puts
+the ticket filename on its own line (preceded by `\n`), so a naive
+`(^|[/\\])01-...` pattern never matches.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/orchestrator.test.ts` and `test/integration.test.ts`
+bundles, and the full suite.
+
+All 608 tests pass (setup: 79, orchestrator: 156, worktree: 25,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 156).
+Lint clean.
+
+Note: the implementation above was left uncommitted by the session
+that wrote it (prd.json still showed passes:false and there was no
+matching git commit). This session re-verified the working tree
+matches the description -- build, lint, targeted orchestrator/
+integration bundles, and the full suite all pass with zero failures
+-- then set passes:true and committed.

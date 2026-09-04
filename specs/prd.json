@@ -33,7 +33,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Modify src/orchestrator.ts (runWaves and runWavesIsolated). Create test/mock-agent-fail-ticket-01.js. Test in test/integration.test.ts. Depends on US-001 for the boolean return from commitProgress."
     },
     {

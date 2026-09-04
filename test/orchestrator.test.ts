@@ -1233,6 +1233,77 @@ test('runWaves returns allDone:false when agent fails',
         }
     })
 
+const MOCK_FAIL_TICKET_01 = join(
+    process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
+)
+
+test('runWaves - a failed ticket is not re-run in a later wave',
+    async t => {
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-fail.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-pass.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '03-dependent.md'),
+            makeTicketBody({
+                status:'ready-for-agent',
+                blockers:[2],
+            })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        const invocationLog = join(base, 'invocations.log')
+
+        const originalCwd = process.cwd()
+        const originalEnv = process.env.MOCK_INVOCATION_LOG
+        process.env.MOCK_INVOCATION_LOG = invocationLog
+        process.chdir(base)
+        try {
+            await runWaves(
+                tickets, 'test spec',
+                MOCK_FAIL_TICKET_01, null, 10, logsDir,
+                undefined, undefined, undefined, 0,
+            )
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'failed ticket stays ready-for-agent'
+            )
+            t.equal(
+                tickets[2].status,
+                'done',
+                'dependent ticket ran in a later wave'
+            )
+
+            const invocations = existsSync(invocationLog) ?
+                readFileSync(invocationLog, 'utf8')
+                    .split('\n').filter(Boolean).length :
+                0
+            t.equal(
+                invocations, 1,
+                'failed ticket was only attempted once ' +
+                'across the whole run'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            if (originalEnv === undefined) {
+                delete process.env.MOCK_INVOCATION_LOG
+            } else {
+                process.env.MOCK_INVOCATION_LOG = originalEnv
+            }
+        }
+    })
+
 // -- dryRunIsolated --
 
 test('dryRunIsolated basic test', t => {

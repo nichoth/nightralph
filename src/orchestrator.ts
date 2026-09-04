@@ -1214,6 +1214,27 @@ async function runTicketAttempts (
     return outcome
 }
 
+// Wraps writeProgress + commitProgress so callers do not each
+// need to guard against a commit failure (e.g. a git lock held
+// by a concurrent process) crashing the run.
+async function saveProgress (
+    repoRoot:string,
+    progressPath:string,
+    progress:ProgressData,
+    message:string,
+    d:Display
+):Promise<void> {
+    writeProgress(progressPath, progress)
+    try {
+        await commitProgress(repoRoot, progressPath, message)
+    } catch (err) {
+        d.log(
+            '  Failed to commit progress: ' +
+            formatErrorMessage(err)
+        )
+    }
+}
+
 function runProgress (tickets:ReadonlyArray<Ticket>):RunProgress {
     return {
         completed:tickets.filter(t => t.status === 'done').length,
@@ -1243,9 +1264,12 @@ export async function runWaves (
 
     let totalCompleted = 0
     let waveNum = 0
+    const failedNums = new Set<number>()
 
     while (true) {
-        const ready = findReadyTickets(tickets)
+        const ready = findReadyTickets(tickets).filter(
+            t => !failedNums.has(t.num)
+        )
         if (ready.length === 0) break
 
         waveNum++
@@ -1329,6 +1353,7 @@ export async function runWaves (
             if (r.status === 'rejected') continue
             const { ticket, result } = r.value
             if (result.exitCode !== 0) {
+                failedNums.add(ticket.num)
                 d.setTicketStatus(ticket.num, 'failed')
                 d.log(
                     `  ${ticket.filename}: ` +
@@ -1363,6 +1388,9 @@ export async function runWaves (
         `\nFinished: ${totalCompleted} completed` +
         (remaining.length > 0 ?
             `, ${remaining.length} remaining` :
+            '') +
+        (failedNums.size > 0 ?
+            `, ${failedNums.size} failed` :
             '')
     )
     d.cleanup()
@@ -1412,11 +1440,12 @@ export async function runWavesIsolated (opts:{
         generateProgress(opts.featureName, opts.tickets),
         readProgress(progressPath)
     )
-    writeProgress(progressPath, progress)
-    await commitProgress(
+    await saveProgress(
         repoRoot,
         progressPath,
-        `nightralph: start ${opts.featureName}`
+        progress,
+        `nightralph: start ${opts.featureName}`,
+        d,
     )
 
     if (!opts.testCmd) {
@@ -1425,9 +1454,12 @@ export async function runWavesIsolated (opts:{
 
     let totalCompleted = 0
     let waveNum = 0
+    const failedNums = new Set<number>()
 
     while (true) {
-        const ready = findReadyTickets(opts.tickets)
+        const ready = findReadyTickets(opts.tickets).filter(
+            t => !failedNums.has(t.num)
+        )
         if (ready.length === 0) break
 
         waveNum++
@@ -1486,6 +1518,7 @@ export async function runWavesIsolated (opts:{
             const ticket = ready[i]
 
             if (outcome.kind === 'worktree-error') {
+                failedNums.add(ticket.num)
                 d.setTicketStatus(ticket.num, 'failed')
                 d.log(
                     `  ${ticket.filename}: failed to create ` +
@@ -1495,6 +1528,7 @@ export async function runWavesIsolated (opts:{
             }
 
             if (outcome.kind === 'no-commits') {
+                failedNums.add(ticket.num)
                 d.setTicketStatus(ticket.num, 'failed')
                 d.log(
                     `  ${ticket.filename}: agent exited 0 ` +
@@ -1505,6 +1539,7 @@ export async function runWavesIsolated (opts:{
             }
 
             if (outcome.kind === 'failed') {
+                failedNums.add(ticket.num)
                 d.setTicketStatus(ticket.num, 'failed')
                 if (outcome.reason === 'exit') {
                     checkItems(ticket, outcome.completedItems)
@@ -1517,14 +1552,15 @@ export async function runWavesIsolated (opts:{
                     exitCode:outcome.exitCode,
                     done:false,
                 })
-                writeProgress(progressPath, progress)
-                await commitProgress(
+                await saveProgress(
                     repoRoot,
                     progressPath,
+                    progress,
                     `nightralph: ${ticket.filename} ` +
                     (outcome.reason === 'tests' ?
                         'tests failed' :
-                        'failed')
+                        'failed'),
+                    d,
                 )
                 continue
             }
@@ -1571,11 +1607,12 @@ export async function runWavesIsolated (opts:{
                         branch:branchResult.branch,
                         exitCode:0,
                     })
-                    writeProgress(progressPath, progress)
-                    await commitProgress(
+                    await saveProgress(
                         repoRoot,
                         progressPath,
-                        `nightralph: ${ticket.filename} done`
+                        progress,
+                        `nightralph: ${ticket.filename} done`,
+                        d,
                     )
 
                     const worktreePath = worktreePathsByNum.get(
@@ -1623,12 +1660,13 @@ export async function runWavesIsolated (opts:{
                             branch:branchResult.branch,
                             exitCode:0,
                         })
-                        writeProgress(progressPath, progress)
-                        await commitProgress(
+                        await saveProgress(
                             repoRoot,
                             progressPath,
+                            progress,
                             `nightralph: ${ticket.filename} ` +
-                            'done (respawn)'
+                            'done (respawn)',
+                            d,
                         )
 
                         if (worktreePath) {
@@ -1658,12 +1696,13 @@ export async function runWavesIsolated (opts:{
                             exitCode:0,
                             done:false,
                         })
-                        writeProgress(progressPath, progress)
-                        await commitProgress(
+                        await saveProgress(
                             repoRoot,
                             progressPath,
+                            progress,
                             `nightralph: ${ticket.filename} ` +
-                            'merge failed'
+                            'merge failed',
+                            d,
                         )
                     }
                 }
@@ -1709,6 +1748,9 @@ export async function runWavesIsolated (opts:{
         `\nFinished: ${totalCompleted} completed` +
         (remaining.length > 0 ?
             `, ${remaining.length} remaining` :
+            '') +
+        (failedNums.size > 0 ?
+            `, ${failedNums.size} failed` :
             '')
     )
     d.cleanup()
