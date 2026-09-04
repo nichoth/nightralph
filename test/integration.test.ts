@@ -547,6 +547,9 @@ const MOCK_COMMIT_THEN_HANG = join(
 const MOCK_GRANDCHILD_HANG = join(
     process.cwd(), 'test', 'mock-agent-grandchild-hang.js'
 )
+const MOCK_GRANDCHILD_EXIT = join(
+    process.cwd(), 'test', 'mock-agent-grandchild-exit.js'
+)
 const MOCK_FAIL_TICKET_01 = join(
     process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
 )
@@ -3318,5 +3321,58 @@ test('runWavesIsolated - agent that deletes its worktree ' +
     } finally {
         cleanupWorktrees(projectDir)
         rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('spawnAgent - grace timer kills process group ' +
+    'when agent exits but grandchild holds stdout', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-grandchild-exit-')
+    )
+    try {
+        const logPath = join(logDir, 'exit.log')
+        const pidFile = join(logDir, 'grandchild.pid')
+        const start = Date.now()
+        const result = await spawnAgent({
+            prompt:'test prompt',
+            agentCmd:MOCK_GRANDCHILD_EXIT,
+            model:null,
+            timeout:30,
+            logPath,
+            cwd:logDir,
+        })
+        const elapsedMs = Date.now() - start
+
+        t.equal(
+            result.exitCode, 0,
+            'agent exited 0'
+        )
+        t.equal(
+            result.timedOut, false,
+            'not a timeout -- agent exited voluntarily'
+        )
+        t.ok(
+            elapsedMs < 10000,
+            'spawnAgent resolves within 10s ' +
+            `(took ${elapsedMs}ms)`
+        )
+
+        const grandchildPid = Number(
+            readFileSync(pidFile, 'utf8').trim()
+        )
+        // Small delay to let SIGKILL fully propagate
+        await new Promise(r => setTimeout(r, 200))
+        let grandchildAlive = true
+        try {
+            process.kill(grandchildPid, 0)
+        } catch {
+            grandchildAlive = false
+        }
+        t.equal(
+            grandchildAlive, false,
+            'grandchild process is no longer alive'
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
     }
 })

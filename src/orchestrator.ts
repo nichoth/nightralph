@@ -805,6 +805,7 @@ export function spawnAgent (opts:{
         // the run does not hang forever on someone else's fd.
         proc.on('exit', code => {
             graceTimer = setTimeout(() => {
+                killProcessGroup(proc.pid)
                 proc.stdout.destroy()
                 proc.stderr.destroy()
                 finish(code ?? 1)

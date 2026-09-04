@@ -1435,3 +1435,35 @@ All 706 tests pass (setup: 87, orchestrator: 168, worktree: 77,
 progress: 57, merge: 40, display: 86, testcmd: 13,
 integration: 178).
 Lint clean.
+
+## 2026-09-04 - US-003: Kill process group on grace timeout
+
+Completed. In `spawnAgent` (src/orchestrator.ts), the grace timer
+callback that fires when the agent exits but a grandchild holds
+the stdout pipe open previously only destroyed the streams and
+resolved the promise. Now it calls `killProcessGroup(proc.pid)`
+before destroying streams, so dev servers and watchers spawned by
+the agent do not survive indefinitely.
+
+Created test/mock-agent-grandchild-exit.js: spawns a long-lived
+grandchild sharing stdout via `stdio:['ignore', 'inherit',
+'inherit']`, writes the grandchild pid to `./grandchild.pid`,
+then calls `process.exit(0)`. Unlike the existing
+mock-agent-grandchild-hang.js (which never exits and exercises
+the timeout path), this mock exercises the grace timer path where
+the agent exits voluntarily but the grandchild keeps the pipe.
+
+Added 1 new test to test/integration.test.ts: verifies spawnAgent
+resolves within 10s, exitCode is 0, timedOut is false, and the
+grandchild process is no longer alive after the grace timer fires.
+
+Gotcha: SIGKILL is delivered immediately but the grandchild
+becomes a zombie until init reaps it. `process.kill(pid, 0)`
+returns success for zombies, so the test needs a short delay
+(200ms) between spawnAgent resolving and the alive check to avoid
+a false positive.
+
+All 710 tests pass (setup: 87, orchestrator: 168, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 182).
+Lint clean.
