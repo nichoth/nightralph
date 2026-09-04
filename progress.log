@@ -1010,3 +1010,46 @@ matching git commit). This session re-verified the working tree
 matches the description -- build, lint, targeted orchestrator/
 integration bundles, and the full suite all pass with zero failures
 -- then set passes:true and committed.
+
+## 2026-09-03 - US-003: An agent that exits before reading stdin cannot crash the run
+
+Completed. `spawnAgent` in src/orchestrator.ts wrote the prompt
+directly to `proc.stdin` with no error listener. When an agent CLI
+exits immediately (bad flags, auth failure) before draining stdin,
+Node's write to the now-closed pipe raises EPIPE as an uncaught
+`error` event on the stdin stream, which crashes the whole
+orchestrator process -- taking down every other ticket's wave with
+it.
+
+Added a `proc.stdin.on('error', ...)` listener, installed before the
+write, that logs the failure into the ticket's log file via
+`formatErrorMessage` instead of letting it propagate. No other
+behavior changes: the agent's own exit code (1, in the reproduction
+case) still flows through `proc.on('close', ...)` as before, so
+`spawnAgent` resolves normally with `exitCode:1, timedOut:false`.
+
+Added test/mock-agent-exit-before-reading.js: calls `process.exit(1)`
+immediately without ever registering a stdin listener, so the parent
+process's write is guaranteed to hit a closed pipe.
+
+Added one test to test/integration.test.ts
+("spawnAgent - an agent that exits before reading stdin does not
+crash the run") using a 2MB prompt, large enough that the OS pipe
+buffer cannot absorb it in a single write so the EPIPE is reliably
+triggered. Confirmed red first: running the bundled integration
+suite against the pre-fix code crashed the whole test process with
+an uncaught `Error: write EPIPE`, not just a single failing
+assertion.
+
+Gotcha: manually re-bundling a single test file with esbuild needs
+`--packages=external` (matching the `npm test` script) -- omitting
+it produces a bundle that tries to `require('stream')` at runtime
+and fails immediately with a confusing "Dynamic require... not
+supported" error that looks unrelated to the change under test.
+
+Verified via `npm run build` (typecheck), `npm run lint`, the
+targeted `test/integration.test.ts` bundle, and the full suite.
+
+All 610 tests pass (setup: 79, orchestrator: 156, worktree: 25,
+progress: 57, merge: 40, display: 82, testcmd: 13, integration: 158).
+Lint clean.

@@ -711,6 +711,17 @@ export function spawnAgent (opts:{
         proc.kill('SIGKILL')
     }, opts.timeout * 1000)
 
+    // An agent that exits before draining stdin (bad flags,
+    // auth failure) closes its end of the pipe; writing to it
+    // then raises EPIPE on proc.stdin. Without a listener that
+    // is an uncaught 'error' event that kills the orchestrator.
+    proc.stdin.on('error', err => {
+        logStream.write(
+            'nightralph: stdin write failed: ' +
+            `${formatErrorMessage(err)}\n`
+        )
+    })
+
     if (!promptFile) {
         proc.stdin.write(opts.prompt)
     }

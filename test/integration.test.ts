@@ -2364,6 +2364,43 @@ test('spawnAgent - agent that never exits is killed at ' +
     }
 })
 
+test('spawnAgent - an agent that exits before reading ' +
+    'stdin does not crash the run', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-epipe-log-')
+    )
+    const MOCK_EXIT_BEFORE_READING = join(
+        process.cwd(), 'test',
+        'mock-agent-exit-before-reading.js'
+    )
+    try {
+        const logPath = join(logDir, 'epipe.log')
+        // Large enough that the OS pipe buffer cannot
+        // absorb it in one write, so the writer observes
+        // EPIPE once the reader has exited and closed its
+        // end of the pipe.
+        const bigPrompt = 'x'.repeat(2 * 1024 * 1024)
+        const result = await spawnAgent({
+            prompt:bigPrompt,
+            agentCmd:MOCK_EXIT_BEFORE_READING,
+            model:null,
+            timeout:10,
+            logPath,
+        })
+
+        t.equal(
+            result.exitCode, 1,
+            'resolves with the process exit code, not a crash'
+        )
+        t.equal(
+            result.timedOut, false,
+            'this is not a timeout'
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
 test('spawnAgent - unknown provider passes through ' +
     'with no extra args', async t => {
     const logDir = mkdtempSync(

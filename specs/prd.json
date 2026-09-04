@@ -48,7 +48,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Modify src/orchestrator.ts:714-717. Create test/mock-agent-exit-before-reading.js. Test in test/integration.test.ts."
     },
     {
