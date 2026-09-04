@@ -165,7 +165,7 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Modify src/worktree.ts and src/orchestrator.ts. Create test/mock-agent-dirty-then-fail.js. Test in test/worktree.test.ts and test/integration.test.ts."
     },
     {

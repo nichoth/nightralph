@@ -1306,3 +1306,46 @@ All 690 tests pass (setup: 79, orchestrator: 166, worktree: 75,
 progress: 57, merge: 40, display: 86, testcmd: 13,
 integration: 174).
 Lint clean.
+
+## 2026-09-03 - US-010: A failed attempt's worktree is removed even when dirty
+
+Completed. `removeWorktree` in src/worktree.ts previously ran
+`git worktree remove` without `--force`, which fails when the
+worktree contains modified or untracked files (git exits 128
+with "contains modified or untracked files, use --force to
+delete it"). Since failed agents often leave dirty files behind
+(partial writes, untracked artifacts), the orchestrator's cleanup
+calls silently failed and left worktree directories accumulating
+as sibling directories.
+
+Changed `removeWorktree` to accept an optional second parameter
+`opts?:{ force?:boolean }`. When `opts.force` is true, `--force`
+is inserted into the git args before the worktree path. The
+public signature is backward-compatible (existing callers that
+pass no second arg behave identically).
+
+Updated all cleanup call sites in src/orchestrator.ts to pass
+`force:true`:
+- `removeWorktreeQuietly` (used after failed agent exits and
+  failed test gates)
+- The respawn-recovery path's direct `removeWorktree` call
+- The `stoppedAt` cleanup loop's direct `removeWorktree` call
+
+Created test/mock-agent-dirty-then-fail.js: writes an untracked
+file into its cwd then exits 1 for ticket 01-*; any other ticket
+succeeds like mock-agent-pass.js.
+
+Added 2 new tests to test/worktree.test.ts:
+- removeWorktree with force removes a dirty worktree
+- removeWorktree without force fails on a dirty worktree
+
+Added 1 new integration test to test/integration.test.ts:
+- dirty worktree from failed agent is cleaned up: two tickets,
+  01 writes dirty files and exits 1, 02 passes. Asserts 01 stays
+  ready-for-agent, 02 reaches done, and 01's worktree directory
+  is gone.
+
+All 695 tests pass (setup: 79, orchestrator: 166, worktree: 77,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 177).
+Lint clean.

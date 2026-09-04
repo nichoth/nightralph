@@ -128,14 +128,16 @@ export function createWorktree (
 }
 
 export async function removeWorktree (
-    worktreePath:string
+    worktreePath:string,
+    opts?:{ force?:boolean }
 ):Promise<void> {
-    // Use git -C to run the command from the worktree directory context
-    // so git can resolve the repository
-    await execFileAsync(
-        'git',
-        ['-C', worktreePath, 'worktree', 'remove', worktreePath]
-    )
+    const args = [
+        '-C', worktreePath,
+        'worktree', 'remove',
+    ]
+    if (opts?.force) args.push('--force')
+    args.push(worktreePath)
+    await execFileAsync('git', args)
 }
 
 export function hasNewCommits (

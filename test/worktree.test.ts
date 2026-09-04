@@ -412,6 +412,74 @@ test('listWorktrees returns all worktree paths', async t => {
     )
 })
 
+test(
+    'removeWorktree with force removes a dirty worktree',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+        const ticket = makeTestTicket({
+            num:7, slug:'force-dirty',
+        })
+
+        const result = await createWorktree({
+            repoRoot,
+            repoName,
+            baseBranch,
+            ticket,
+        })
+
+        writeFileSync(
+            join(result.worktreePath, 'untracked.txt'),
+            'dirty content'
+        )
+
+        await removeWorktree(result.worktreePath, {
+            force:true,
+        })
+
+        t.equal(
+            existsSync(result.worktreePath),
+            false,
+            'dirty worktree removed with force'
+        )
+    }
+)
+
+test(
+    'removeWorktree without force fails on a dirty worktree',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+        const ticket = makeTestTicket({
+            num:8, slug:'no-force-dirty',
+        })
+
+        const result = await createWorktree({
+            repoRoot,
+            repoName,
+            baseBranch,
+            ticket,
+        })
+
+        writeFileSync(
+            join(result.worktreePath, 'untracked.txt'),
+            'dirty content'
+        )
+
+        try {
+            await removeWorktree(result.worktreePath)
+            t.fail('should have thrown for dirty worktree')
+        } catch (error) {
+            t.ok(
+                error instanceof Error,
+                'throws on dirty worktree without force'
+            )
+        }
+    }
+)
+
 // -- error paths --
 
 test('removeWorktree throws for non-existent path', async t => {

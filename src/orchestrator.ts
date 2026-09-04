@@ -65,7 +65,7 @@ async function removeWorktreeQuietly (
     d:Display
 ):Promise<void> {
     try {
-        await removeWorktree(worktreePath)
+        await removeWorktree(worktreePath, { force:true })
     } catch (err) {
         d.log(
             '  Failed to remove worktree ' +
@@ -1798,7 +1798,10 @@ export async function runWavesIsolated (opts:{
 
                         if (worktreePath) {
                             try {
-                                await removeWorktree(worktreePath)
+                                await removeWorktree(
+                                    worktreePath,
+                                    { force:true }
+                                )
                             } catch (err) {
                                 d.log(
                                     '  Failed to remove worktree ' +
@@ -1845,7 +1848,10 @@ export async function runWavesIsolated (opts:{
                     const ticket = ticketsByNum.get(sb.ticketNum)
                     if (ticket && ticket.status === 'done') continue
                     try {
-                        await removeWorktree(sb.worktreePath)
+                        await removeWorktree(
+                            sb.worktreePath,
+                            { force:true }
+                        )
                     } catch (err) {
                         d.log(
                             '  Failed to remove worktree ' +

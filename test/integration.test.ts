@@ -553,6 +553,9 @@ const MOCK_FAIL_TICKET_01 = join(
 const MOCK_DELETE_WORKTREE_01 = join(
     process.cwd(), 'test', 'mock-agent-delete-worktree-01.js'
 )
+const MOCK_DIRTY_THEN_FAIL = join(
+    process.cwd(), 'test', 'mock-agent-dirty-then-fail.js'
+)
 
 const GIT_ENV = {
     ...process.env,
@@ -1478,6 +1481,89 @@ test('runWavesIsolated - failed ticket worktree is cleaned up',
             rmSync(projectDir, { recursive:true, force:true })
         }
     })
+
+test('runWavesIsolated - dirty worktree from failed agent is ' +
+    'cleaned up', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-dirty-fail.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        writeFileSync(
+            join(issuesDir, '02-clean-pass.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_DIRTY_THEN_FAIL,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-dirty-fail',
+                conflictStrategy:'respawn',
+                retryDelay:0,
+                retries:0,
+            })
+
+            t.equal(
+                tickets[0].status,
+                'ready-for-agent',
+                'failed dirty ticket keeps ready status'
+            )
+
+            t.equal(
+                tickets[1].status,
+                'done',
+                'clean ticket still completes'
+            )
+
+            const repoName = projectDir
+                .split('/').pop()
+            const worktreePath = join(
+                projectDir, '..',
+                `${repoName}.01-dirty-fail`
+            )
+            t.equal(
+                existsSync(worktreePath),
+                false,
+                'dirty worktree removed after failed agent'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
 
 test('runWavesIsolated - re-run after a prior failed run does not ' +
     'crash when the branch already exists', async t => {
