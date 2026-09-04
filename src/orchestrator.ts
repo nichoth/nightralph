@@ -382,7 +382,11 @@ const PROVIDER_ARGS:Record<string, string[]> = {
         '--output-format', 'stream-json',
         '--dangerously-skip-permissions',
     ],
-    codex:['exec', '--full-auto'],
+    // codex removed --full-auto; this is the counterpart
+    // of claude's --dangerously-skip-permissions, and the
+    // workspace-write sandbox would block commits because
+    // a worktree's .git link points outside the tree
+    codex:['exec', '--dangerously-bypass-approvals-and-sandbox'],
     pi:[
         '-p', '--verbose',
         '--approve', '--no-session',
@@ -393,6 +397,27 @@ const PROVIDER_ARGS:Record<string, string[]> = {
 export function getProviderArgs (cmd:string):string[] {
     const name = basename(cmd)
     return PROVIDER_ARGS[name] ?? []
+}
+
+// The thinking levels pi accepts, lowest to highest.
+export const THINKING_LEVELS = [
+    'off', 'minimal', 'low', 'medium',
+    'high', 'xhigh', 'max',
+] as const
+
+export type ThinkingLevel = typeof THINKING_LEVELS[number]
+
+// The level for a retry. Without a starting level the
+// first retry jumps to high; otherwise step one rung up
+// and stop at max.
+export function escalateThinking (
+    level?:ThinkingLevel
+):ThinkingLevel {
+    if (!level) return 'high'
+    const i = THINKING_LEVELS.indexOf(level)
+    return THINKING_LEVELS[
+        Math.min(i + 1, THINKING_LEVELS.length - 1)
+    ]
 }
 
 export function formatStreamLine (
@@ -554,6 +579,9 @@ function cleanupPromptFile (filePath:string):void {
 export type AgentResult = {
     exitCode:number
     completedItems:string[]
+    // true when the orchestrator killed the agent at
+    // the timeout; exitCode is non-zero in that case
+    timedOut:boolean
 }
 
 export function spawnAgent (opts:{
@@ -565,6 +593,8 @@ export function spawnAgent (opts:{
     cwd?:string
     label?:string
     maxTurns?:number
+    // pi only; other providers ignore it
+    thinking?:ThinkingLevel
     onLine?:(line:string) => void
 }):Promise<AgentResult> {
     const args:string[] = [
@@ -580,6 +610,9 @@ export function spawnAgent (opts:{
     const providerName = basename(opts.agentCmd)
     const isClaude = providerName === 'claude'
     const isPi = providerName === 'pi'
+    if (isPi && opts.thinking) {
+        args.push('--thinking', opts.thinking)
+    }
     const prefix = opts.label ?
         `  [${opts.label}] ` :
         '  '
@@ -659,14 +692,23 @@ export function spawnAgent (opts:{
         }
     })
 
+    let timedOut = false
     const timeout = setTimeout(() => {
-        if (!proc.killed) {
-            console.warn(
-                'Agent did not exit in ' +
-                `${opts.timeout}s; killing.`
-            )
-            proc.kill('SIGKILL')
+        if (proc.killed) return
+        timedOut = true
+        const msg = 'agent timed out after ' +
+            `${opts.timeout}s; killing it`
+        // The status display repaints the screen, so a
+        // bare console.warn would be painted over. Route
+        // the reason through onLine and into the ticket
+        // log so it is visible in both places.
+        logStream.write(`nightralph: ${msg}\n`)
+        if (opts.onLine) {
+            opts.onLine(`${prefix}${msg}`)
+        } else {
+            console.warn(`${prefix}${msg}`)
         }
+        proc.kill('SIGKILL')
     }, opts.timeout * 1000)
 
     if (!promptFile) {
@@ -695,6 +737,7 @@ export function spawnAgent (opts:{
             resolve({
                 exitCode:code ?? 1,
                 completedItems,
+                timedOut,
             })
         })
         proc.on('error', err => {
@@ -707,7 +750,11 @@ export function spawnAgent (opts:{
                 'Agent process error:',
                 formatErrorMessage(err)
             )
-            resolve({ exitCode:1, completedItems })
+            resolve({
+                exitCode:1,
+                completedItems,
+                timedOut,
+            })
         })
     })
 }
@@ -753,6 +800,8 @@ export function dryRunIsolated (opts:{
     conflictStrategy:MergeConflictStrategy
     progressPath:string
     testCmd?:string|null
+    thinking?:ThinkingLevel
+    retries?:number
 }):void {
     listTickets(opts.tickets)
 
@@ -805,6 +854,12 @@ export function dryRunIsolated (opts:{
         `\nTest command: ${opts.testCmd ?? '(none)'}`
     )
     console.log(
+        `Thinking:     ${opts.thinking ?? '(provider default)'}`
+    )
+    console.log(
+        `Retries:      ${opts.retries ?? DEFAULT_RETRIES}`
+    )
+    console.log(
         `\nMerge strategy: ${strategyDesc}`
     )
     console.log(`Progress file: ${opts.progressPath}`)
@@ -819,6 +874,7 @@ async function runTestGate (opts:{
     worktreePath:string
     timeout:number
     logsDir:string
+    attempt?:number
     log:(msg:string) => void
 }):Promise<boolean> {
     const result = await runTestCmd({
@@ -826,9 +882,9 @@ async function runTestGate (opts:{
         cwd:opts.worktreePath,
         timeout:opts.timeout,
     })
-    const testLogPath = join(
-        opts.logsDir,
-        opts.ticket.filename.replace(/\.md$/, '.test.log')
+    const testLogPath = attemptLogPath(
+        opts.logsDir, opts.ticket, opts.attempt ?? 1,
+        '.test.log'
     )
     writeFileSync(testLogPath, result.output)
 
@@ -958,6 +1014,206 @@ async function respawnAndRetryMerge (opts:{
     return mergeResult.success
 }
 
+export const DEFAULT_RETRIES = 2
+
+// Log file for one attempt: the first attempt keeps the
+// plain name so existing tooling still finds it, later
+// attempts get their own file instead of overwriting it.
+function attemptLogPath (
+    logsDir:string,
+    ticket:Ticket,
+    attempt:number,
+    ext:string
+):string {
+    const stem = ticket.filename.replace(/\.md$/, '')
+    const suffix = attempt > 1 ? `.attempt${attempt}` : ''
+    return join(logsDir, `${stem}${suffix}${ext}`)
+}
+
+type TicketOutcome =
+    | { kind:'worktree-error'; error:unknown }
+    | { kind:'no-commits' }
+    | {
+        kind:'failed'
+        reason:'exit'|'tests'
+        branchName:string
+        exitCode:number
+        completedItems:string[]
+    }
+    | {
+        kind:'ready'
+        worktreePath:string
+        branchName:string
+        completedItems:string[]
+    }
+
+type TicketAttemptOpts = {
+    ticket:Ticket
+    repoRoot:string
+    repoName:string
+    baseBranch:string
+    specBody:string
+    agentCmd:string
+    model:string|null
+    timeout:number
+    logsDir:string
+    testCmd?:string|null
+    maxTurns?:number
+    thinking?:ThinkingLevel
+    d:Display
+}
+
+// One attempt at a ticket: a fresh worktree, one agent run,
+// and the checks that decide whether the branch can merge.
+// A failed attempt removes its worktree before returning.
+async function runTicketAttempt (
+    opts:TicketAttemptOpts&{ attempt:number }
+):Promise<TicketOutcome> {
+    const { ticket, d } = opts
+
+    let worktree:{ worktreePath:string; branchName:string }
+    try {
+        worktree = await createWorktree({
+            repoRoot:opts.repoRoot,
+            repoName:opts.repoName,
+            baseBranch:opts.baseBranch,
+            ticket,
+        })
+    } catch (error) {
+        return { kind:'worktree-error', error }
+    }
+
+    d.setTicketStatus(ticket.num, 'in-progress')
+    const agentResult = await spawnAgent({
+        prompt:renderPrompt(
+            opts.specBody, ticket,
+            { testCmd:opts.testCmd }
+        ),
+        agentCmd:opts.agentCmd,
+        model:opts.model,
+        timeout:opts.timeout,
+        logPath:attemptLogPath(
+            opts.logsDir, ticket, opts.attempt, '.log'
+        ),
+        cwd:worktree.worktreePath,
+        label:ticket.filename.replace(/\.md$/, ''),
+        maxTurns:opts.maxTurns,
+        thinking:opts.thinking,
+        onLine:(line) => d.log(line),
+    })
+
+    // A timeout kill is not the agent reporting failure.
+    // Keep whatever it committed and let the test gate and
+    // merge decide, instead of discarding the worktree.
+    if (agentResult.timedOut) {
+        d.log(
+            `  ${ticket.filename}: timed out; ` +
+            'keeping the work it committed'
+        )
+    } else if (agentResult.exitCode !== 0) {
+        d.log(
+            `  ${ticket.filename}: ` +
+            `agent exited ${agentResult.exitCode}`
+        )
+        await removeWorktreeQuietly(worktree.worktreePath, d)
+        return {
+            kind:'failed',
+            reason:'exit',
+            branchName:worktree.branchName,
+            exitCode:agentResult.exitCode,
+            completedItems:agentResult.completedItems,
+        }
+    }
+
+    if (isDirty(worktree.worktreePath)) {
+        const committed = await commitDirty(
+            worktree.worktreePath,
+            'nightralph: auto-commit ' +
+            `${ticket.filename} remaining changes`
+        )
+        if (committed) {
+            d.log(
+                `  ${ticket.filename}: ` +
+                'auto-committed remaining changes'
+            )
+        }
+    }
+
+    if (!hasNewCommits(
+        opts.repoRoot, opts.baseBranch, worktree.branchName
+    )) {
+        return { kind:'no-commits' }
+    }
+
+    if (opts.testCmd) {
+        const passed = await runTestGate({
+            testCmd:opts.testCmd,
+            ticket,
+            worktreePath:worktree.worktreePath,
+            timeout:opts.timeout,
+            logsDir:opts.logsDir,
+            attempt:opts.attempt,
+            log:(msg) => d.log(msg),
+        })
+        if (!passed) {
+            await removeWorktreeQuietly(
+                worktree.worktreePath, d
+            )
+            return {
+                kind:'failed',
+                reason:'tests',
+                branchName:worktree.branchName,
+                exitCode:1,
+                completedItems:agentResult.completedItems,
+            }
+        }
+    }
+
+    return {
+        kind:'ready',
+        worktreePath:worktree.worktreePath,
+        branchName:worktree.branchName,
+        completedItems:agentResult.completedItems,
+    }
+}
+
+// Runs a ticket until an attempt is ready to merge or the
+// retry cap is hit. Each retry starts from a fresh worktree
+// and, for pi, a higher thinking level.
+async function runTicketAttempts (
+    opts:TicketAttemptOpts&{ retries:number }
+):Promise<TicketOutcome> {
+    const { ticket, d } = opts
+    const maxAttempts = opts.retries + 1
+    const isPi = basename(opts.agentCmd) === 'pi'
+    let thinking = opts.thinking
+    let outcome:TicketOutcome = { kind:'no-commits' }
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (attempt === 1) {
+            d.log(`  Starting ${ticket.filename}`)
+        } else {
+            thinking = escalateThinking(thinking)
+            d.log(
+                `  ${ticket.filename}: retrying ` +
+                `(attempt ${attempt}/${maxAttempts}` +
+                (isPi ? `, thinking ${thinking}` : '') +
+                ')'
+            )
+        }
+        outcome = await runTicketAttempt({
+            ...opts, attempt, thinking,
+        })
+        if (
+            outcome.kind === 'ready' ||
+            outcome.kind === 'worktree-error'
+        ) {
+            return outcome
+        }
+    }
+    return outcome
+}
+
 function runProgress (tickets:ReadonlyArray<Ticket>):RunProgress {
     return {
         completed:tickets.filter(t => t.status === 'done').length,
@@ -974,10 +1230,14 @@ export async function runWaves (
     logsDir:string,
     display?:Display,
     maxTurns?:number,
+    thinking?:ThinkingLevel,
+    retries?:number,
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
     const d = display ?? createDisplay()
+    const maxAttempts = (retries ?? DEFAULT_RETRIES) + 1
+    const isPi = basename(agentCmd) === 'pi'
     let totalWaves = 0
     for (const _ of simulateWaves(tickets)) totalWaves++
 
@@ -1011,25 +1271,55 @@ export async function runWaves (
         const results = await Promise.allSettled(
             ready.map(async t => {
                 const prompt = renderPrompt(specBody, t)
-                const logPath = join(
-                    logsDir,
-                    t.filename.replace(/\.md$/, '.log')
-                )
                 const label = t.filename.replace(
                     /\.md$/, ''
                 )
                 d.setTicketStatus(t.num, 'in-progress')
                 d.log(`  Starting ${t.filename}`)
-                const result = await spawnAgent({
+                let level = thinking
+                let result = await spawnAgent({
                     prompt,
                     agentCmd,
                     model,
                     timeout,
-                    logPath,
+                    logPath:attemptLogPath(logsDir, t, 1, '.log'),
                     label,
                     maxTurns,
+                    thinking:level,
                     onLine:(line) => d.log(line),
                 })
+                // In-place runs have no worktree or test
+                // gate, so a non-zero exit is the only
+                // failure that can be retried here.
+                for (
+                    let attempt = 2;
+                    result.exitCode !== 0 &&
+                    !result.timedOut &&
+                    attempt <= maxAttempts;
+                    attempt++
+                ) {
+                    level = escalateThinking(level)
+                    d.log(
+                        `  ${t.filename}: agent exited ` +
+                        `${result.exitCode}; retrying ` +
+                        `(attempt ${attempt}/${maxAttempts}` +
+                        (isPi ? `, thinking ${level}` : '') +
+                        ')'
+                    )
+                    result = await spawnAgent({
+                        prompt,
+                        agentCmd,
+                        model,
+                        timeout,
+                        logPath:attemptLogPath(
+                            logsDir, t, attempt, '.log'
+                        ),
+                        label,
+                        maxTurns,
+                        thinking:level,
+                        onLine:(line) => d.log(line),
+                    })
+                }
                 return { ticket:t, result }
             })
         )
@@ -1092,10 +1382,15 @@ export async function runWavesIsolated (opts:{
     display?:Display
     testCmd?:string|null
     maxTurns?:number
+    // starting thinking level for pi; unset = pi's default
+    thinking?:ThinkingLevel
+    // extra attempts per ticket after a failure; default 2
+    retries?:number
 }):Promise<{ allDone:boolean }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
     const d = opts.display ?? createDisplay()
+    const retries = opts.retries ?? DEFAULT_RETRIES
     let totalWaves = 0
     for (const _ of simulateWaves(opts.tickets)) totalWaves++
 
@@ -1155,63 +1450,26 @@ export async function runWavesIsolated (opts:{
             })),
         )
 
-        const worktreeSettled = await Promise.allSettled(
-            ready.map(t => createWorktree({
+        // Each ticket runs its own attempt loop in parallel.
+        // Progress is recorded afterwards, sequentially, so
+        // commits on the base branch never race each other.
+        const outcomes = await Promise.all(
+            ready.map(t => runTicketAttempts({
+                ticket:t,
                 repoRoot,
                 repoName,
                 baseBranch,
-                ticket:t,
+                specBody:opts.specBody,
+                agentCmd:opts.agentCmd,
+                model:opts.model,
+                timeout:opts.timeout,
+                logsDir:opts.logsDir,
+                testCmd:opts.testCmd,
+                maxTurns:opts.maxTurns,
+                thinking:opts.thinking,
+                retries,
+                d,
             }))
-        )
-
-        const activeTickets:Array<Ticket> = []
-        const worktrees:Array<{
-            worktreePath:string
-            branchName:string
-        }> = []
-
-        for (let i = 0; i < worktreeSettled.length; i++) {
-            const settled = worktreeSettled[i]
-            const ticket = ready[i]
-            if (settled.status === 'rejected') {
-                d.setTicketStatus(ticket.num, 'failed')
-                d.log(
-                    `  ${ticket.filename}: failed to create ` +
-                    `worktree: ${formatErrorMessage(settled.reason)}`
-                )
-                continue
-            }
-            activeTickets.push(ticket)
-            worktrees.push(settled.value)
-        }
-
-        const results = await Promise.allSettled(
-            activeTickets.map((t, i) => {
-                const prompt = renderPrompt(
-                    opts.specBody, t,
-                    { testCmd:opts.testCmd }
-                )
-                const logPath = join(
-                    opts.logsDir,
-                    t.filename.replace(/\.md$/, '.log')
-                )
-                const label = t.filename.replace(
-                    /\.md$/, ''
-                )
-                d.setTicketStatus(t.num, 'in-progress')
-                d.log(`  Starting ${t.filename}`)
-                return spawnAgent({
-                    prompt,
-                    agentCmd:opts.agentCmd,
-                    model:opts.model,
-                    timeout:opts.timeout,
-                    logPath,
-                    cwd:worktrees[i].worktreePath,
-                    label,
-                    maxTurns:opts.maxTurns,
-                    onLine:(line) => d.log(line),
-                })
-            })
         )
 
         let waveCompleted = 0
@@ -1223,55 +1481,20 @@ export async function runWavesIsolated (opts:{
         const ticketsByNum = new Map<number, Ticket>()
         const worktreePathsByNum = new Map<number, string>()
 
-        for (let i = 0; i < results.length; i++) {
-            const r = results[i]
-            if (r.status === 'rejected') continue
-            const agentResult = r.value
-            const ticket = activeTickets[i]
-            const worktree = worktrees[i]
+        for (let i = 0; i < outcomes.length; i++) {
+            const outcome = outcomes[i]
+            const ticket = ready[i]
 
-            if (agentResult.exitCode !== 0) {
+            if (outcome.kind === 'worktree-error') {
                 d.setTicketStatus(ticket.num, 'failed')
                 d.log(
-                    `  ${ticket.filename}: ` +
-                    `agent exited ${agentResult.exitCode}`
-                )
-                checkItems(ticket, agentResult.completedItems)
-                checkTicket(progress, ticket.num, {
-                    branch:worktree.branchName,
-                    exitCode:agentResult.exitCode,
-                    done:false,
-                })
-                writeProgress(progressPath, progress)
-                await commitProgress(
-                    repoRoot,
-                    progressPath,
-                    `nightralph: ${ticket.filename} failed`
-                )
-
-                await removeWorktreeQuietly(
-                    worktree.worktreePath, d
+                    `  ${ticket.filename}: failed to create ` +
+                    `worktree: ${formatErrorMessage(outcome.error)}`
                 )
                 continue
             }
 
-            if (isDirty(worktree.worktreePath)) {
-                const committed = await commitDirty(
-                    worktree.worktreePath,
-                    'nightralph: auto-commit ' +
-                    `${ticket.filename} remaining changes`
-                )
-                if (committed) {
-                    d.log(
-                        `  ${ticket.filename}: ` +
-                        'auto-committed remaining changes'
-                    )
-                }
-            }
-
-            if (!hasNewCommits(
-                repoRoot, baseBranch, worktree.branchName
-            )) {
+            if (outcome.kind === 'no-commits') {
                 d.setTicketStatus(ticket.num, 'failed')
                 d.log(
                     `  ${ticket.filename}: agent exited 0 ` +
@@ -1281,53 +1504,44 @@ export async function runWavesIsolated (opts:{
                 continue
             }
 
-            if (opts.testCmd) {
-                const passed = await runTestGate({
-                    testCmd:opts.testCmd,
-                    ticket,
-                    worktreePath:worktree.worktreePath,
-                    timeout:opts.timeout,
-                    logsDir:opts.logsDir,
-                    log:(msg) => d.log(msg),
-                })
-
-                if (!passed) {
-                    // Acceptance criteria are not met when
-                    // the suite is red, so checklist items
-                    // the agent claimed are not checked off.
-                    d.setTicketStatus(ticket.num, 'failed')
-                    checkTicket(progress, ticket.num, {
-                        branch:worktree.branchName,
-                        exitCode:1,
-                        done:false,
-                    })
-                    writeProgress(progressPath, progress)
-                    await commitProgress(
-                        repoRoot,
-                        progressPath,
-                        `nightralph: ${ticket.filename} ` +
-                            'tests failed'
-                    )
-                    await removeWorktreeQuietly(
-                        worktree.worktreePath, d
-                    )
-                    continue
+            if (outcome.kind === 'failed') {
+                d.setTicketStatus(ticket.num, 'failed')
+                if (outcome.reason === 'exit') {
+                    checkItems(ticket, outcome.completedItems)
                 }
+                // Acceptance criteria are not met when the
+                // suite is red, so checklist items the agent
+                // claimed are not checked off in that case.
+                checkTicket(progress, ticket.num, {
+                    branch:outcome.branchName,
+                    exitCode:outcome.exitCode,
+                    done:false,
+                })
+                writeProgress(progressPath, progress)
+                await commitProgress(
+                    repoRoot,
+                    progressPath,
+                    `nightralph: ${ticket.filename} ` +
+                    (outcome.reason === 'tests' ?
+                        'tests failed' :
+                        'failed')
+                )
+                continue
             }
 
-            checkItems(ticket, agentResult.completedItems)
+            checkItems(ticket, outcome.completedItems)
             d.log(
                 `  ${ticket.filename}: agent finished, ` +
                 'awaiting merge'
             )
             ticketsByNum.set(ticket.num, ticket)
             worktreePathsByNum.set(
-                ticket.num, worktree.worktreePath
+                ticket.num, outcome.worktreePath
             )
             successfulBranches.push({
-                branch:worktree.branchName,
+                branch:outcome.branchName,
                 ticketNum:ticket.num,
-                worktreePath:worktree.worktreePath,
+                worktreePath:outcome.worktreePath,
             })
         }
 

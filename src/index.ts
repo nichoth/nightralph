@@ -13,6 +13,9 @@ import {
     runWaves,
     runWavesIsolated,
     stripSpecSection,
+    THINKING_LEVELS,
+    DEFAULT_RETRIES,
+    type ThinkingLevel,
 } from './orchestrator.js'
 import { detectTestCmd } from './testcmd.js'
 import { createDisplay } from './display.js'
@@ -103,7 +106,7 @@ yargs(hideBin(process.argv))
             .option('timeout', {
                 type:'number',
                 describe:'Kill agent after N seconds',
-                default:900,
+                default:3600,
             })
             .option('test-cmd', {
                 type:'string',
@@ -124,6 +127,21 @@ yargs(hideBin(process.argv))
                 type:'number',
                 describe:'Max agentic turns per ticket ' +
                     '(forwarded to the agent CLI)',
+            })
+            .option('thinking', {
+                type:'string',
+                choices:THINKING_LEVELS,
+                describe:'Starting thinking level for ' +
+                    'the pi provider. Omitted = pi\'s ' +
+                    'default. Retries step up from here.',
+            })
+            .option('retries', {
+                type:'number',
+                default:DEFAULT_RETRIES,
+                describe:'Extra attempts per ticket ' +
+                    'after a failed run, each with a ' +
+                    'higher thinking level (pi). 0 ' +
+                    'disables retries.',
             }),
         async argv => {
             await runExecute({
@@ -137,6 +155,10 @@ yargs(hideBin(process.argv))
                 stopOnConflict:argv.X as
                     boolean|undefined,
                 maxTurns:argv.maxTurns as
+                    number|undefined,
+                thinking:argv.thinking as
+                    ThinkingLevel|undefined,
+                retries:argv.retries as
                     number|undefined,
             })
         }
@@ -176,6 +198,8 @@ async function runExecute (argv:{
     testCmd?:string
     stopOnConflict?:boolean
     maxTurns?:number
+    thinking?:ThinkingLevel
+    retries?:number
 }):Promise<void> {
     const { dir, spec } = await resolveIssuesDir(
         argv.spec
@@ -247,6 +271,8 @@ async function runExecute (argv:{
                 conflictStrategy,
                 progressPath,
                 testCmd,
+                thinking:argv.thinking,
+                retries:argv.retries,
             })
         } else {
             dryRun(tickets, specBody)
@@ -270,6 +296,8 @@ async function runExecute (argv:{
             display,
             testCmd,
             maxTurns:argv.maxTurns,
+            thinking:argv.thinking,
+            retries:argv.retries,
         })
     } else {
         result = await runWaves(
@@ -279,6 +307,8 @@ async function runExecute (argv:{
             logsDir,
             display,
             argv.maxTurns,
+            argv.thinking,
+            argv.retries,
         )
     }
 

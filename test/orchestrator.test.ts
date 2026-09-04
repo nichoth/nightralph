@@ -2,6 +2,7 @@ import { test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync,
     readFileSync, existsSync, readdirSync,
+    rmSync, symlinkSync, chmodSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -25,6 +26,7 @@ import {
     getProviderArgs,
     formatStreamLine,
     createPiStreamFormatter,
+    escalateThinking,
     type Ticket,
 } from '../src/orchestrator.js'
 
@@ -1469,15 +1471,15 @@ test('getProviderArgs - claude provider adds stream flags',
         )
     })
 
-test('getProviderArgs - codex provider adds sandbox flag',
-    t => {
-        const args = getProviderArgs('codex')
-        t.deepEqual(
-            args,
-            ['exec', '--full-auto'],
-            'codex gets exec and full-auto flag'
-        )
-    })
+test('getProviderArgs - codex provider adds exec and ' +
+    'bypass flag', t => {
+    const args = getProviderArgs('codex')
+    t.deepEqual(
+        args,
+        ['exec', '--dangerously-bypass-approvals-and-sandbox'],
+        'codex gets exec and the approvals/sandbox bypass'
+    )
+})
 
 test('getProviderArgs - unknown provider returns empty',
     t => {
@@ -1512,8 +1514,8 @@ test('getProviderArgs - full path with codex basename',
         )
         t.deepEqual(
             args,
-            ['exec', '--full-auto'],
-            'full path to codex still gets sandbox flag'
+            ['exec', '--dangerously-bypass-approvals-and-sandbox'],
+            'full path to codex still gets the bypass flag'
         )
     })
 
@@ -1856,4 +1858,64 @@ test('stripSpecSection ignores # inside fenced blocks',
             ),
             'next section content kept'
         )
+    })
+
+// -- escalateThinking --
+
+test('escalateThinking - unset level jumps to high', t => {
+    t.equal(
+        escalateThinking(undefined), 'high',
+        'first retry without a starting level uses high'
+    )
+})
+
+test('escalateThinking - steps one rung up the ladder', t => {
+    t.equal(escalateThinking('medium'), 'high', 'medium -> high')
+    t.equal(escalateThinking('high'), 'xhigh', 'high -> xhigh')
+    t.equal(escalateThinking('off'), 'minimal', 'off -> minimal')
+})
+
+test('escalateThinking - clamps at max', t => {
+    t.equal(escalateThinking('max'), 'max', 'max stays max')
+})
+
+test('runWaves retries a failed agent with escalated thinking',
+    async t => {
+        const base = initTempGitRepo()
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'nightralph-provider-test-')
+        )
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-flaky.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+
+        const MOCK_FAIL_THEN_PASS = join(
+            process.cwd(), 'test', 'mock-agent-fail-then-pass.js'
+        )
+        symlinkSync(MOCK_FAIL_THEN_PASS, join(binDir, 'pi'))
+        chmodSync(join(binDir, 'pi'), 0o755)
+
+        const originalCwd = process.cwd()
+        process.chdir(base)
+        try {
+            const result = await runWaves(
+                tickets, 'test spec',
+                join(binDir, 'pi'), null, 10, logsDir,
+                undefined, undefined, undefined, 1,
+            )
+            t.equal(result.allDone, true, 'all done after retry')
+            t.equal(tickets[0].status, 'done', 'ticket done')
+            t.ok(
+                existsSync(join(logsDir, '01-flaky.attempt2.log')),
+                'retry wrote its own log'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            rmSync(binDir, { recursive:true, force:true })
+        }
     })

@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-09-02
+Last verified: 2026-09-03
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -59,6 +59,15 @@ Small orchestrator that runs a single-agent session per issue.
   `package.json` at the repo root; `""` = disabled
 - `--max-turns <n>` -- max agentic turns per ticket,
   forwarded to the agent CLI (e.g. `--max-turns 30`)
+- `--timeout <n>` -- seconds before a still-running
+  agent is killed; default 3600. A killed agent is
+  not a failure (see orchestrator guarantees)
+- `--thinking <level>` -- starting thinking level for
+  `pi`, validated against `THINKING_LEVELS`; omitted =
+  pi's default; ignored by other providers
+- `--retries <n>` -- extra attempts per ticket after a
+  failed run; default `DEFAULT_RETRIES` (2); `0`
+  disables retries
 - `--dry-run` -- shows wave order without running;
   auto-detects git repo and shows worktree/branch
   layout when inside one
@@ -69,7 +78,9 @@ Small orchestrator that runs a single-agent session per issue.
 
 ### orchestrator (`src/orchestrator.ts`)
 - **Exposes**: `Ticket`, `AgentResult`,
-  `COMPLETED_RE`, `scanTickets(dir)`,
+  `COMPLETED_RE`, `THINKING_LEVELS`, `ThinkingLevel`,
+  `DEFAULT_RETRIES`, `escalateThinking(level?)`,
+  `scanTickets(dir)`,
   `findReadyTickets(tickets)`, `checkItems(ticket, items)`,
   `markDone(ticket)`,
   `renderPrompt(specBody, ticket, opts?)`,
@@ -89,14 +100,27 @@ Small orchestrator that runs a single-agent session per issue.
 - **checkItems(ticket, items)**: checks off specific
   `- [ ]` items in a ticket file by matching text;
   called with completed items from agent output
-- **AgentResult**: `{ exitCode, completedItems }` --
-  returned by `spawnAgent`
-- **spawnAgent(opts)**: returns `AgentResult`; collects
+- **THINKING_LEVELS**: pi's levels lowest to highest:
+  `off, minimal, low, medium, high, xhigh, max`
+- **escalateThinking(level?)**: the level for a retry;
+  `undefined` -> `high`, otherwise one rung up the
+  ladder, clamped at `max`
+- **AgentResult**: `{ exitCode, completedItems, timedOut }`
+  -- returned by `spawnAgent`; `timedOut` is true when
+  the orchestrator killed the agent at the timeout, and
+  `exitCode` is non-zero in that case
+- **spawnAgent(opts)**: returns `AgentResult`; kills the
+  agent after `timeout` seconds and reports that through
+  `onLine` (or `console.warn` when no `onLine`) and as a
+  line in the ticket log, never only to the console, since
+  `StatusDisplay` repaints over bare console output; collects
   `[x] <text>` lines from agent stdout via
   `COMPLETED_RE`; accepts optional `cwd` to run
   the agent process in a specific directory (used for
   worktree isolation); accepts optional `maxTurns`
   forwarded as `--max-turns` to the agent CLI;
+  accepts optional `thinking` forwarded as
+  `--thinking <level>` only when the provider is `pi`;
   accepts optional `onLine` callback to redirect
   output lines (used by Display integration); for
   `pi`, writes prompt to a temp file and passes
@@ -111,17 +135,33 @@ Small orchestrator that runs a single-agent session per issue.
   `User Stories` from the per-ticket prompt
 - **runWaves(...)**: accepts optional `display`
   parameter (`Display` interface); defaults to
-  `createDisplay()` when omitted
+  `createDisplay()` when omitted; trailing optional
+  `thinking` and `retries` -- a non-zero exit is
+  retried up to `retries` times with an escalated
+  level (timeouts are not retried)
 - **renderMergePrompt(specBody, ticket)**: prompt for
   a respawned agent resolving a merge conflict; tells
   the agent to resolve conflict markers, not re-implement
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
-  updates; accepts optional `display` and `testCmd`
-  in opts
+  updates; accepts optional `display`, `testCmd`,
+  `thinking`, and `retries` in opts
 - **Guarantees**: `runWavesIsolated` throws if the
-  base branch working tree is dirty; merge failures
+  base branch working tree is dirty; a failed attempt
+  (non-zero exit, exit 0 with no new commits, or a red
+  test gate) is retried up to `retries` times, each
+  from a fresh worktree via `createWorktree` and, for
+  `pi`, with `escalateThinking` applied to the previous
+  level; only the final attempt's outcome is recorded
+  in progress.md; retry logs are
+  `<logsDir>/<ticket>.attempt<n>.log` and
+  `<ticket>.attempt<n>.test.log`, the first attempt
+  keeps the unsuffixed names; a timed-out agent
+  (`timedOut:true`) is not treated as a failed agent:
+  its worktree is kept, dirty changes are auto-committed,
+  and the branch goes through the new-commits check,
+  test gate, and merge exactly like an exit 0; merge failures
   are recorded in progress.md with `done:false`;
   respawned agents receive `renderMergePrompt`
   instead of `renderPrompt`; when `testCmd` is set, a
@@ -132,7 +172,8 @@ Small orchestrator that runs a single-agent session per issue.
   agent run and after a merge-conflict respawn
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; accepts
-  `testCmd` in opts and prints it
+  `testCmd`, `thinking`, and `retries` in opts and
+  prints them
 
 ### testcmd module (`src/testcmd.ts`)
 - **Exposes**: `TestResult`,

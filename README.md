@@ -126,6 +126,12 @@ npx nightralph codex --dry-run
 
 # Specify a feature by name
 npx nightralph claude -m claude-opus-4-6 --spec my-feature
+
+# Cap each agent at 30 agentic turns
+npx nightralph claude -m claude-opus-4-6 --max-turns 30
+
+# Start pi at medium thinking and allow one escalated retry
+npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --thinking medium --retries 1
 ```
 
 #### `--spec <name>` option
@@ -143,8 +149,11 @@ Flags:
 | `--spec <name>` | no | auto | Feature name (resolves `.scratch/<name>/`) |
 | `--dry-run` | no | -- | Show wave order and prompt without running |
 | `-X` | no | -- | Stop on merge conflict instead of re-spawning |
-| `--timeout` | no | `900` | Kill agent after N seconds |
+| `--timeout` | no | `3600` | Kill the agent after N seconds. A killed agent is not a failure: its work is kept (see Notes) |
 | `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable. Shares the agent's `--timeout`. The command runs in a fresh git worktree, which contains only tracked files, so a project that needs an install step should include it, for example `--test-cmd 'npm ci && npm test'` |
+| `--max-turns <n>` | no | -- | Max agentic turns per ticket. Forwarded verbatim as `--max-turns <n>` to the provider CLI. Only `claude` accepts it; `codex` and `pi` reject it as an unknown option and the agent exits immediately. Applies to every agent spawn, including a re-spawn after a merge conflict. When omitted, `claude` applies no turn limit, so `--timeout` is the only cap. Reaching the limit is an error exit, so the ticket is recorded as failed |
+| `--thinking <level>` | no | -- | Starting thinking level for `pi`, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Forwarded as `--thinking <level>`. Omitted = pi's own default. Ignored for other providers. Each retry steps up from here (see `--retries`) |
+| `--retries <n>` | no | `2` | Extra attempts per ticket after a failed run. Each retry starts from a fresh worktree; with `pi` it also raises the thinking level (see Notes). `0` disables retries |
 
 
 **Notes**:
@@ -167,12 +176,34 @@ Flags:
   and the test output is written to `<dir>/../logs/<ticket>.test.log`.
   Failed tickets (non-zero exit) keep their status and block
   dependents.
+* A failed attempt is retried, up to `--retries` times, before the
+  ticket is recorded as failed. Non-zero exit, exit 0 with no new
+  commits, and a red test command all count as failures; a timeout
+  does not (see below). Each retry discards the previous worktree
+  and starts from a fresh one. With `pi`, each retry raises the
+  thinking level: without `--thinking` the first retry uses `high`
+  and the second `max`; with `--thinking <level>` each retry steps
+  one level up from the previous attempt, stopping at `max`.
+  `claude` and `codex` are retried at the same settings. Retry
+  logs are written to `<dir>/../logs/<ticket>.attempt<n>.log`
+  (and `.attempt<n>.test.log` for the test command) so the first
+  attempt's log is kept.
+* An agent still running at `--timeout` is killed. The kill is
+  reported in the status display and in the ticket log. It is not
+  treated as an agent failure: uncommitted changes in the worktree
+  are auto-committed, and the branch goes through the same
+  new-commits check, test gate, and merge as an agent that exited 0.
+  Opus tickets have taken over 12 minutes of API time, which is why
+  the default is an hour rather than the old 15 minutes.
 * Agent logs are written to `<dir>/../logs/<ticket>.log`.
 * Provider commands are launched non-interactively with default flags
   that grant the agent write access to the worktree, so tickets can
   actually be implemented without a permission prompt:
   * `claude`: `--print --dangerously-skip-permissions`
-  * `codex`: `exec --full-auto`
+  * `codex`: `exec --dangerously-bypass-approvals-and-sandbox`
+    (codex removed `--full-auto`; the workspace-write sandbox
+    cannot commit in a worktree because its `.git` link points
+    outside the tree)
   * `pi`: `-p --approve --no-session`
     (prompt delivered via temp file, not stdin)
 

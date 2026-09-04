@@ -537,6 +537,12 @@ const MOCK_DIRTY = join(
 const MOCK_FAIL = join(
     process.cwd(), 'test', 'mock-agent-fail.js'
 )
+const MOCK_HANG = join(
+    process.cwd(), 'test', 'mock-agent-hang.js'
+)
+const MOCK_COMMIT_THEN_HANG = join(
+    process.cwd(), 'test', 'mock-agent-commit-then-hang.js'
+)
 
 const GIT_ENV = {
     ...process.env,
@@ -945,6 +951,75 @@ async t => {
             t.ok(
                 logOutput.includes('auto-commit'),
                 'git log contains auto-commit message'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - agent killed at the timeout keeps ' +
+    'its committed and uncommitted work', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-slow.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_COMMIT_THEN_HANG,
+                model:null,
+                timeout:2,
+                logsDir,
+                featureName:'test-feature-timeout',
+                conflictStrategy:'respawn',
+            })
+
+            t.equal(
+                tickets[0].status,
+                'done',
+                'timed-out agent with new commits still ' +
+                'completes the ticket'
+            )
+            t.ok(
+                existsSync(join(projectDir, 'committed.txt')),
+                'work the agent committed is merged into ' +
+                'the base branch'
+            )
+            t.ok(
+                existsSync(join(projectDir, 'uncommitted.txt')),
+                'work the agent left uncommitted is ' +
+                'auto-committed and merged'
             )
         } finally {
             process.chdir(originalCwd)
@@ -2151,6 +2226,46 @@ test('spawnAgent - codex provider prepends exec ' +
     }
 })
 
+test('spawnAgent - agent that never exits is killed at ' +
+    'the timeout and the timeout is reported', async t => {
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-timeout-log-')
+    )
+    try {
+        const logPath = join(logDir, 'hang.log')
+        const lines:string[] = []
+        const result = await spawnAgent({
+            prompt:'test prompt',
+            agentCmd:MOCK_HANG,
+            model:null,
+            timeout:1,
+            logPath,
+            onLine:line => lines.push(line),
+        })
+
+        t.equal(
+            result.timedOut, true,
+            'result reports the timeout'
+        )
+        t.ok(
+            result.exitCode !== 0,
+            'a killed agent does not count as exit 0'
+        )
+        t.ok(
+            lines.some(l => /timed out/i.test(l)),
+            'timeout is reported through onLine so the ' +
+            'display shows it'
+        )
+        const log = readFileSync(logPath, 'utf8')
+        t.ok(
+            /timed out/i.test(log),
+            'timeout is recorded in the agent log'
+        )
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
 test('spawnAgent - unknown provider passes through ' +
     'with no extra args', async t => {
     const logDir = mkdtempSync(
@@ -2244,3 +2359,443 @@ test('CLI subprocess exits 0 when all tickets complete',
             })
         }
     })
+
+// -- thinking escalation --
+
+test('spawnAgent - pi provider receives --thinking when set',
+    async t => {
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'nightralph-provider-test-')
+        )
+        const logDir = mkdtempSync(
+            join(tmpdir(), 'nightralph-provider-log-')
+        )
+        try {
+            symlinkSync(MOCK_ECHO, join(binDir, 'pi'))
+            chmodSync(join(binDir, 'pi'), 0o755)
+
+            const logPath = join(logDir, 'pi.log')
+            const result = await spawnAgent({
+                prompt:'test prompt',
+                agentCmd:join(binDir, 'pi'),
+                model:null,
+                timeout:10,
+                logPath,
+                thinking:'high',
+            })
+
+            t.equal(result.exitCode, 0, 'agent exits 0')
+
+            const log = readFileSync(logPath, 'utf8')
+            const args = JSON.parse(log.trim().split('\n')[0])
+            const idx = args.indexOf('--thinking')
+            t.ok(idx >= 0, 'spawned process received --thinking')
+            t.equal(
+                args[idx + 1], 'high',
+                'the level follows the flag'
+            )
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logDir, { recursive:true, force:true })
+        }
+    })
+
+test('spawnAgent - non-pi provider never receives --thinking',
+    async t => {
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'nightralph-provider-test-')
+        )
+        const logDir = mkdtempSync(
+            join(tmpdir(), 'nightralph-provider-log-')
+        )
+        try {
+            symlinkSync(MOCK_ECHO, join(binDir, 'codex'))
+            chmodSync(join(binDir, 'codex'), 0o755)
+
+            const logPath = join(logDir, 'codex.log')
+            await spawnAgent({
+                prompt:'test prompt',
+                agentCmd:join(binDir, 'codex'),
+                model:null,
+                timeout:10,
+                logPath,
+                thinking:'high',
+            })
+
+            const log = readFileSync(logPath, 'utf8')
+            const args = JSON.parse(log.trim())
+            t.equal(
+                args.includes('--thinking'), false,
+                'codex does not get the pi-only flag'
+            )
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logDir, { recursive:true, force:true })
+        }
+    })
+
+const MOCK_FAIL_THEN_PASS = join(
+    process.cwd(), 'test', 'mock-agent-fail-then-pass.js'
+)
+
+function cleanupWorktrees (projectDir:string):void {
+    try {
+        execSync(
+            'git worktree list --porcelain',
+            { cwd:projectDir }
+        ).toString()
+            .split('\n')
+            .filter(l => l.startsWith('worktree '))
+            .map(l => l.substring('worktree '.length))
+            .filter(p => p !== projectDir)
+            .forEach(p => rmSync(p, {
+                recursive:true, force:true
+            }))
+    } catch {
+    }
+}
+
+test('runWavesIsolated - a failed pi agent is retried with ' +
+    'escalated thinking and the retry can succeed', async t => {
+    const projectDir = initTempGitRepo()
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-test-')
+    )
+    try {
+        symlinkSync(MOCK_FAIL_THEN_PASS, join(binDir, 'pi'))
+        chmodSync(join(binDir, 'pi'), 0o755)
+
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-flaky.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:join(binDir, 'pi'),
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                retries:2,
+            })
+
+            t.equal(result.allDone, true, 'run reports all done')
+            t.equal(
+                tickets[0].status, 'done',
+                'ticket is done after the retry'
+            )
+            t.ok(
+                existsSync(join(logsDir, '01-flaky.log')),
+                'first attempt log exists'
+            )
+            t.ok(
+                existsSync(join(logsDir, '01-flaky.attempt2.log')),
+                'second attempt gets its own log'
+            )
+            t.equal(
+                existsSync(join(logsDir, '01-flaky.attempt3.log')),
+                false,
+                'no third attempt once the retry succeeds'
+            )
+            const progressContent = readFileSync(
+                join(projectDir, 'progress.md'), 'utf8'
+            )
+            t.ok(
+                progressContent.includes('[x] 01-flaky.md'),
+                'progress records the ticket as done'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(binDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - retries:0 disables the retry so the ' +
+    'failure stands', async t => {
+    const projectDir = initTempGitRepo()
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-test-')
+    )
+    try {
+        symlinkSync(MOCK_FAIL_THEN_PASS, join(binDir, 'pi'))
+        chmodSync(join(binDir, 'pi'), 0o755)
+
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-flaky.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:join(binDir, 'pi'),
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                retries:0,
+            })
+
+            t.equal(result.allDone, false, 'run is not all done')
+            t.equal(
+                tickets[0].status, 'ready-for-agent',
+                'ticket stays ready-for-agent'
+            )
+            t.equal(
+                existsSync(join(logsDir, '01-flaky.attempt2.log')),
+                false,
+                'no second attempt was made'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(binDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - --thinking is forwarded to a pi agent',
+    async t => {
+        const projectDir = tmp()
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'nightralph-provider-test-')
+        )
+        try {
+            symlinkSync(MOCK_ECHO, join(binDir, 'pi'))
+            chmodSync(join(binDir, 'pi'), 0o755)
+            const { issuesDir, logsDir } =
+                scratchDirs(projectDir)
+            writeFileSync(
+                join(issuesDir, '01-echo.md'),
+                makeTicketBody({ status:'ready-for-agent' }),
+            )
+
+            const { code } = await spawnCli([
+                join(binDir, 'pi'),
+                '--spec', FEAT,
+                '--timeout', '10',
+                '--thinking', 'medium',
+            ], { cwd:projectDir })
+
+            t.equal(code, 0, 'exit code 0')
+            const logContent = readFileSync(
+                join(logsDir, '01-echo.log'), 'utf8'
+            )
+            const args = JSON.parse(
+                logContent.trim().split('\n')[0]
+            )
+            const idx = args.indexOf('--thinking')
+            t.ok(idx >= 0, 'agent received --thinking')
+            t.equal(args[idx + 1], 'medium', 'with the level')
+        } finally {
+            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive:true, force:true })
+        }
+    })
+
+test('CLI subprocess - --thinking rejects an unknown level',
+    async t => {
+        const projectDir = tmp()
+        try {
+            const { issuesDir } = scratchDirs(projectDir)
+            writeFileSync(
+                join(issuesDir, '01-echo.md'),
+                makeTicketBody({ status:'ready-for-agent' }),
+            )
+            const { code } = await spawnCli([
+                MOCK_ECHO,
+                '--spec', FEAT,
+                '--thinking', 'galaxy-brain',
+            ], { cwd:projectDir })
+            t.notEqual(code, 0, 'non-zero exit')
+        } finally {
+            rmSync(projectDir, { recursive:true, force:true })
+        }
+    })
+
+test('CLI subprocess - --retries 0 disables the retry',
+    async t => {
+        const projectDir = tmp()
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'nightralph-provider-test-')
+        )
+        try {
+            symlinkSync(MOCK_FAIL_THEN_PASS, join(binDir, 'pi'))
+            chmodSync(join(binDir, 'pi'), 0o755)
+            const { issuesDir, logsDir } =
+                scratchDirs(projectDir)
+            writeFileSync(
+                join(issuesDir, '01-flaky.md'),
+                makeTicketBody({ status:'ready-for-agent' }),
+            )
+
+            const { code } = await spawnCli([
+                join(binDir, 'pi'),
+                '--spec', FEAT,
+                '--timeout', '10',
+                '--retries', '0',
+            ], { cwd:projectDir })
+
+            t.equal(code, 1, 'run fails')
+            t.equal(
+                existsSync(join(logsDir, '01-flaky.attempt2.log')),
+                false,
+                'no retry happened'
+            )
+        } finally {
+            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive:true, force:true })
+        }
+    })
+
+test('CLI subprocess - default retries recover a flaky pi agent',
+    async t => {
+        const projectDir = tmp()
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'nightralph-provider-test-')
+        )
+        try {
+            symlinkSync(MOCK_FAIL_THEN_PASS, join(binDir, 'pi'))
+            chmodSync(join(binDir, 'pi'), 0o755)
+            const { issuesDir, logsDir } =
+                scratchDirs(projectDir)
+            writeFileSync(
+                join(issuesDir, '01-flaky.md'),
+                makeTicketBody({ status:'ready-for-agent' }),
+            )
+
+            const { code } = await spawnCli([
+                join(binDir, 'pi'),
+                '--spec', FEAT,
+                '--timeout', '10',
+            ], { cwd:projectDir })
+
+            t.equal(code, 0, 'run succeeds without flags')
+            t.ok(
+                existsSync(join(logsDir, '01-flaky.attempt2.log')),
+                'second attempt ran'
+            )
+        } finally {
+            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive:true, force:true })
+        }
+    })
+
+test('CLI subprocess - --dry-run in a git repo prints thinking ' +
+    'and retries', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        writeFileSync(
+            join(issuesDir, '01-alpha.md'),
+            makeTicketBody({ status:'ready-for-agent' }),
+        )
+        commitAll(projectDir, 'add tickets')
+
+        const { code, stdout } = await spawnCli([
+            MOCK_AGENT,
+            '--spec', FEAT,
+            '--dry-run',
+            '--thinking', 'low',
+            '--retries', '3',
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit code 0')
+        t.ok(
+            /Thinking:\s+low/.test(stdout),
+            'prints the starting thinking level'
+        )
+        t.ok(
+            /Retries:\s+3/.test(stdout),
+            'prints the retry cap'
+        )
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - a red test gate on the first attempt ' +
+    'is retried from a fresh worktree', async t => {
+    const projectDir = initTempGitRepo()
+    const markerDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-gate-marker-')
+    )
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-gate.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        // Fails the first time it runs, passes afterwards.
+        const marker = join(markerDir, 'seen')
+        const testCmd =
+            `test -f ${marker} || { touch ${marker}; false; }`
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                testCmd,
+                retries:1,
+            })
+
+            t.equal(result.allDone, true, 'run reports all done')
+            t.equal(tickets[0].status, 'done', 'ticket is done')
+            t.ok(
+                existsSync(join(logsDir, '01-gate.test.log')),
+                'first attempt test log kept'
+            )
+            t.ok(
+                existsSync(
+                    join(logsDir, '01-gate.attempt2.test.log')
+                ),
+                'second attempt test log written'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(markerDir, { recursive:true, force:true })
+    }
+})
