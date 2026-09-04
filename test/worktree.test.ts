@@ -480,6 +480,55 @@ test(
     }
 )
 
+test(
+    'concurrent create and remove do not race on ' +
+    'git worktree metadata',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+
+        const ticketA = makeTestTicket({
+            num:20, slug:'race-a',
+        })
+        const ticketB = makeTestTicket({
+            num:21, slug:'race-b',
+        })
+
+        const resultA = await createWorktree({
+            repoRoot,
+            repoName,
+            baseBranch,
+            ticket:ticketA,
+        })
+
+        t.ok(
+            existsSync(resultA.worktreePath),
+            'worktree A exists before concurrent ops'
+        )
+
+        const [, resultB] = await Promise.all([
+            removeWorktree(resultA.worktreePath),
+            createWorktree({
+                repoRoot,
+                repoName,
+                baseBranch,
+                ticket:ticketB,
+            }),
+        ])
+
+        t.equal(
+            existsSync(resultA.worktreePath),
+            false,
+            'worktree A removed'
+        )
+        t.ok(
+            existsSync(resultB.worktreePath),
+            'worktree B created'
+        )
+    }
+)
+
 // -- error paths --
 
 test('removeWorktree throws for non-existent path', async t => {

@@ -127,7 +127,7 @@ export function createWorktree (
     return result
 }
 
-export async function removeWorktree (
+async function removeWorktreeNow (
     worktreePath:string,
     opts?:{ force?:boolean }
 ):Promise<void> {
@@ -138,6 +138,17 @@ export async function removeWorktree (
     if (opts?.force) args.push('--force')
     args.push(worktreePath)
     await execFileAsync('git', args)
+}
+
+export function removeWorktree (
+    worktreePath:string,
+    opts?:{ force?:boolean }
+):Promise<void> {
+    const result = worktreeQueue.then(
+        () => removeWorktreeNow(worktreePath, opts)
+    )
+    worktreeQueue = result.catch(() => {})
+    return result
 }
 
 export function hasNewCommits (

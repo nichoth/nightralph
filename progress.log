@@ -1490,3 +1490,31 @@ All 716 tests pass (setup: 87, orchestrator: 168, worktree: 77,
 progress: 57, merge: 40, display: 86, testcmd: 19,
 integration: 182).
 Lint clean.
+
+## 2026-09-04 - US-005: Serialize worktree removal through module queue
+
+Completed. `removeWorktree` in src/worktree.ts was a standalone async
+function that called `git worktree remove` directly, bypassing the
+`worktreeQueue` promise chain that `createWorktree` uses for
+serialization. Concurrent create + remove calls could race on
+`.git/worktrees` metadata.
+
+Extracted the existing `removeWorktree` body into a private
+`removeWorktreeNow`, and replaced the public `removeWorktree` with a
+wrapper that chains through `worktreeQueue` using the same pattern as
+`createWorktree`: `.then()` off the queue tail, replace the tail with
+a `.catch(() => {})`'d copy so a rejected removal doesn't wedge the
+queue for later callers. The public signature is unchanged.
+
+Added 1 new test to test/worktree.test.ts: creates worktree A, then
+concurrently removes A and creates B via Promise.all; asserts A is
+gone and B exists. As with the createWorktree serialization test
+(US-005 from the earlier PRD), this machine's git handles the
+concurrent operations without corruption even without serialization,
+so the test is a regression guard, not a demonstrated repro of the
+original race.
+
+All 719 tests pass (setup: 87, orchestrator: 168, worktree: 80,
+progress: 57, merge: 40, display: 86, testcmd: 19,
+integration: 182).
+Lint clean.
