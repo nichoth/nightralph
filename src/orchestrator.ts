@@ -257,6 +257,9 @@ export function renderPrompt (
             'via web search. Use the spec and ticket ' +
             'body as your sole reference for API shapes.',
         ...testRules,
+        '- Do NOT read or modify files outside ' +
+            'your current directory (the worktree).',
+        '- Do NOT run git push.',
         '- Commit your work when finished.',
         '- After completing each checklist item in the ' +
             'ticket, print a line: [x] <item text> ' +
@@ -294,6 +297,7 @@ export function renderMergePrompt (
         '3. Commit the resolved files.',
         '',
         'Do NOT re-implement the ticket from scratch.',
+        'Do NOT run git push.',
     ].join('\n')
 }
 

@@ -1288,3 +1288,21 @@ All 687 tests pass (setup: 79, orchestrator: 163, worktree: 75,
 progress: 57, merge: 40, display: 86, testcmd: 13,
 integration: 174).
 Lint clean.
+
+## 2026-09-03 - US-009: The prompt confines the agent to its worktree
+
+Completed. Added two confinement rules to `renderPrompt` in
+src/orchestrator.ts: agents are told not to read or modify files
+outside their current directory (the worktree), and not to run
+`git push`. Added a `git push` prohibition to `renderMergePrompt`
+as well.
+
+Added 3 new tests to test/orchestrator.test.ts:
+- renderPrompt output contains a rule mentioning 'git push'
+- renderPrompt output contains a rule mentioning 'current directory'
+- renderMergePrompt output contains a rule mentioning 'git push'
+
+All 690 tests pass (setup: 79, orchestrator: 166, worktree: 75,
+progress: 57, merge: 40, display: 86, testcmd: 13,
+integration: 174).
+Lint clean.

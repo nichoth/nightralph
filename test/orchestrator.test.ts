@@ -18,6 +18,7 @@ import {
     COMPLETED_RE,
     TOOL_USE_RE,
     renderPrompt,
+    renderMergePrompt,
     stripSpecSection,
     runWaves,
     spawnAgent,
@@ -820,6 +821,45 @@ test('renderPrompt omits test rules when no test command',
             'no test rules without a command'
         )
     })
+
+test('renderPrompt contains git push rule', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderPrompt('spec body', ticket)
+    t.ok(
+        prompt.toLowerCase().includes('git push'),
+        'prompt mentions git push'
+    )
+})
+
+test('renderPrompt contains current directory rule',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderPrompt('spec body', ticket)
+        t.ok(
+            prompt.toLowerCase().includes(
+                'current directory'
+            ),
+            'prompt mentions current directory'
+        )
+    })
+
+test('renderMergePrompt contains git push rule', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderMergePrompt('spec body', ticket)
+    t.ok(
+        prompt.toLowerCase().includes('git push'),
+        'merge prompt mentions git push'
+    )
+})
 
 // -- spawnAgent --
 
