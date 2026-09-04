@@ -184,7 +184,7 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Modify README.md and AGENTS.md. No tests -- docs are not tested. Run npm run toc && npm run lint."
     }
   ]

@@ -1349,3 +1349,45 @@ All 695 tests pass (setup: 79, orchestrator: 166, worktree: 77,
 progress: 57, merge: 40, display: 86, testcmd: 13,
 integration: 177).
 Lint clean.
+
+## 2026-09-04 - US-011: Documentation updates for robustness features
+
+Documentation-only change. No new tests -- docs are not tested.
+
+README.md updates:
+1. Flags table: added `--retry-delay` with description and default
+2. Notes: described retry backoff behavior (exponential, controlled
+   by `--retry-delay`) and failed-ticket exclusion from later waves
+3. Notes: described process group kills (`detached:true`, SIGKILL to
+   `-pid`) and signal handling (SIGINT exits 130, SIGTERM exits 143,
+   both kill all running agents)
+4. Notes: recommended `--timeout 900` for fast models
+5. Notes: added `.scratch/` `.gitignore` guidance (force-added
+   progress.md is still tracked)
+6. Pi provider bullet: corrected to show full flags
+   (`-p --verbose --approve --no-session --mode json`) and
+   clarified `--approve` auto-accepts tool-use proposals
+
+AGENTS.md updates:
+1. Last verified date updated to 2026-09-04
+2. orchestrator exports: added `DEFAULT_RETRY_DELAY`,
+   `retryDelayFor`, `killProcessGroup`, `killRunningAgents`
+3. spawnAgent contract: documented `detached:true`, process group
+   kills, `proc.stdin` error listener (EPIPE resilience),
+   `CLOSE_GRACE_MS` grace timer for grandchild pipe hangs
+4. Added `retryDelayFor` and `killProcessGroup`/`killRunningAgents`
+   contract entries
+5. `runWaves`/`runWavesIsolated`: added `retryDelay` option,
+   `failedNums` exclusion, error outcome handling, dirty worktree
+   force-cleanup, prompt confinement rules
+6. `dryRunIsolated`: added `retryDelay` to printed opts
+7. CLI: added `--retry-delay` flag
+8. worktree module: documented `createWorktree` serialization and
+   stale cleanup; `removeWorktree` `force` option
+9. progress module: added `readProgress`, `mergeProgress` exports;
+   documented `commitProgress` returning `Promise<boolean>` and
+   `git add --force` for gitignored paths
+10. display module: noted `StatusDisplay` no longer installs
+    process-level signal handlers
+
+Typecheck, TOC generation, and lint all clean.
