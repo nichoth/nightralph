@@ -1134,8 +1134,17 @@ function attemptLogPath (
 
 type TicketOutcome =
     | { kind:'worktree-error'; error:unknown }
-    | { kind:'error'; error:unknown }
-    | { kind:'no-commits' }
+    | {
+        kind:'error'
+        error:unknown
+        worktreePath?:string
+        branchName?:string
+    }
+    | {
+        kind:'no-commits'
+        worktreePath:string
+        branchName:string
+    }
     | {
         kind:'failed'
         reason:'exit'|'tests'
@@ -1245,7 +1254,12 @@ async function runTicketAttempt (
     if (!hasNewCommits(
         opts.repoRoot, opts.baseBranch, worktree.branchName
     )) {
-        return { kind:'no-commits' }
+        await removeWorktreeQuietly(worktree.worktreePath, d)
+        return {
+            kind:'no-commits',
+            worktreePath:worktree.worktreePath,
+            branchName:worktree.branchName,
+        }
     }
 
     if (opts.testCmd) {
@@ -1291,7 +1305,9 @@ async function runTicketAttempts (
     const maxAttempts = opts.retries + 1
     const isPi = basename(opts.agentCmd) === 'pi'
     let thinking = opts.thinking
-    let outcome:TicketOutcome = { kind:'no-commits' }
+    let outcome:TicketOutcome = {
+        kind:'no-commits', worktreePath:'', branchName:'',
+    }
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         if (attempt === 1) {

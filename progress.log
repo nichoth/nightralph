@@ -1518,3 +1518,33 @@ All 719 tests pass (setup: 87, orchestrator: 168, worktree: 80,
 progress: 57, merge: 40, display: 86, testcmd: 19,
 integration: 182).
 Lint clean.
+
+## 2026-09-04 - US-006: Carry worktree info in failure outcomes and clean up
+
+Completed. Two changes to `TicketOutcome` in src/orchestrator.ts:
+
+1. The `'no-commits'` variant now carries `worktreePath:string` and
+   `branchName:string`, so downstream handlers (US-007) can record
+   which branch/worktree was involved.
+2. The `'error'` variant now carries optional `worktreePath?:string`
+   and `branchName?:string`, so errors that occur after worktree
+   creation can forward that info.
+
+In `runTicketAttempt`, the `no-commits` return path now calls
+`removeWorktreeQuietly` before returning, so leftover worktrees
+from agents that exit 0 but make no changes are cleaned up instead
+of leaking on disk. The return value includes `worktreePath` and
+`branchName` from the just-removed worktree.
+
+The default `outcome` in `runTicketAttempts` was updated to include
+empty-string `worktreePath`/`branchName` to satisfy the new type
+(this default is unreachable since `maxAttempts >= 1`).
+
+Updated the existing integration test ("agent exits 0 but makes no
+commits") from asserting worktree is preserved to asserting it is
+cleaned up (removed from disk).
+
+All 719 tests pass (setup: 87, orchestrator: 168, worktree: 80,
+progress: 57, merge: 40, display: 86, testcmd: 19,
+integration: 182).
+Lint clean.

@@ -937,7 +937,7 @@ test('runWavesIsolated - passing test command runs in the ' +
 })
 
 test('runWavesIsolated - agent exits 0 but makes no commits, ' +
-    'ticket stays ready-for-agent and worktree is preserved',
+    'ticket stays ready-for-agent and worktree is cleaned up',
 async t => {
     const projectDir = initTempGitRepo()
     try {
@@ -979,9 +979,10 @@ async t => {
                 projectDir, '..',
                 `${repoName}.01-noop`
             )
-            t.ok(
+            t.equal(
                 existsSync(worktreePath),
-                'worktree preserved when agent made no commits'
+                false,
+                'worktree cleaned up when agent made no commits'
             )
         } finally {
             process.chdir(originalCwd)
