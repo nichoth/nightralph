@@ -33,7 +33,7 @@
   },
   "devDependencies": {
     "@substrate-system/tapzero": "^0.10.16",
-    "@types/node": "^26.3.0",
+    "@types/node": "^26.4.1",
     "esbuild": "^0.28.2",
     "eslint": "^10.9.1",
     "markdown-toc": "^1.2.0",
