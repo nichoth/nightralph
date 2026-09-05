@@ -35,7 +35,7 @@ yargs(hideBin(process.argv))
         'init',
         'Install bundled skills and doc templates',
         y => y,
-        async argv => {
+        async () => {
             const tracker = await select<TrackerKind>({
                 message:'Issue tracker format',
                 choices:[
