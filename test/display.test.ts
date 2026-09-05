@@ -437,6 +437,84 @@ test('rendered lines never exceed terminal width', t => {
     )
 })
 
+// -- Tests for scroll prevention --
+
+test('render output never exceeds termHeight - 1 newlines', t => {
+    const stream = createMockStream()
+    stream.rows = 24
+    const display = new StatusDisplay({
+        stream,
+    })
+
+    const tickets = createTestTickets()
+    display.startWave(1, 1, tickets)
+
+    // Count newlines in the initial render
+    let output = stream.getOutput()
+    let nlCount = (output.match(/\n/g) || []).length
+    t.ok(
+        nlCount <= stream.rows - 1,
+        'initial render newlines (' + nlCount +
+        ') should not exceed termHeight - 1 (' +
+        (stream.rows - 1) + ')'
+    )
+
+    // After logging messages, the invariant still holds
+    for (let i = 0; i < 30; i++) {
+        display.log(`message ${i}`)
+    }
+    stream.clear()
+    display.log('final message')
+    output = stream.getOutput()
+    nlCount = (output.match(/\n/g) || []).length
+    t.ok(
+        nlCount <= stream.rows - 1,
+        'after many log messages, newlines (' + nlCount +
+        ') should not exceed termHeight - 1 (' +
+        (stream.rows - 1) + ')'
+    )
+
+    // After status change, invariant holds
+    stream.clear()
+    display.setTicketStatus(1, 'done')
+    output = stream.getOutput()
+    nlCount = (output.match(/\n/g) || []).length
+    t.ok(
+        nlCount <= stream.rows - 1,
+        'after status change, newlines (' + nlCount +
+        ') should not exceed termHeight - 1 (' +
+        (stream.rows - 1) + ')'
+    )
+
+    display.cleanup()
+})
+
+test('render output stays within bounds across terminal sizes', t => {
+    for (const rows of [8, 12, 16, 24, 40]) {
+        const stream = createMockStream()
+        stream.rows = rows
+        const display = new StatusDisplay({
+            stream,
+        })
+
+        const tickets = createTestTickets()
+        display.startWave(1, 1, tickets)
+        display.log('test message')
+
+        stream.clear()
+        display.setTicketStatus(1, 'in-progress')
+        const output = stream.getOutput()
+        const nlCount = (output.match(/\n/g) || []).length
+        t.ok(
+            nlCount <= rows - 1,
+            `rows=${rows}: newlines (${nlCount}) should ` +
+            `not exceed ${rows - 1}`
+        )
+
+        display.cleanup()
+    }
+})
+
 // -- Tests for AC3: Rolling message area --
 
 test('message area has fixed height of messageLines (AC3.1)', t => {
@@ -449,7 +527,8 @@ test('message area has fixed height of messageLines (AC3.1)', t => {
     display.startWave(1, 1, tickets)
 
     // With 0 messages, message area fills remaining rows
-    // rows=24, header=1, tickets=3, separator=1 -> logRows=19
+    // rows=24, header=1, tickets=3, separator=1,
+    // 1 reserved for cursor -> logRows=18
     let output = stream.getOutput()
     const separatorIdx = output.lastIndexOf('-'.repeat(50))
     if (separatorIdx >= 0) {
@@ -458,7 +537,7 @@ test('message area has fixed height of messageLines (AC3.1)', t => {
         const messageAreaText = output.substring(messageAreaStart, messageAreaEnd)
         const messageAreaNewlines = (messageAreaText.match(/\n/g) || []).length
         t.equal(
-            messageAreaNewlines, 19,
+            messageAreaNewlines, 18,
             'message area should fill remaining terminal rows'
         )
     }
@@ -482,7 +561,7 @@ test('message area has fixed height of messageLines (AC3.1)', t => {
         const msgAreaText = output.substring(msgStart)
         const msgAreaNewlines = (msgAreaText.match(/\n/g) || []).length
         t.equal(
-            msgAreaNewlines, 19,
+            msgAreaNewlines, 18,
             'message area height should remain stable'
         )
     }
@@ -490,7 +569,7 @@ test('message area has fixed height of messageLines (AC3.1)', t => {
 
 test('new messages push old messages out (AC3.2)', t => {
     const stream = createMockStream()
-    // rows=8, 3 tickets -> logRows = 8-2-3 = 3 visible log lines
+    // rows=8, 3 tickets -> logRows = 8-3-3 = 2 visible log lines
     stream.rows = 8
     const display = new StatusDisplay({
         stream,
@@ -499,25 +578,24 @@ test('new messages push old messages out (AC3.2)', t => {
     const tickets = createTestTickets()
     display.startWave(1, 1, tickets)
 
-    // Log more messages than visible log rows (3)
+    // Log more messages than visible log rows (2)
     display.log('msg1')
     display.log('msg2')
-    display.log('msg3')
     stream.clear()
-    display.log('msg4')
+    display.log('msg3')
     const output = stream.getOutput()
 
-    // msg1 should not be visible, msg4 should be there
+    // msg1 should not be visible, msg3 should be there
     t.ok(
         !output.includes('msg1'),
         'oldest message should be removed when buffer full'
     )
     t.ok(
-        output.includes('msg4'),
+        output.includes('msg3'),
         'new message should be visible'
     )
     t.ok(
-        output.includes('msg2') && output.includes('msg3'),
+        output.includes('msg2'),
         'recent messages should remain'
     )
 })
