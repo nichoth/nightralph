@@ -1,6 +1,6 @@
 {
   "name": "nightralph",
-  "version": "0.0.24",
+  "version": "0.0.25",
   "type": "module",
   "description": "Orchestrator that runs a single-agent session per issue.",
   "bin": {
