@@ -87,7 +87,7 @@ test('setup copies skills to .agents/skills', t => {
     }
 })
 
-test('setup does NOT create .claude/skills by default', t => {
+test('setup creates symlinks in .claude/skills', t => {
     const {
         projectDir, bundledSkillsDir, docsTemplatesDir,
     } = makeTempProject()
@@ -96,28 +96,6 @@ test('setup does NOT create .claude/skills by default', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
-    })
-
-    const claudeSkills = join(
-        projectDir, '.claude', 'skills'
-    )
-    t.ok(
-        !existsSync(claudeSkills),
-        '.claude/skills should not exist without --claude'
-    )
-})
-
-test('setup --claude creates symlinks in .claude/skills', t => {
-    const {
-        projectDir, bundledSkillsDir, docsTemplatesDir,
-    } = makeTempProject()
-
-    setup({
-        bundledSkillsDir,
-        docsTemplatesDir,
-        projectDir,
-        claude:true,
         tracker:'local',
     })
 
@@ -219,7 +197,6 @@ test('setup is idempotent', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        claude:true,
         tracker:'local' as const,
     }
 
