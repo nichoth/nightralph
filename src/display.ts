@@ -352,7 +352,7 @@ export class StatusDisplay implements Display {
         const termHeight = this.config.stream.rows ?? 24
         const logRows = Math.max(
             0,
-            termHeight - 2 - renderedTicketCount,
+            termHeight - 3 - renderedTicketCount,
         )
         const visibleMessages = this.messages.slice(-logRows)
         for (const msg of visibleMessages) {
