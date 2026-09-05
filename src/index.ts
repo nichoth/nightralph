@@ -34,11 +34,7 @@ yargs(hideBin(process.argv))
     .command(
         'init',
         'Install bundled skills and doc templates',
-        y => y.option('claude', {
-            type:'boolean',
-            describe:'Also create .claude/skills/ symlinks',
-            default:true,
-        }),
+        y => y,
         async argv => {
             const tracker = await select<TrackerKind>({
                 message:'Issue tracker format',
@@ -75,7 +71,6 @@ yargs(hideBin(process.argv))
                     scriptDir, 'docs-templates'
                 ),
                 projectDir:process.cwd(),
-                claude:argv.claude,
                 tracker,
             })
         }

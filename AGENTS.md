@@ -39,13 +39,16 @@ Small orchestrator that runs a single-agent session per issue.
   `gh auth status` succeeds
 - **DOC_TEMPLATES**: `['triage-labels.md', 'domain.md']` --
   issue-tracker.md is handled separately via tracker selection
-- **Guarantees**: `setup()` always overwrites
-  `issue-tracker.md` (not skip-if-exists like other
-  templates); always writes AGENTS.md to the target project
+- **Guarantees**: `setup()` always creates symlinks
+  from `.claude/skills/` to `.agents/skills/` for
+  every skill; always overwrites `issue-tracker.md`
+  (not skip-if-exists like other templates); always
+  writes AGENTS.md to the target project
 
 ### CLI (`src/index.ts`)
-- `nightralph init [--claude]` -- prompts for tracker
-  format, then scaffolds skills and docs
+- `nightralph init` -- prompts for tracker
+  format, then scaffolds skills, docs, and
+  `.claude/skills/` symlinks
 - `nightralph <provider> [--spec <name>]` -- executes
   tickets; `--spec` takes a feature name that resolves
   to `.scratch/<name>/` (issues dir + spec.md by

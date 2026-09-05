@@ -70,7 +70,6 @@ export type SetupOpts = {
     bundledSkillsDir:string
     docsTemplatesDir:string
     projectDir:string
-    claude?:boolean
     tracker:TrackerKind
 }
 
@@ -84,7 +83,6 @@ export function setup (opts:SetupOpts):void {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        claude,
         tracker,
     } = opts
     const agentsSkillsDir = join(
@@ -111,25 +109,23 @@ export function setup (opts:SetupOpts):void {
         )
     }
 
-    if (claude) {
-        const claudeSkillsDir = join(
-            projectDir, '.claude', 'skills'
-        )
-        mkdirSync(claudeSkillsDir, { recursive:true })
+    const claudeSkillsDir = join(
+        projectDir, '.claude', 'skills'
+    )
+    mkdirSync(claudeSkillsDir, { recursive:true })
 
-        for (const skill of SKILL_DIRS) {
-            const linkPath = join(claudeSkillsDir, skill)
-            const target = join(
-                '..', '..', '.agents', 'skills', skill
-            )
-            if (existsSync(linkPath)) continue
-            symlinkSync(target, linkPath)
-        }
-
-        console.log(
-            '\nCreated symlinks in .claude/skills/'
+    for (const skill of SKILL_DIRS) {
+        const linkPath = join(claudeSkillsDir, skill)
+        const target = join(
+            '..', '..', '.agents', 'skills', skill
         )
+        if (existsSync(linkPath)) continue
+        symlinkSync(target, linkPath)
     }
+
+    console.log(
+        '\nCreated symlinks in .claude/skills/'
+    )
 
     const docsAgentsDir = join(
         projectDir, 'docs', 'agents'
