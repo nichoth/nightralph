@@ -76,7 +76,7 @@ yargs(hideBin(process.argv))
         }
     )
     .command(
-        '$0 <provider>',
+        '$0 <provider> [turns]',
         'Execute tickets with the given provider',
         y => y
             .positional('provider', {
@@ -84,6 +84,12 @@ yargs(hideBin(process.argv))
                 describe:'Agent CLI to spawn ' +
                     '(e.g. claude, codex, pi)',
                 demandOption:true,
+            })
+            .positional('turns', {
+                type:'number',
+                describe:'Max agentic turns per ' +
+                    'ticket (shorthand for ' +
+                    '--max-turns)',
             })
             .option('m', {
                 alias:'model',
@@ -158,8 +164,8 @@ yargs(hideBin(process.argv))
                 testCmd:argv.testCmd as string|undefined,
                 stopOnConflict:argv.X as
                     boolean|undefined,
-                maxTurns:argv.maxTurns as
-                    number|undefined,
+                maxTurns:(argv.maxTurns ??
+                    argv.turns) as number|undefined,
                 thinking:argv.thinking as
                     ThinkingLevel|undefined,
                 retries:argv.retries as

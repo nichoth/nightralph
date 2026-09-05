@@ -49,10 +49,12 @@ Small orchestrator that runs a single-agent session per issue.
 - `nightralph init` -- prompts for tracker
   format, then scaffolds skills, docs, and
   `.claude/skills/` symlinks
-- `nightralph <provider> [--spec <name>]` -- executes
-  tickets; `--spec` takes a feature name that resolves
-  to `.scratch/<name>/` (issues dir + spec.md by
-  convention)
+- `nightralph <provider> [turns] [--spec <name>]` --
+  executes tickets; optional `turns` positional sets
+  max agentic turns per ticket (shorthand for
+  `--max-turns`); `--spec` takes a feature name that
+  resolves to `.scratch/<name>/` (issues dir + spec.md
+  by convention)
 - `-X` flag -- stop on merge conflict instead of
   re-spawning the agent (sets conflict strategy to
   `'stop'`)

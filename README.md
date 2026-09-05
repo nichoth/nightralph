@@ -130,6 +130,9 @@ npx nightralph claude -m claude-opus-4-6 --spec my-feature
 # Cap each agent at 30 agentic turns
 npx nightralph claude -m claude-opus-4-6 --max-turns 30
 
+# Same thing, using the positional shorthand
+npx nightralph claude -m claude-opus-4-6 30
+
 # Start pi at medium thinking and allow one escalated retry
 npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --thinking medium --retries 1
 ```
@@ -145,6 +148,7 @@ Flags:
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
 | `<provider>` | yes | -- | Agent harness to spawn (e.g. `claude`, `codex`, `pi`) |
+| `[turns]` | no | -- | Max agentic turns per ticket (positional shorthand for `--max-turns`) |
 | `-m`, `--model` | no | -- | Model flag passed to the agent |
 | `--spec <name>` | no | auto | Feature name (resolves `.scratch/<name>/`) |
 | `--dry-run` | no | -- | Show wave order and prompt without running |

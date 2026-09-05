@@ -221,8 +221,10 @@ export class StatusDisplay implements Display {
     }
 
     log (message:string):void {
-        this.messages.push(message)
-        if (this.messages.length > MAX_MESSAGE_BUFFER) {
+        for (const line of message.split('\n')) {
+            this.messages.push(line)
+        }
+        while (this.messages.length > MAX_MESSAGE_BUFFER) {
             this.messages.shift()
         }
         this.render()
