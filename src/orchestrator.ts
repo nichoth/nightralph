@@ -405,25 +405,42 @@ export function getProviderArgs (cmd:string):string[] {
     return PROVIDER_ARGS[name] ?? []
 }
 
-// The thinking levels pi accepts, lowest to highest.
-export const THINKING_LEVELS = [
+// Per-provider effort ladders.
+export const EFFORT_LADDERS = {
+    pi:['off', 'minimal', 'low', 'medium',
+        'high', 'xhigh', 'max'],
+    claude:['low', 'medium', 'high',
+        'xhigh', 'max'],
+    codex:['minimal', 'low', 'medium',
+        'high', 'xhigh'],
+} as const
+
+export type ProviderName =
+    keyof typeof EFFORT_LADDERS
+
+export type EffortLevel =
+    typeof EFFORT_LADDERS[ProviderName][number]
+
+export const ALL_EFFORT_LEVELS:EffortLevel[] = [
     'off', 'minimal', 'low', 'medium',
     'high', 'xhigh', 'max',
-] as const
+]
 
-export type ThinkingLevel = typeof THINKING_LEVELS[number]
-
-// The level for a retry. Without a starting level the
-// first retry jumps to high; otherwise step one rung up
-// and stop at max.
-export function escalateThinking (
-    level?:ThinkingLevel
-):ThinkingLevel {
+// Step up the effort ladder for a given provider.
+// Without a starting level, the first retry jumps to high.
+// Otherwise, step one rung up and stop at the provider's max.
+export function escalateEffort (
+    provider:ProviderName,
+    level?:EffortLevel
+):EffortLevel {
     if (!level) return 'high'
-    const i = THINKING_LEVELS.indexOf(level)
-    return THINKING_LEVELS[
-        Math.min(i + 1, THINKING_LEVELS.length - 1)
-    ]
+    const ladder = EFFORT_LADDERS[provider]
+    const i = (ladder as readonly string[])
+        .indexOf(level)
+    if (i === -1) return level
+    return ladder[
+        Math.min(i + 1, ladder.length - 1)
+    ] as EffortLevel
 }
 
 export function formatStreamLine (
@@ -631,8 +648,7 @@ export function spawnAgent (opts:{
     cwd?:string
     label?:string
     maxTurns?:number
-    // pi only; other providers ignore it
-    thinking?:ThinkingLevel
+    effort?:EffortLevel
     onLine?:(line:string) => void
 }):Promise<AgentResult> {
     const args:string[] = [
@@ -648,8 +664,29 @@ export function spawnAgent (opts:{
     const providerName = basename(opts.agentCmd)
     const isClaude = providerName === 'claude'
     const isPi = providerName === 'pi'
-    if (isPi && opts.thinking) {
-        args.push('--thinking', opts.thinking)
+    if (opts.effort && providerName in EFFORT_LADDERS) {
+        const ladder = EFFORT_LADDERS[
+            providerName as ProviderName
+        ]
+        if (
+            !(ladder as readonly string[])
+                .includes(opts.effort)
+        ) {
+            if (opts.onLine) {
+                opts.onLine(
+                    'Warning: effort ' +
+                    `'${opts.effort}' not ` +
+                    'supported by ' +
+                    `${providerName}, skipping`
+                )
+            }
+        } else if (isPi) {
+            args.push('--thinking', opts.effort)
+        } else if (isClaude) {
+            args.push('--effort', opts.effort)
+        } else if (providerName === 'codex') {
+            args.push('-e', opts.effort)
+        }
     }
     const prefix = opts.label ?
         `  [${opts.label}] ` :
@@ -881,7 +918,7 @@ export function dryRunIsolated (opts:{
     conflictStrategy:MergeConflictStrategy
     progressPath:string
     testCmd?:string|null
-    thinking?:ThinkingLevel
+    effort?:EffortLevel
     retries?:number
     retryDelay?:number
 }):void {
@@ -936,7 +973,7 @@ export function dryRunIsolated (opts:{
         `\nTest command: ${opts.testCmd ?? '(none)'}`
     )
     console.log(
-        `Thinking:     ${opts.thinking ?? '(provider default)'}`
+        `Effort:       ${opts.effort ?? '(provider default)'}`
     )
     console.log(
         `Retries:      ${opts.retries ?? DEFAULT_RETRIES}`
@@ -1103,7 +1140,7 @@ async function respawnAndRetryMerge (opts:{
     return mergeResult.success
 }
 
-export const DEFAULT_RETRIES = 2
+export const DEFAULT_RETRIES = 3
 
 // Seconds to wait before the first retry; each later retry
 // doubles the wait so a provider outage is waited out instead
@@ -1171,7 +1208,7 @@ type TicketAttemptOpts = {
     logsDir:string
     testCmd?:string|null
     maxTurns?:number
-    thinking?:ThinkingLevel
+    effort?:EffortLevel
     d:Display
 }
 
@@ -1210,7 +1247,7 @@ async function runTicketAttempt (
         cwd:worktree.worktreePath,
         label:ticket.filename.replace(/\.md$/, ''),
         maxTurns:opts.maxTurns,
-        thinking:opts.thinking,
+        effort:opts.effort,
         onLine:(line) => d.log(line),
     })
 
@@ -1297,14 +1334,15 @@ async function runTicketAttempt (
 
 // Runs a ticket until an attempt is ready to merge or the
 // retry cap is hit. Each retry starts from a fresh worktree
-// and, for pi, a higher thinking level.
+// and a higher effort level.
 async function runTicketAttempts (
     opts:TicketAttemptOpts&{ retries:number; retryDelay:number }
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
     const maxAttempts = opts.retries + 1
-    const isPi = basename(opts.agentCmd) === 'pi'
-    let thinking = opts.thinking
+    const providerName = basename(opts.agentCmd)
+    const isKnown = providerName in EFFORT_LADDERS
+    let effort = opts.effort
     let outcome:TicketOutcome = {
         kind:'no-commits', worktreePath:'', branchName:'',
     }
@@ -1313,20 +1351,27 @@ async function runTicketAttempts (
         if (attempt === 1) {
             d.log(`  Starting ${ticket.filename}`)
         } else {
-            thinking = escalateThinking(thinking)
+            if (isKnown) {
+                effort = escalateEffort(
+                    providerName as ProviderName,
+                    effort
+                )
+            }
             const delay = retryDelayFor(opts.retryDelay, attempt)
             d.log(
                 `  ${ticket.filename}: retrying ` +
                 `(attempt ${attempt}/${maxAttempts}` +
-                (isPi ? `, thinking ${thinking}` : '') +
-                (delay > 0 ? `, waiting ${delay}s` : '') +
+                (isKnown && effort ?
+                    `, effort ${effort}` : '') +
+                (delay > 0 ?
+                    `, waiting ${delay}s` : '') +
                 ')'
             )
             if (delay > 0) await sleep(delay * 1000)
         }
         try {
             outcome = await runTicketAttempt({
-                ...opts, attempt, thinking,
+                ...opts, attempt, effort,
             })
         } catch (error) {
             d.log(
@@ -1382,7 +1427,7 @@ export async function runWaves (
     logsDir:string,
     display?:Display,
     maxTurns?:number,
-    thinking?:ThinkingLevel,
+    effort?:EffortLevel,
     retries?:number,
     retryDelay?:number,
 ):Promise<{ allDone:boolean }> {
@@ -1391,7 +1436,8 @@ export async function runWaves (
     const d = display ?? createDisplay()
     const maxAttempts = (retries ?? DEFAULT_RETRIES) + 1
     const delayBase = retryDelay ?? 0
-    const isPi = basename(agentCmd) === 'pi'
+    const providerName = basename(agentCmd)
+    const isKnown = providerName in EFFORT_LADDERS
     let totalWaves = 0
     for (const _ of simulateWaves(tickets)) totalWaves++
 
@@ -1433,7 +1479,7 @@ export async function runWaves (
                 )
                 d.setTicketStatus(t.num, 'in-progress')
                 d.log(`  Starting ${t.filename}`)
-                let level = thinking
+                let level = effort
                 let result = await spawnAgent({
                     prompt,
                     agentCmd,
@@ -1442,7 +1488,7 @@ export async function runWaves (
                     logPath:attemptLogPath(logsDir, t, 1, '.log'),
                     label,
                     maxTurns,
-                    thinking:level,
+                    effort:level,
                     onLine:(line) => d.log(line),
                 })
                 // In-place runs have no worktree or test
@@ -1455,14 +1501,21 @@ export async function runWaves (
                     attempt <= maxAttempts;
                     attempt++
                 ) {
-                    level = escalateThinking(level)
+                    if (isKnown) {
+                        level = escalateEffort(
+                            providerName as ProviderName,
+                            level
+                        )
+                    }
                     const delay = retryDelayFor(delayBase, attempt)
                     d.log(
                         `  ${t.filename}: agent exited ` +
                         `${result.exitCode}; retrying ` +
                         `(attempt ${attempt}/${maxAttempts}` +
-                        (isPi ? `, thinking ${level}` : '') +
-                        (delay > 0 ? `, waiting ${delay}s` : '') +
+                        (isKnown && level ?
+                            `, effort ${level}` : '') +
+                        (delay > 0 ?
+                            `, waiting ${delay}s` : '') +
                         ')'
                     )
                     if (delay > 0) await sleep(delay * 1000)
@@ -1476,7 +1529,7 @@ export async function runWaves (
                         ),
                         label,
                         maxTurns,
-                        thinking:level,
+                        effort:level,
                         onLine:(line) => d.log(line),
                     })
                 }
@@ -1546,9 +1599,9 @@ export async function runWavesIsolated (opts:{
     display?:Display
     testCmd?:string|null
     maxTurns?:number
-    // starting thinking level for pi; unset = pi's default
-    thinking?:ThinkingLevel
-    // extra attempts per ticket after a failure; default 2
+    // starting effort level; unset = provider's default
+    effort?:EffortLevel
+    // extra attempts per ticket after a failure; default 3
     retries?:number
     // seconds to wait before the first retry; default 30
     retryDelay?:number
@@ -1637,7 +1690,7 @@ export async function runWavesIsolated (opts:{
                 logsDir:opts.logsDir,
                 testCmd:opts.testCmd,
                 maxTurns:opts.maxTurns,
-                thinking:opts.thinking,
+                effort:opts.effort,
                 retries,
                 retryDelay,
                 d,

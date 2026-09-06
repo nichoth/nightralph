@@ -13,11 +13,11 @@ import {
     runWaves,
     runWavesIsolated,
     stripSpecSection,
-    THINKING_LEVELS,
+    ALL_EFFORT_LEVELS,
     DEFAULT_RETRIES,
     DEFAULT_RETRY_DELAY,
     killRunningAgents,
-    type ThinkingLevel,
+    type EffortLevel,
 } from './orchestrator.js'
 import { detectTestCmd } from './testcmd.js'
 import { createDisplay } from './display.js'
@@ -131,19 +131,19 @@ yargs(hideBin(process.argv))
                 describe:'Max agentic turns per ticket ' +
                     '(forwarded to the agent CLI)',
             })
-            .option('thinking', {
+            .option('effort', {
                 type:'string',
-                choices:THINKING_LEVELS,
-                describe:'Starting thinking level for ' +
-                    'the pi provider. Omitted = pi\'s ' +
-                    'default. Retries step up from here.',
+                choices:ALL_EFFORT_LEVELS,
+                describe:'Starting effort level. ' +
+                    'Omitted = provider default. ' +
+                    'Retries step up from here.',
             })
             .option('retries', {
                 type:'number',
                 default:DEFAULT_RETRIES,
                 describe:'Extra attempts per ticket ' +
                     'after a failed run, each with a ' +
-                    'higher thinking level (pi). 0 ' +
+                    'higher effort level. 0 ' +
                     'disables retries.',
             })
             .option('retry-delay', {
@@ -166,8 +166,8 @@ yargs(hideBin(process.argv))
                     boolean|undefined,
                 maxTurns:(argv.maxTurns ??
                     argv.turns) as number|undefined,
-                thinking:argv.thinking as
-                    ThinkingLevel|undefined,
+                effort:argv.effort as
+                    EffortLevel|undefined,
                 retries:argv.retries as
                     number|undefined,
                 retryDelay:argv.retryDelay as
@@ -210,7 +210,7 @@ async function runExecute (argv:{
     testCmd?:string
     stopOnConflict?:boolean
     maxTurns?:number
-    thinking?:ThinkingLevel
+    effort?:EffortLevel
     retries?:number
     retryDelay?:number
 }):Promise<void> {
@@ -284,7 +284,7 @@ async function runExecute (argv:{
                 conflictStrategy,
                 progressPath,
                 testCmd,
-                thinking:argv.thinking,
+                effort:argv.effort,
                 retries:argv.retries,
                 retryDelay:argv.retryDelay,
             })
@@ -319,7 +319,7 @@ async function runExecute (argv:{
             display,
             testCmd,
             maxTurns:argv.maxTurns,
-            thinking:argv.thinking,
+            effort:argv.effort,
             retries:argv.retries,
             retryDelay:argv.retryDelay,
         })
@@ -331,7 +331,7 @@ async function runExecute (argv:{
             logsDir,
             display,
             argv.maxTurns,
-            argv.thinking,
+            argv.effort,
             argv.retries,
             argv.retryDelay,
         )

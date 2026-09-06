@@ -2,7 +2,7 @@ import { test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync,
     readFileSync, existsSync, readdirSync,
-    rmSync, symlinkSync, chmodSync,
+    rmSync, symlinkSync, chmodSync, copyFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -27,10 +27,13 @@ import {
     getProviderArgs,
     formatStreamLine,
     createPiStreamFormatter,
-    escalateThinking,
+    escalateEffort,
     retryDelayFor,
     DEFAULT_RETRY_DELAY,
+    DEFAULT_RETRIES,
+    ALL_EFFORT_LEVELS,
     type Ticket,
+    type EffortLevel,
 } from '../src/orchestrator.js'
 
 // -- helpers --
@@ -2021,23 +2024,77 @@ test('stripSpecSection ignores # inside fenced blocks',
         )
     })
 
-// -- escalateThinking --
+// -- escalateEffort --
 
-test('escalateThinking - unset level jumps to high', t => {
+test('escalateEffort - returns high when level is undefined', t => {
     t.equal(
-        escalateThinking(undefined), 'high',
-        'first retry without a starting level uses high'
+        escalateEffort('pi', undefined),
+        'high',
+        'pi: undefined -> high'
+    )
+    t.equal(
+        escalateEffort('claude', undefined),
+        'high',
+        'claude: undefined -> high'
+    )
+    t.equal(
+        escalateEffort('codex', undefined),
+        'high',
+        'codex: undefined -> high'
     )
 })
 
-test('escalateThinking - steps one rung up the ladder', t => {
-    t.equal(escalateThinking('medium'), 'high', 'medium -> high')
-    t.equal(escalateThinking('high'), 'xhigh', 'high -> xhigh')
-    t.equal(escalateThinking('off'), 'minimal', 'off -> minimal')
+test('escalateEffort - steps up one rung per provider', t => {
+    t.equal(
+        escalateEffort('pi', 'medium'),
+        'high',
+        'pi: medium -> high'
+    )
+    t.equal(
+        escalateEffort('claude', 'medium'),
+        'high',
+        'claude: medium -> high'
+    )
+    t.equal(
+        escalateEffort('codex', 'medium'),
+        'high',
+        'codex: medium -> high'
+    )
 })
 
-test('escalateThinking - clamps at max', t => {
-    t.equal(escalateThinking('max'), 'max', 'max stays max')
+test('escalateEffort - clamps at provider highest level', t => {
+    t.equal(
+        escalateEffort('pi', 'max'),
+        'max',
+        'pi: max stays max'
+    )
+    t.equal(
+        escalateEffort('claude', 'max'),
+        'max',
+        'claude: max stays max'
+    )
+    t.equal(
+        escalateEffort('codex', 'xhigh'),
+        'xhigh',
+        'codex: xhigh stays xhigh (codex max)'
+    )
+})
+
+test('escalateEffort - handles level not in provider ladder', t => {
+    t.equal(
+        escalateEffort('claude', 'off'),
+        'off',
+        'claude: off not in ladder, returns off'
+    )
+    t.equal(
+        escalateEffort('codex', 'max'),
+        'max',
+        'codex: max not in ladder, returns max'
+    )
+})
+
+test('DEFAULT_RETRIES equals 3', t => {
+    t.equal(DEFAULT_RETRIES, 3, 'DEFAULT_RETRIES is 3')
 })
 
 // -- retryDelayFor --
@@ -2068,7 +2125,7 @@ test('DEFAULT_RETRY_DELAY is 30', t => {
     t.equal(DEFAULT_RETRY_DELAY, 30, 'default retry delay')
 })
 
-test('runWaves retries a failed agent with escalated thinking',
+test('runWaves retries a failed agent with escalated effort',
     async t => {
         const base = initTempGitRepo()
         const binDir = mkdtempSync(
@@ -2146,6 +2203,528 @@ test('runWaves waits retryDelay seconds before a retry', async t => {
         )
     } finally {
         process.chdir(originalCwd)
+        rmSync(binDir, { recursive:true, force:true })
+    }
+})
+
+// -- provider flag mapping (AC3) --
+
+test(
+    'spawnAgent: claude receives --effort flag (AC3.1)',
+    async t => {
+        const binDir = mkdtempSync(join(tmpdir(), 'test-claude-'))
+        const logsDir = mkdtempSync(
+            join(tmpdir(), 'test-logs-')
+        )
+        const ECHO_AGENT = join(
+            process.cwd(), 'test', 'mock-agent-echo-args.js'
+        )
+
+        symlinkSync(ECHO_AGENT, join(binDir, 'claude'))
+        chmodSync(join(binDir, 'claude'), 0o755)
+
+        try {
+            const logPath = join(logsDir, 'test.log')
+
+            await spawnAgent({
+                prompt:'test prompt',
+                agentCmd:join(binDir, 'claude'),
+                model:null,
+                timeout:10,
+                logPath,
+                effort:'high',
+            })
+
+            const logContent = readFileSync(logPath, 'utf8')
+            const lines = logContent.trim().split('\n')
+            let args:string[] = []
+            for (const line of lines) {
+                try {
+                    const parsed = JSON.parse(line)
+                    if (Array.isArray(parsed)) {
+                        args = parsed
+                        break
+                    }
+                } catch {
+                    // continue
+                }
+            }
+
+            t.ok(
+                args.length > 0,
+                'found agent args in log'
+            )
+            const effortIdx = args.indexOf('--effort')
+            t.ok(
+                effortIdx >= 0,
+                'args contain --effort flag'
+            )
+            t.equal(
+                args[effortIdx + 1], 'high',
+                '--effort value is "high"'
+            )
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logsDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'spawnAgent: pi receives --thinking flag (AC3.2)',
+    async t => {
+        const binDir = mkdtempSync(join(tmpdir(), 'test-pi-'))
+        const logsDir = mkdtempSync(
+            join(tmpdir(), 'test-logs-')
+        )
+        const ECHO_AGENT = join(
+            process.cwd(), 'test', 'mock-agent-echo-args.js'
+        )
+
+        symlinkSync(ECHO_AGENT, join(binDir, 'pi'))
+        chmodSync(join(binDir, 'pi'), 0o755)
+
+        try {
+            const logPath = join(logsDir, 'test.log')
+
+            await spawnAgent({
+                prompt:'test prompt',
+                agentCmd:join(binDir, 'pi'),
+                model:null,
+                timeout:10,
+                logPath,
+                effort:'high',
+            })
+
+            const logContent = readFileSync(logPath, 'utf8')
+            const lines = logContent.trim().split('\n')
+            let args:string[] = []
+            for (const line of lines) {
+                try {
+                    const parsed = JSON.parse(line)
+                    if (Array.isArray(parsed)) {
+                        args = parsed
+                        break
+                    }
+                } catch {
+                    // continue
+                }
+            }
+
+            t.ok(
+                args.length > 0,
+                'found agent args in log'
+            )
+            const thinkingIdx = args.indexOf('--thinking')
+            t.ok(
+                thinkingIdx >= 0,
+                'args contain --thinking flag'
+            )
+            t.equal(
+                args[thinkingIdx + 1], 'high',
+                '--thinking value is "high"'
+            )
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logsDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'spawnAgent: codex receives -e flag (AC3.3)',
+    async t => {
+        const binDir = mkdtempSync(join(tmpdir(), 'test-codex-'))
+        const logsDir = mkdtempSync(
+            join(tmpdir(), 'test-logs-')
+        )
+        const ECHO_AGENT = join(
+            process.cwd(), 'test', 'mock-agent-echo-args.js'
+        )
+
+        symlinkSync(ECHO_AGENT, join(binDir, 'codex'))
+        chmodSync(join(binDir, 'codex'), 0o755)
+
+        try {
+            const logPath = join(logsDir, 'test.log')
+
+            await spawnAgent({
+                prompt:'test prompt',
+                agentCmd:join(binDir, 'codex'),
+                model:null,
+                timeout:10,
+                logPath,
+                effort:'high',
+            })
+
+            const logContent = readFileSync(logPath, 'utf8')
+            const lines = logContent.trim().split('\n')
+            let args:string[] = []
+            for (const line of lines) {
+                try {
+                    const parsed = JSON.parse(line)
+                    if (Array.isArray(parsed)) {
+                        args = parsed
+                        break
+                    }
+                } catch {
+                    // continue
+                }
+            }
+
+            t.ok(
+                args.length > 0,
+                'found agent args in log'
+            )
+            const eIdx = args.indexOf('-e')
+            t.ok(
+                eIdx >= 0,
+                'args contain -e flag'
+            )
+            t.equal(
+                args[eIdx + 1], 'high',
+                '-e value is "high"'
+            )
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logsDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'spawnAgent: no effort flag when omitted (AC3.4)',
+    async t => {
+        const binDir = mkdtempSync(join(tmpdir(), 'test-noflag-'))
+        const logsDir = mkdtempSync(
+            join(tmpdir(), 'test-logs-')
+        )
+        const ECHO_AGENT = join(
+            process.cwd(), 'test', 'mock-agent-echo-args.js'
+        )
+
+        symlinkSync(ECHO_AGENT, join(binDir, 'claude'))
+        chmodSync(join(binDir, 'claude'), 0o755)
+
+        try {
+            const logPath = join(logsDir, 'test.log')
+
+            await spawnAgent({
+                prompt:'test prompt',
+                agentCmd:join(binDir, 'claude'),
+                model:null,
+                timeout:10,
+                logPath,
+                // effort intentionally omitted
+            })
+
+            const logContent = readFileSync(logPath, 'utf8')
+            const lines = logContent.trim().split('\n')
+            let args:string[] = []
+            for (const line of lines) {
+                try {
+                    const parsed = JSON.parse(line)
+                    if (Array.isArray(parsed)) {
+                        args = parsed
+                        break
+                    }
+                } catch {
+                    // continue
+                }
+            }
+
+            t.ok(
+                args.length > 0,
+                'found agent args in log'
+            )
+            const hasEffort = args.includes('--effort')
+            const hasThinking = args.includes('--thinking')
+            const hasE = args.includes('-e')
+            t.ok(!hasEffort, 'no --effort flag')
+            t.ok(!hasThinking, 'no --thinking flag')
+            t.ok(!hasE, 'no -e flag')
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logsDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'spawnAgent: validates effort against provider ladder (AC1.2)',
+    async t => {
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'test-validate-')
+        )
+        const logsDir = mkdtempSync(
+            join(tmpdir(), 'test-logs-')
+        )
+        const ECHO_AGENT = join(
+            process.cwd(), 'test', 'mock-agent-echo-args.js'
+        )
+
+        symlinkSync(ECHO_AGENT, join(binDir, 'claude'))
+        chmodSync(join(binDir, 'claude'), 0o755)
+
+        try {
+            const warnings:string[] = []
+            const logPath = join(logsDir, 'test.log')
+
+            await spawnAgent({
+                prompt:'test prompt',
+                agentCmd:join(binDir, 'claude'),
+                model:null,
+                timeout:10,
+                logPath,
+                effort:'off' as EffortLevel, // invalid for claude
+                onLine:(line:string) => {
+                    if (line.includes('Warning')) {
+                        warnings.push(line)
+                    }
+                },
+            })
+
+            t.ok(
+                warnings.length > 0,
+                'warning emitted for invalid effort'
+            )
+            t.ok(
+                warnings[0].includes('off'),
+                'warning mentions invalid effort level'
+            )
+
+            const logContent = readFileSync(logPath, 'utf8')
+            const lines = logContent.trim().split('\n')
+            let args:string[] = []
+            for (const line of lines) {
+                try {
+                    const parsed = JSON.parse(line)
+                    if (Array.isArray(parsed)) {
+                        args = parsed
+                        break
+                    }
+                } catch {
+                    // continue
+                }
+            }
+
+            const hasEffort = args.includes('--effort')
+            t.ok(
+                !hasEffort,
+                '--effort not passed when invalid'
+            )
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logsDir, { recursive:true, force:true })
+        }
+    }
+)
+
+// -- AC1.1: ALL_EFFORT_LEVELS export --
+
+test('AC1.1 - ALL_EFFORT_LEVELS exported with correct values',
+    t => {
+        t.deepEqual(
+            ALL_EFFORT_LEVELS,
+            [
+                'off', 'minimal', 'low', 'medium',
+                'high', 'xhigh', 'max',
+            ],
+            'ALL_EFFORT_LEVELS has all expected values in order'
+        )
+    }
+)
+
+// -- AC2.3: Effort resets to starting level for each new ticket --
+
+test('AC2.3 - Effort resets to starting level for each ' +
+    'new ticket', async t => {
+    const originalCwd = process.cwd()
+    const base = initTempGitRepo()
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-effort-reset-test-')
+    )
+    const issuesDir = join(base, '.scratch', 'feature')
+    const logsDir = join(base, 'logs')
+    const argsLogPath = join(base, 'args.log')
+    mkdirSync(issuesDir, { recursive:true })
+
+    // Create two independent tickets (both ready, no blockers)
+    writeFileSync(
+        join(issuesDir, '01-ticket1.md'),
+        makeTicketBody({ status:'ready-for-agent' })
+    )
+    writeFileSync(
+        join(issuesDir, '02-ticket2.md'),
+        makeTicketBody({ status:'ready-for-agent' })
+    )
+
+    // Commit the tickets so working tree is clean
+    process.chdir(base)
+    execSync(
+        'git add .scratch && git commit -m "add tickets" --no-verify',
+        {
+            stdio:'pipe',
+            env: {
+                ...process.env,
+                GIT_COMMITTER_NAME:'Test',
+                GIT_COMMITTER_EMAIL:'test@example.com',
+                GIT_AUTHOR_NAME:'Test',
+                GIT_AUTHOR_EMAIL:'test@example.com',
+            },
+        }
+    )
+
+    const tickets = scanTickets(issuesDir)
+    const repoName = 'test-repo'
+
+    const MOCK_FAIL_CAPTURE = join(
+        originalCwd,
+        'test', 'mock-agent-fail-capture-args.js'
+    )
+    mkdirSync(binDir, { recursive:true })
+    const piPath = join(binDir, 'pi')
+    copyFileSync(MOCK_FAIL_CAPTURE, piPath)
+    chmodSync(piPath, 0o755)
+
+    const originalEnv = process.env.ARGS_LOG_PATH
+    process.env.ARGS_LOG_PATH = argsLogPath
+    // Already chdir'd to base above
+    // process.chdir(base)
+    try {
+        const { runWavesIsolated } = await import(
+            '../src/orchestrator.js'
+        )
+        // Pass effort:'medium' so all first attempts start
+        // with medium. If an attempt fails and retries, it
+        // escalates to high. But ticket 02's first attempt
+        // should still be 'medium', not 'high'.
+        await runWavesIsolated({
+            tickets,
+            specBody:'test spec',
+            agentCmd:join(binDir, 'pi'),
+            model:null,
+            timeout:10,
+            logsDir,
+            featureName:'feature',
+            repoName,
+            conflictStrategy:'respawn',
+            progressPath:'.scratch/feature/progress.md',
+            testCmd:null,
+            effort:'medium' as EffortLevel,
+            retries:1,
+            retryDelay:0,
+        })
+
+        t.equal(
+            tickets[0].status, 'done',
+            'ticket 1 should be done after retry'
+        )
+        t.equal(
+            tickets[1].status, 'done',
+            'ticket 2 should be done after retry'
+        )
+
+        // Read captured args
+        t.ok(
+            existsSync(argsLogPath),
+            'args log file should exist'
+        )
+        const argsLogContent = readFileSync(
+            argsLogPath, 'utf8'
+        )
+        const argsLines = argsLogContent
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map(line => JSON.parse(line))
+
+        t.ok(
+            argsLines.length >= 2,
+            'should have captured args for multiple attempts'
+        )
+
+        // Separate attempts by ticket worktree in cwd
+        const invocationsByTicket:Record<
+            string, Array<any>
+        > = {}
+        for (const log of argsLines) {
+            // worktree paths are like
+            // .../nightralph-orch-test-Pvx0hc.01-ticket1
+            const ticketMatch = log.cwd
+                .match(/\.(\d+)-/)
+            if (ticketMatch) {
+                const num = ticketMatch[1]
+                if (!invocationsByTicket[num]) {
+                    invocationsByTicket[num] = []
+                }
+                invocationsByTicket[num].push(log)
+            }
+        }
+
+        t.ok(
+            invocationsByTicket['02'],
+            'should have attempts for ticket 02 ' +
+                '(found tickets: ' +
+                Object.keys(invocationsByTicket).join(', ') +
+                ')'
+        )
+        t.ok(
+            invocationsByTicket['02'].length >= 1,
+            'ticket 02 should have at least one attempt'
+        )
+
+        // Sort by timestamp to get first attempt first
+        const ticket02Attempts =
+            invocationsByTicket['02'].sort(
+                (a:any, b:any) =>
+                    a.timestamp - b.timestamp
+            )
+
+        // First attempt for ticket 02 should have
+        // --thinking medium (not escalated)
+        const ticket02FirstAttempt = ticket02Attempts[0]
+        const thinkingIdx1 =
+            ticket02FirstAttempt.args
+                .indexOf('--thinking')
+        const firstThinkingValue =
+            thinkingIdx1 >= 0 ?
+            ticket02FirstAttempt.args[thinkingIdx1 + 1] :
+            null
+
+        t.equal(
+            firstThinkingValue, 'medium',
+            'ticket 02 first attempt should have ' +
+                '--thinking medium (starting effort, not ' +
+                'escalated from ticket 01 retries)'
+        )
+
+        // Second attempt should have --thinking high
+        if (ticket02Attempts.length >= 2) {
+            const ticket02SecondAttempt =
+                ticket02Attempts[1]
+            const thinkingIdx =
+                ticket02SecondAttempt.args
+                    .indexOf('--thinking')
+            const secondThinkingValue =
+                thinkingIdx >= 0 ?
+                ticket02SecondAttempt.args[
+                    thinkingIdx + 1
+                ] :
+                null
+            t.equal(
+                secondThinkingValue, 'high',
+                'ticket 02 second attempt should have ' +
+                    '--thinking high (escalated on retry)'
+            )
+        }
+    } finally {
+        process.chdir(originalCwd)
+        if (originalEnv === undefined) {
+            delete process.env.ARGS_LOG_PATH
+        } else {
+            process.env.ARGS_LOG_PATH = originalEnv
+        }
         rmSync(binDir, { recursive:true, force:true })
     }
 })

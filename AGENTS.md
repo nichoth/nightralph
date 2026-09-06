@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-09-04
+Last verified: 2026-09-05
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -67,11 +67,11 @@ Small orchestrator that runs a single-agent session per issue.
 - `--timeout <n>` -- seconds before a still-running
   agent is killed; default 3600. A killed agent is
   not a failure (see orchestrator guarantees)
-- `--thinking <level>` -- starting thinking level for
-  `pi`, validated against `THINKING_LEVELS`; omitted =
-  pi's default; ignored by other providers
+- `--effort <level>` -- starting effort level,
+  validated against the active provider's ladder; omitted =
+  provider default; ignored by providers without effort support
 - `--retries <n>` -- extra attempts per ticket after a
-  failed run; default `DEFAULT_RETRIES` (2); `0`
+  failed run; default `DEFAULT_RETRIES` (3); `0`
   disables retries
 - `--retry-delay <n>` -- seconds to wait before the
   first retry; doubles each further retry; default
@@ -86,9 +86,10 @@ Small orchestrator that runs a single-agent session per issue.
 
 ### orchestrator (`src/orchestrator.ts`)
 - **Exposes**: `Ticket`, `AgentResult`,
-  `COMPLETED_RE`, `THINKING_LEVELS`, `ThinkingLevel`,
+  `COMPLETED_RE`, `EFFORT_LADDERS`, `ProviderName`,
+  `EffortLevel`, `ALL_EFFORT_LEVELS`,
   `DEFAULT_RETRIES`, `DEFAULT_RETRY_DELAY`,
-  `escalateThinking(level?)`, `retryDelayFor(base, attempt)`,
+  `escalateEffort(provider, level?)`, `retryDelayFor(base, attempt)`,
   `scanTickets(dir)`,
   `findReadyTickets(tickets)`, `checkItems(ticket, items)`,
   `markDone(ticket)`,
@@ -110,11 +111,21 @@ Small orchestrator that runs a single-agent session per issue.
 - **checkItems(ticket, items)**: checks off specific
   `- [ ]` items in a ticket file by matching text;
   called with completed items from agent output
-- **THINKING_LEVELS**: pi's levels lowest to highest:
-  `off, minimal, low, medium, high, xhigh, max`
-- **escalateThinking(level?)**: the level for a retry;
-  `undefined` -> `high`, otherwise one rung up the
-  ladder, clamped at `max`
+- **EFFORT_LADDERS**: per-provider effort levels,
+  mapping provider names to their supported ladder. pi:
+  `off, minimal, low, medium, high, xhigh, max`; claude:
+  `low, medium, high, xhigh, max`; codex:
+  `minimal, low, medium, high, xhigh`
+- **ProviderName**: type of provider names that have
+  effort support; keys of `EFFORT_LADDERS`
+- **EffortLevel**: type representing any supported effort
+  level across all providers
+- **ALL_EFFORT_LEVELS**: union of all provider levels,
+  lowest to highest: `off, minimal, low, medium, high, xhigh, max`
+- **escalateEffort(provider, level?)**: the level for a
+  retry for a given provider; `undefined` -> `high`,
+  otherwise one rung up the provider's ladder, clamped at
+  the provider's max
 - **AgentResult**: `{ exitCode, completedItems, timedOut }`
   -- returned by `spawnAgent`; `timedOut` is true when
   the orchestrator killed the agent at the timeout, and
@@ -158,12 +169,13 @@ Small orchestrator that runs a single-agent session per issue.
   in a specific directory (used for worktree isolation);
   accepts optional `maxTurns` forwarded as
   `--max-turns` to the agent CLI; accepts optional
-  `thinking` forwarded as `--thinking <level>` only
-  when the provider is `pi`; accepts optional `onLine`
-  callback to redirect output lines (used by Display
-  integration); for `pi`, writes prompt to a temp file
-  and passes `@path` as a positional arg instead of
-  piping to stdin
+  `effort` and maps it to the correct native flag for
+  each provider: `--thinking <level>` for pi,
+  `--effort <level>` for claude, `-e <level>` for codex;
+  accepts optional `onLine` callback to redirect output
+  lines (used by Display integration); for `pi`, writes
+  prompt to a temp file and passes `@path` as a positional
+  arg instead of piping to stdin
 - **renderPrompt(specBody, ticket, opts?)**: `opts.testCmd`
   adds test-first rules to the prompt and names the
   command the orchestrator will run after the agent exits
@@ -174,7 +186,7 @@ Small orchestrator that runs a single-agent session per issue.
 - **runWaves(...)**: accepts optional `display`
   parameter (`Display` interface); defaults to
   `createDisplay()` when omitted; trailing optional
-  `thinking`, `retries`, and `retryDelay` -- a
+  `effort`, `retries`, and `retryDelay` -- a
   non-zero exit is retried up to `retries` times
   with an escalated level and exponential backoff
   (timeouts are not retried); a per-run `failedNums`
@@ -187,14 +199,14 @@ Small orchestrator that runs a single-agent session per issue.
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
   updates; accepts optional `display`, `testCmd`,
-  `thinking`, `retries`, and `retryDelay` in opts
+  `effort`, `retries`, and `retryDelay` in opts
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; a failed attempt
   (non-zero exit, exit 0 with no new commits, or a red
   test gate) is retried up to `retries` times, each
   from a fresh worktree via `createWorktree` and, for
-  `pi`, with `escalateThinking` applied to the previous
-  level, with exponential backoff between retries
+  known providers, with `escalateEffort` applied to the
+  previous level, with exponential backoff between retries
   (`retryDelayFor`); only the final attempt's outcome
   is recorded in progress.md; retry logs are
   `<logsDir>/<ticket>.attempt<n>.log` and
@@ -229,7 +241,7 @@ Small orchestrator that runs a single-agent session per issue.
   `git push`
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; accepts
-  `testCmd`, `thinking`, `retries`, and `retryDelay`
+  `testCmd`, `effort`, `retries`, and `retryDelay`
   in opts and prints them
 
 ### testcmd module (`src/testcmd.ts`)

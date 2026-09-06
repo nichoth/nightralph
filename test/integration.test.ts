@@ -2760,9 +2760,9 @@ test('CLI subprocess exits 0 when all tickets complete',
         }
     })
 
-// -- thinking escalation --
+// -- effort escalation --
 
-test('spawnAgent - pi provider receives --thinking when set',
+test('spawnAgent - effort maps to --thinking for pi provider',
     async t => {
         const binDir = mkdtempSync(
             join(tmpdir(), 'nightralph-provider-test-')
@@ -2781,7 +2781,7 @@ test('spawnAgent - pi provider receives --thinking when set',
                 model:null,
                 timeout:10,
                 logPath,
-                thinking:'high',
+                effort:'high',
             })
 
             t.equal(result.exitCode, 0, 'agent exits 0')
@@ -2800,7 +2800,7 @@ test('spawnAgent - pi provider receives --thinking when set',
         }
     })
 
-test('spawnAgent - non-pi provider never receives --thinking',
+test('spawnAgent - codex provider receives -e flag',
     async t => {
         const binDir = mkdtempSync(
             join(tmpdir(), 'nightralph-provider-test-')
@@ -2819,14 +2819,16 @@ test('spawnAgent - non-pi provider never receives --thinking',
                 model:null,
                 timeout:10,
                 logPath,
-                thinking:'high',
+                effort:'high',
             })
 
             const log = readFileSync(logPath, 'utf8')
             const args = JSON.parse(log.trim())
+            const idx = args.indexOf('-e')
+            t.ok(idx >= 0, 'spawned process received -e')
             t.equal(
-                args.includes('--thinking'), false,
-                'codex does not get the pi-only flag'
+                args[idx + 1], 'high',
+                'the effort level follows the flag'
             )
         } finally {
             rmSync(binDir, { recursive:true, force:true })
@@ -2856,7 +2858,7 @@ function cleanupWorktrees (projectDir:string):void {
 }
 
 test('runWavesIsolated - a failed pi agent is retried with ' +
-    'escalated thinking and the retry can succeed', async t => {
+    'escalated effort and the retry can succeed', async t => {
     const projectDir = initTempGitRepo()
     const binDir = mkdtempSync(
         join(tmpdir(), 'nightralph-provider-test-')
@@ -3034,7 +3036,7 @@ test('runWavesIsolated - omitting retryDelay does not ' +
     }
 })
 
-test('CLI subprocess - --thinking is forwarded to a pi agent',
+test('CLI subprocess - --effort is forwarded to a pi agent',
     async t => {
         const projectDir = tmp()
         const binDir = mkdtempSync(
@@ -3054,7 +3056,7 @@ test('CLI subprocess - --thinking is forwarded to a pi agent',
                 join(binDir, 'pi'),
                 '--spec', FEAT,
                 '--timeout', '10',
-                '--thinking', 'medium',
+                '--effort', 'medium',
             ], { cwd:projectDir })
 
             t.equal(code, 0, 'exit code 0')
@@ -3073,7 +3075,7 @@ test('CLI subprocess - --thinking is forwarded to a pi agent',
         }
     })
 
-test('CLI subprocess - --thinking rejects an unknown level',
+test('CLI subprocess - --effort rejects an unknown level',
     async t => {
         const projectDir = tmp()
         try {
@@ -3085,7 +3087,7 @@ test('CLI subprocess - --thinking rejects an unknown level',
             const { code } = await spawnCli([
                 MOCK_ECHO,
                 '--spec', FEAT,
-                '--thinking', 'galaxy-brain',
+                '--effort', 'galaxy-brain',
             ], { cwd:projectDir })
             t.notEqual(code, 0, 'non-zero exit')
         } finally {
@@ -3162,7 +3164,7 @@ test('CLI subprocess - default retries recover a flaky pi agent',
         }
     })
 
-test('CLI subprocess - --dry-run in a git repo prints thinking ' +
+test('CLI subprocess - --dry-run in a git repo prints effort ' +
     'and retries', async t => {
     const projectDir = initTempGitRepo()
     try {
@@ -3177,15 +3179,15 @@ test('CLI subprocess - --dry-run in a git repo prints thinking ' +
             MOCK_AGENT,
             '--spec', FEAT,
             '--dry-run',
-            '--thinking', 'low',
+            '--effort', 'low',
             '--retries', '3',
             '--retry-delay', '15',
         ], { cwd:projectDir })
 
         t.equal(code, 0, 'exit code 0')
         t.ok(
-            /Thinking:\s+low/.test(stdout),
-            'prints the starting thinking level'
+            /Effort:\s+low/.test(stdout),
+            'prints the starting effort level'
         )
         t.ok(
             /Retries:\s+3/.test(stdout),
