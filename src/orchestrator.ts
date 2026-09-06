@@ -1586,10 +1586,10 @@ export async function runWaves (
                 break
             }
             d.log(
-                `\nNo tickets completed this wave. ` +
+                '\nNo tickets completed this wave. ' +
                 `${remaining.length} ready ticket` +
                 `${remaining.length === 1 ? '' : 's'} ` +
-                `remain; continuing.`
+                'remain; continuing.'
             )
         }
     }
@@ -2016,10 +2016,10 @@ export async function runWavesIsolated (opts:{
                 break
             }
             d.log(
-                `\nNo tickets completed this wave. ` +
+                '\nNo tickets completed this wave. ' +
                 `${remaining.length} ready ticket` +
                 `${remaining.length === 1 ? '' : 's'} ` +
-                `remain; continuing.`
+                'remain; continuing.'
             )
         }
     }
