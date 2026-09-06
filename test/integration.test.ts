@@ -2802,41 +2802,41 @@ test('spawnAgent - effort maps to --thinking for pi provider',
 
 test('spawnAgent - codex provider receives ' +
     'model_reasoning_effort via -c flag',
-    async t => {
-        const binDir = mkdtempSync(
-            join(tmpdir(), 'nightralph-provider-test-')
-        )
-        const logDir = mkdtempSync(
-            join(tmpdir(), 'nightralph-provider-log-')
-        )
-        try {
-            symlinkSync(MOCK_ECHO, join(binDir, 'codex'))
-            chmodSync(join(binDir, 'codex'), 0o755)
+async t => {
+    const binDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-test-')
+    )
+    const logDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-provider-log-')
+    )
+    try {
+        symlinkSync(MOCK_ECHO, join(binDir, 'codex'))
+        chmodSync(join(binDir, 'codex'), 0o755)
 
-            const logPath = join(logDir, 'codex.log')
-            await spawnAgent({
-                prompt:'test prompt',
-                agentCmd:join(binDir, 'codex'),
-                model:null,
-                timeout:10,
-                logPath,
-                effort:'high',
-            })
+        const logPath = join(logDir, 'codex.log')
+        await spawnAgent({
+            prompt:'test prompt',
+            agentCmd:join(binDir, 'codex'),
+            model:null,
+            timeout:10,
+            logPath,
+            effort:'high',
+        })
 
-            const log = readFileSync(logPath, 'utf8')
-            const args = JSON.parse(log.trim())
-            const idx = args.indexOf('-c')
-            t.ok(idx >= 0, 'spawned process received -c')
-            t.equal(
-                args[idx + 1],
-                'model_reasoning_effort=high',
-                'the reasoning effort config follows -c'
-            )
-        } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logDir, { recursive:true, force:true })
-        }
-    })
+        const log = readFileSync(logPath, 'utf8')
+        const args = JSON.parse(log.trim())
+        const idx = args.indexOf('-c')
+        t.ok(idx >= 0, 'spawned process received -c')
+        t.equal(
+            args[idx + 1],
+            'model_reasoning_effort=high',
+            'the reasoning effort config follows -c'
+        )
+    } finally {
+        rmSync(binDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
 
 const MOCK_FAIL_THEN_PASS = join(
     process.cwd(), 'test', 'mock-agent-fail-then-pass.js'
