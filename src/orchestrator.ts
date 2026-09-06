@@ -1575,11 +1575,22 @@ export async function runWaves (
         }
 
         if (waveCompleted === 0) {
+            const remaining = findReadyTickets(tickets)
+                .filter(t => !failedNums.has(t.num))
+            if (remaining.length === 0) {
+                d.log(
+                    '\nNo tickets completed this wave ' +
+                    'and no ready tickets remain. ' +
+                    'Stopping.'
+                )
+                break
+            }
             d.log(
-                '\nNo tickets completed this wave. ' +
-                'Stopping.'
+                `\nNo tickets completed this wave. ` +
+                `${remaining.length} ready ticket` +
+                `${remaining.length === 1 ? '' : 's'} ` +
+                `remain; continuing.`
             )
-            break
         }
     }
 
@@ -1993,11 +2004,23 @@ export async function runWavesIsolated (opts:{
         }
 
         if (waveCompleted === 0) {
+            const remaining = findReadyTickets(
+                opts.tickets
+            ).filter(t => !failedNums.has(t.num))
+            if (remaining.length === 0) {
+                d.log(
+                    '\nNo tickets completed this wave ' +
+                    'and no ready tickets remain. ' +
+                    'Stopping.'
+                )
+                break
+            }
             d.log(
-                '\nNo tickets completed this wave. ' +
-                'Stopping.'
+                `\nNo tickets completed this wave. ` +
+                `${remaining.length} ready ticket` +
+                `${remaining.length === 1 ? '' : 's'} ` +
+                `remain; continuing.`
             )
-            break
         }
     }
 
