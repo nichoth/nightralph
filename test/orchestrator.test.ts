@@ -2074,9 +2074,9 @@ test('escalateEffort - clamps at provider highest level', t => {
         'claude: max stays max'
     )
     t.equal(
-        escalateEffort('codex', 'xhigh'),
-        'xhigh',
-        'codex: xhigh stays xhigh (codex max)'
+        escalateEffort('codex', 'high'),
+        'high',
+        'codex: high stays high (codex max)'
     )
 })
 
@@ -2332,7 +2332,8 @@ test(
 )
 
 test(
-    'spawnAgent: codex receives -e flag (AC3.3)',
+    'spawnAgent: codex receives ' +
+    'model_reasoning_effort via -c flag (AC3.3)',
     async t => {
         const binDir = mkdtempSync(join(tmpdir(), 'test-codex-'))
         const logsDir = mkdtempSync(
@@ -2376,14 +2377,15 @@ test(
                 args.length > 0,
                 'found agent args in log'
             )
-            const eIdx = args.indexOf('-e')
+            const cIdx = args.indexOf('-c')
             t.ok(
-                eIdx >= 0,
-                'args contain -e flag'
+                cIdx >= 0,
+                'args contain -c flag'
             )
             t.equal(
-                args[eIdx + 1], 'high',
-                '-e value is "high"'
+                args[cIdx + 1],
+                'model_reasoning_effort=high',
+                '-c value is "model_reasoning_effort=high"'
             )
         } finally {
             rmSync(binDir, { recursive:true, force:true })

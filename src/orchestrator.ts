@@ -411,8 +411,7 @@ export const EFFORT_LADDERS = {
         'high', 'xhigh', 'max'],
     claude:['low', 'medium', 'high',
         'xhigh', 'max'],
-    codex:['minimal', 'low', 'medium',
-        'high', 'xhigh'],
+    codex:['low', 'medium', 'high'],
 } as const
 
 export type ProviderName =
@@ -696,7 +695,10 @@ export function spawnAgent (opts:{
         } else if (isClaude) {
             args.push('--effort', opts.effort)
         } else if (providerName === 'codex') {
-            args.push('-e', opts.effort)
+            args.push(
+                '-c',
+                `model_reasoning_effort=${opts.effort}`
+            )
         }
     }
     const prefix = opts.label ?

@@ -2800,7 +2800,8 @@ test('spawnAgent - effort maps to --thinking for pi provider',
         }
     })
 
-test('spawnAgent - codex provider receives -e flag',
+test('spawnAgent - codex provider receives ' +
+    'model_reasoning_effort via -c flag',
     async t => {
         const binDir = mkdtempSync(
             join(tmpdir(), 'nightralph-provider-test-')
@@ -2824,11 +2825,12 @@ test('spawnAgent - codex provider receives -e flag',
 
             const log = readFileSync(logPath, 'utf8')
             const args = JSON.parse(log.trim())
-            const idx = args.indexOf('-e')
-            t.ok(idx >= 0, 'spawned process received -e')
+            const idx = args.indexOf('-c')
+            t.ok(idx >= 0, 'spawned process received -c')
             t.equal(
-                args[idx + 1], 'high',
-                'the effort level follows the flag'
+                args[idx + 1],
+                'model_reasoning_effort=high',
+                'the reasoning effort config follows -c'
             )
         } finally {
             rmSync(binDir, { recursive:true, force:true })

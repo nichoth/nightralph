@@ -26,12 +26,17 @@ so they can't drift as long as you install the skills with this package.
 - [Workflow](#workflow)
   * [Create Issues](#create-issues)
   * [Examples](#examples)
+    + [`--spec ` option](#--spec--option)
 - [How It Works](#how-it-works)
   * [Select a ticket](#select-a-ticket)
   * [Worktrees](#worktrees)
   * [Progress](#progress)
 - [Keep Your Machine Awake](#keep-your-machine-awake)
   * [Mac OS](#mac-os)
+    + [Claude Opus 4.6](#claude-opus-46)
+    + [Claude Sonnet 5](#claude-sonnet-5)
+    + [`pi` + OpenRouter model](#pi--openrouter-model)
+    + [`codex` + Luna](#codex--luna)
 
 <!-- tocstop -->
 
@@ -107,7 +112,6 @@ before a ticket can be marked `done`.
 > then follow with `to-tickets`.
 >
 
-
 ### Examples
 
 After you have the tickets, use the `nightralph` loop to execute.
@@ -124,7 +128,8 @@ npx nightralph pi -m openrouter/z-ai/glm-5.3-flash
 # Dry run to inspect the dependency graph and prompt
 npx nightralph codex --dry-run
 
-# Use codex
+# Use codex with a specific model
+npx nightralph codex -m gpt-5.6-luna
 
 # Specify a feature by name
 npx nightralph claude -m claude-opus-4-6 --spec my-feature
@@ -135,15 +140,11 @@ npx nightralph claude -m claude-opus-4-6 --max-turns 30
 # Same thing, using the positional shorthand
 npx nightralph claude -m claude-opus-4-6 30
 
-# Start pi at medium thinking and allow one escalated retry
-npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --thinking medium --retries 1
+# Start pi at medium effort and allow one escalated retry
+npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --effort medium --retries 1
 ```
 
-#### `--spec <name>` option
-
-A feature name that resolves to `.scratch/<name>/`.
-The spec file is `.scratch/<name>/spec.md` and the issues directory
-is `.scratch/<name>/issues/`.
+### Interface
 
 Flags:
 
@@ -158,8 +159,8 @@ Flags:
 | `--timeout` | no | `3600` | Kill the agent after N seconds. A killed agent is not a failure: its work is kept (see Notes) |
 | `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable. Shares the agent's `--timeout`. The command runs in a fresh git worktree, which contains only tracked files, so a project that needs an install step should include it, for example `--test-cmd 'npm ci && npm test'` |
 | `--max-turns <n>` | no | -- | Max agentic turns per ticket. Forwarded verbatim as `--max-turns <n>` to the provider CLI. Only `claude` accepts it; `codex` and `pi` reject it as an unknown option and the agent exits immediately. Applies to every agent spawn, including a re-spawn after a merge conflict. When omitted, `claude` applies no turn limit, so `--timeout` is the only cap. Reaching the limit is an error exit, so the ticket is recorded as failed |
-| `--thinking <level>` | no | -- | Starting thinking level for `pi`, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Forwarded as `--thinking <level>`. Omitted = pi's own default. Ignored for other providers. Each retry steps up from here (see `--retries`) |
-| `--retries <n>` | no | `2` | Extra attempts per ticket after a failed run. Each retry starts from a fresh worktree; with `pi` it also raises the thinking level (see Notes). `0` disables retries |
+| `--effort <level>` | no | -- | Starting effort/reasoning level. Each provider has its own ladder: `claude` supports `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--effort`); `codex` supports `low`, `medium`, `high` (forwarded as `-c model_reasoning_effort=<level>`); `pi` supports `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--thinking`). Omitted = provider default. Each retry steps up from here (see `--retries`) |
+| `--retries <n>` | no | `3` | Extra attempts per ticket after a failed run. Each retry starts from a fresh worktree and raises the effort level one rung (see Notes). `0` disables retries |
 | `--retry-delay <n>` | no | `30` | Seconds to wait before the first retry; doubles each further retry (30s, 60s, 120s, ...). `0` disables the wait |
 
 
@@ -187,15 +188,15 @@ Flags:
   ticket is recorded as failed. Non-zero exit, exit 0 with no new
   commits, and a red test command all count as failures; a timeout
   does not (see below). Each retry discards the previous worktree
-  and starts from a fresh one. With `pi`, each retry raises the
-  thinking level: without `--thinking` the first retry uses `high`
-  and the second `max`; with `--thinking <level>` each retry steps
-  one level up from the previous attempt, stopping at `max`.
-  `claude` and `codex` are retried at the same settings. Retries
-  are spaced with exponential backoff controlled by `--retry-delay`:
-  the first retry waits `--retry-delay` seconds, the second waits
-  double that, and so on. This lets provider outages clear before
-  burning the next attempt. Retry
+  and starts from a fresh one. Each retry also raises the effort
+  level one rung up the provider's ladder: without `--effort` the
+  first retry uses `high`; with `--effort <level>` each retry
+  steps one level up from the previous attempt, stopping at the
+  provider's max (`max` for claude/pi, `high` for codex).
+  Retries are spaced with exponential backoff controlled by
+  `--retry-delay`: the first retry waits `--retry-delay` seconds,
+  the second waits double that, and so on. This lets provider
+  outages clear before burning the next attempt. Retry
   logs are written to `<dir>/../logs/<ticket>.attempt<n>.log`
   (and `.attempt<n>.test.log` for the test command) so the first
   attempt's log is kept.
@@ -237,6 +238,13 @@ Flags:
   * `pi`: `-p --verbose --approve --no-session --mode json`
     (prompt delivered via temp file; `--approve` auto-accepts
     tool-use proposals so the agent runs non-interactively)
+
+
+#### `--spec <name>` option
+
+A feature name that resolves to `.scratch/<name>/`.
+The spec file is `.scratch/<name>/spec.md` and the issues directory
+is `.scratch/<name>/issues/`.
 
 
 ## How It Works

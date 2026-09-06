@@ -117,7 +117,7 @@ Small orchestrator that runs a single-agent session per issue.
   mapping provider names to their supported ladder. pi:
   `off, minimal, low, medium, high, xhigh, max`; claude:
   `low, medium, high, xhigh, max`; codex:
-  `minimal, low, medium, high, xhigh`
+  `low, medium, high`
 - **ProviderName**: type of provider names that have
   effort support; keys of `EFFORT_LADDERS`
 - **EffortLevel**: type representing any supported effort
@@ -174,7 +174,8 @@ Small orchestrator that runs a single-agent session per issue.
   warn and skip); accepts optional
   `effort` and maps it to the correct native flag for
   each provider: `--thinking <level>` for pi,
-  `--effort <level>` for claude, `-e <level>` for codex;
+  `--effort <level>` for claude,
+  `-c model_reasoning_effort=<level>` for codex;
   accepts optional `onLine` callback to redirect output
   lines (used by Display integration); for `pi`, writes
   prompt to a temp file and passes `@path` as a positional
