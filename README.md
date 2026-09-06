@@ -26,6 +26,7 @@ so they can't drift as long as you install the skills with this package.
 - [Workflow](#workflow)
   * [Create Issues](#create-issues)
   * [Examples](#examples)
+  * [Interface](#interface)
     + [`--spec ` option](#--spec--option)
 - [How It Works](#how-it-works)
   * [Select a ticket](#select-a-ticket)
