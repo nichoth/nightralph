@@ -63,7 +63,9 @@ Small orchestrator that runs a single-agent session per issue.
   ticket. Omitted = auto-detect `npm test` from
   `package.json` at the repo root; `""` = disabled
 - `--max-turns <n>` -- max agentic turns per ticket,
-  forwarded to the agent CLI (e.g. `--max-turns 30`)
+  forwarded as `--max-turns` to claude; other
+  providers warn and skip (codex and pi do not
+  accept this flag)
 - `--timeout <n>` -- seconds before a still-running
   agent is killed; default 3600. A killed agent is
   not a failure (see orchestrator guarantees)
@@ -167,8 +169,9 @@ Small orchestrator that runs a single-agent session per issue.
   killed, not just orphaned; accepts optional `cwd`
   to run the agent process
   in a specific directory (used for worktree isolation);
-  accepts optional `maxTurns` forwarded as
-  `--max-turns` to the agent CLI; accepts optional
+  accepts optional `maxTurns`, forwarded as
+  `--max-turns` to claude only (other providers
+  warn and skip); accepts optional
   `effort` and maps it to the correct native flag for
   each provider: `--thinking <level>` for pi,
   `--effort <level>` for claude, `-e <level>` for codex;

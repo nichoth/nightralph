@@ -124,6 +124,8 @@ npx nightralph pi -m openrouter/z-ai/glm-5.3-flash
 # Dry run to inspect the dependency graph and prompt
 npx nightralph codex --dry-run
 
+# Use codex
+
 # Specify a feature by name
 npx nightralph claude -m claude-opus-4-6 --spec my-feature
 

@@ -657,13 +657,24 @@ export function spawnAgent (opts:{
     if (opts.model) {
         args.push('--model', opts.model)
     }
-    if (opts.maxTurns) {
-        args.push('--max-turns', String(opts.maxTurns))
-    }
-
     const providerName = basename(opts.agentCmd)
     const isClaude = providerName === 'claude'
     const isPi = providerName === 'pi'
+
+    if (opts.maxTurns) {
+        if (isClaude) {
+            args.push(
+                '--max-turns',
+                String(opts.maxTurns)
+            )
+        } else if (opts.onLine) {
+            opts.onLine(
+                'Warning: --max-turns not ' +
+                `supported by ${providerName}, ` +
+                'skipping'
+            )
+        }
+    }
     if (opts.effort && providerName in EFFORT_LADDERS) {
         const ladder = EFFORT_LADDERS[
             providerName as ProviderName

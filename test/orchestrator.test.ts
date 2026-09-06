@@ -2728,3 +2728,166 @@ test('AC2.3 - Effort resets to starting level for each ' +
         rmSync(binDir, { recursive:true, force:true })
     }
 })
+
+// -- max-turns per-provider mapping --
+
+function parseArgsFromLog (logPath:string):string[] {
+    const content = readFileSync(logPath, 'utf8')
+    for (const line of content.trim().split('\n')) {
+        try {
+            const parsed = JSON.parse(line)
+            if (Array.isArray(parsed)) return parsed
+        } catch {
+            // continue
+        }
+    }
+    return []
+}
+
+test(
+    'spawnAgent: claude receives --max-turns',
+    async t => {
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'test-mt-claude-')
+        )
+        const logsDir = mkdtempSync(
+            join(tmpdir(), 'test-mt-logs-')
+        )
+        const ECHO = join(
+            process.cwd(),
+            'test', 'mock-agent-echo-args.js'
+        )
+        symlinkSync(ECHO, join(binDir, 'claude'))
+        chmodSync(join(binDir, 'claude'), 0o755)
+
+        try {
+            const logPath = join(logsDir, 'test.log')
+            await spawnAgent({
+                prompt:'test',
+                agentCmd:join(binDir, 'claude'),
+                model:null,
+                timeout:10,
+                logPath,
+                maxTurns:25,
+            })
+
+            const args = parseArgsFromLog(logPath)
+            const idx = args.indexOf('--max-turns')
+            t.ok(
+                idx >= 0,
+                'claude args contain --max-turns'
+            )
+            t.equal(
+                args[idx + 1], '25',
+                '--max-turns value is "25"'
+            )
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logsDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'spawnAgent: codex does not receive --max-turns',
+    async t => {
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'test-mt-codex-')
+        )
+        const logsDir = mkdtempSync(
+            join(tmpdir(), 'test-mt-logs-')
+        )
+        const ECHO = join(
+            process.cwd(),
+            'test', 'mock-agent-echo-args.js'
+        )
+        symlinkSync(ECHO, join(binDir, 'codex'))
+        chmodSync(join(binDir, 'codex'), 0o755)
+
+        const warnings:string[] = []
+        try {
+            const logPath = join(logsDir, 'test.log')
+            await spawnAgent({
+                prompt:'test',
+                agentCmd:join(binDir, 'codex'),
+                model:null,
+                timeout:10,
+                logPath,
+                maxTurns:25,
+                onLine:(line) => {
+                    if (line.includes('Warning')) {
+                        warnings.push(line)
+                    }
+                },
+            })
+
+            const args = parseArgsFromLog(logPath)
+            t.ok(
+                !args.includes('--max-turns'),
+                'codex args do not contain --max-turns'
+            )
+            t.ok(
+                warnings.length > 0,
+                'warning emitted for unsupported ' +
+                    '--max-turns'
+            )
+            t.ok(
+                warnings[0].includes('codex'),
+                'warning names the provider'
+            )
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logsDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'spawnAgent: pi does not receive --max-turns',
+    async t => {
+        const binDir = mkdtempSync(
+            join(tmpdir(), 'test-mt-pi-')
+        )
+        const logsDir = mkdtempSync(
+            join(tmpdir(), 'test-mt-logs-')
+        )
+        const ECHO = join(
+            process.cwd(),
+            'test', 'mock-agent-echo-args.js'
+        )
+        symlinkSync(ECHO, join(binDir, 'pi'))
+        chmodSync(join(binDir, 'pi'), 0o755)
+
+        const warnings:string[] = []
+        try {
+            const logPath = join(logsDir, 'test.log')
+            await spawnAgent({
+                prompt:'test',
+                agentCmd:join(binDir, 'pi'),
+                model:null,
+                timeout:10,
+                logPath,
+                maxTurns:25,
+                onLine:(line) => {
+                    if (line.includes('Warning')) {
+                        warnings.push(line)
+                    }
+                },
+            })
+
+            const args = parseArgsFromLog(logPath)
+            t.ok(
+                !args.includes('--max-turns'),
+                'pi args do not contain --max-turns'
+            )
+            t.ok(
+                warnings.length > 0,
+                'warning emitted for unsupported ' +
+                    '--max-turns'
+            )
+        } finally {
+            rmSync(binDir, { recursive:true, force:true })
+            rmSync(logsDir, { recursive:true, force:true })
+        }
+    }
+)
