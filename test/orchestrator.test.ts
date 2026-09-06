@@ -2565,7 +2565,7 @@ test('AC2.3 - Effort resets to starting level for each ' +
         'git add .scratch && git commit -m "add tickets" --no-verify',
         {
             stdio:'pipe',
-            env: {
+            env:{
                 ...process.env,
                 GIT_COMMITTER_NAME:'Test',
                 GIT_COMMITTER_EMAIL:'test@example.com',
@@ -2689,8 +2689,8 @@ test('AC2.3 - Effort resets to starting level for each ' +
                 .indexOf('--thinking')
         const firstThinkingValue =
             thinkingIdx1 >= 0 ?
-            ticket02FirstAttempt.args[thinkingIdx1 + 1] :
-            null
+                ticket02FirstAttempt.args[thinkingIdx1 + 1] :
+                null
 
         t.equal(
             firstThinkingValue, 'medium',
@@ -2708,10 +2708,10 @@ test('AC2.3 - Effort resets to starting level for each ' +
                     .indexOf('--thinking')
             const secondThinkingValue =
                 thinkingIdx >= 0 ?
-                ticket02SecondAttempt.args[
-                    thinkingIdx + 1
-                ] :
-                null
+                    ticket02SecondAttempt.args[
+                        thinkingIdx + 1
+                    ] :
+                    null
             t.equal(
                 secondThinkingValue, 'high',
                 'ticket 02 second attempt should have ' +
