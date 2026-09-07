@@ -4,13 +4,13 @@
 
 **Blocked by:** 03: The timeout kill takes the agent's process group and always resolves.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `StatusDisplay.startWave` no longer registers signal handlers
-- [ ] `StatusDisplay.cleanup` no longer removes signal handlers
-- [ ] `runningAgents` set tracks live agent processes in the orchestrator
-- [ ] `killRunningAgents()` is exported, kills all tracked agents' process groups, returns count
-- [ ] `spawnAgent` adds/removes agents from the registry on spawn/close
-- [ ] The CLI installs SIGINT/SIGTERM handlers that kill agents and exit
-- [ ] A display test verifies no signal handlers are added by `startWave`
-- [ ] A CLI test verifies SIGINT kills the agent process tree and exits
+- [x] `StatusDisplay.startWave` no longer registers signal handlers
+- [x] `StatusDisplay.cleanup` no longer removes signal handlers
+- [x] `runningAgents` set tracks live agent processes in the orchestrator
+- [x] `killRunningAgents()` is exported, kills all tracked agents' process groups, returns count
+- [x] `spawnAgent` adds/removes agents from the registry on spawn/close
+- [x] The CLI installs SIGINT/SIGTERM handlers that kill agents and exit
+- [x] A display test verifies no signal handlers are added by `startWave`
+- [x] A CLI test verifies SIGINT kills the agent process tree and exits

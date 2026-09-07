@@ -144,11 +144,13 @@ Small orchestrator that runs a single-agent session per issue.
   is 30, `retryDelayFor(30,3)` is 60,
   `retryDelayFor(0,3)` is 0
 - **killProcessGroup(pid)**: sends `SIGKILL` to `-pid`
-  (the whole process group); used by the timeout
-  handler and signal handling
+  (the whole process group), falling back to a direct
+  `SIGKILL` of `pid` when the group kill fails; used by
+  the timeout handler and signal handling
 - **killRunningAgents()**: iterates the module-level
   `runningAgents` set and calls `killProcessGroup` on
-  each tracked pid; agents are added on spawn and
+  each tracked pid, returning the count of agents
+  killed; agents are added on spawn and
   removed on exit
 - **spawnAgent(opts)**: returns `AgentResult`; spawns
   agents with `detached:true` so they become their own
@@ -195,7 +197,8 @@ Small orchestrator that runs a single-agent session per issue.
   with an escalated level and exponential backoff
   (timeouts are not retried); a per-run `failedNums`
   set excludes tickets that exhausted their attempts
-  from later waves
+  or whose merge conflict was not recovered from
+  later waves
 - **renderMergePrompt(specBody, ticket)**: prompt for
   a respawned agent resolving a merge conflict; tells
   the agent to resolve conflict markers, not re-implement
@@ -224,7 +227,8 @@ Small orchestrator that runs a single-agent session per issue.
   worktree) fails that ticket with an `'error'` outcome
   but does not crash the wave -- other tickets continue;
   a per-run `failedNums` set excludes tickets that
-  exhausted their attempts from later waves; failed
+  exhausted their attempts or whose merge conflict was
+  not recovered from later waves; failed
   and stopped worktrees are removed with `force:true`
   so dirty files do not prevent cleanup; every
   terminal failure -- `worktree-error` (exitCode:-1),

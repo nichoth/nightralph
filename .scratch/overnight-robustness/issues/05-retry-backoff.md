@@ -4,13 +4,13 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `retryDelayFor(base, attempt)` returns `base * 2 ** (attempt - 2)`, exported
-- [ ] `DEFAULT_RETRY_DELAY = 30`, exported
-- [ ] `runWavesIsolated` and `runWaves` accept `retryDelay` and sleep before each retry
-- [ ] `dryRunIsolated` prints the retry delay
-- [ ] CLI flag `--retry-delay` with default `DEFAULT_RETRY_DELAY`
-- [ ] Existing CLI subprocess tests that exercise retries pass `--retry-delay 0` to stay fast
-- [ ] A unit test verifies the doubling math
-- [ ] An integration test verifies the delay is actually waited
+- [x] `retryDelayFor(base, attempt)` returns `base * 2 ** (attempt - 2)`, exported
+- [x] `DEFAULT_RETRY_DELAY = 30`, exported
+- [x] `runWavesIsolated` and `runWaves` accept `retryDelay` and sleep before each retry
+- [x] `dryRunIsolated` prints the retry delay
+- [x] CLI flag `--retry-delay` with default `DEFAULT_RETRY_DELAY`
+- [x] Existing CLI subprocess tests that exercise retries pass `--retry-delay 0` to stay fast
+- [x] A unit test verifies the doubling math
+- [x] An integration test verifies the delay is actually waited

@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `commitProgress` returns `Promise<boolean>` -- `true` when a commit was made, `false` when the file is unchanged
-- [ ] Uses `git diff --cached --quiet` to detect a no-op before attempting the commit
-- [ ] A test commits progress, writes identical content, and verifies the second call returns `false` without throwing
+- [x] `commitProgress` returns `Promise<boolean>` -- `true` when a commit was made, `false` when the file is unchanged
+- [x] Uses `git diff --cached --quiet` to detect a no-op before attempting the commit
+- [x] A test commits progress, writes identical content, and verifies the second call returns `false` without throwing

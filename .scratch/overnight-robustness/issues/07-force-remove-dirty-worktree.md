@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `removeWorktree` signature becomes `(path, opts?:{ force?:boolean })`
-- [ ] `removeWorktreeQuietly` in the orchestrator passes `{ force:true }`
-- [ ] A unit test creates a worktree, writes an untracked file, and verifies force-removal succeeds
-- [ ] An integration test runs a mock agent that leaves files behind and exits 1, then verifies the worktree is gone
+- [x] `removeWorktree` signature becomes `(path, opts?:{ force?:boolean })`
+- [x] `removeWorktreeQuietly` in the orchestrator passes `{ force:true }`
+- [x] A unit test creates a worktree, writes an untracked file, and verifies force-removal succeeds
+- [x] An integration test runs a mock agent that leaves files behind and exits 1, then verifies the worktree is gone

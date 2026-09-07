@@ -623,7 +623,15 @@ export function killProcessGroup (pid:number|undefined):void {
     try {
         process.kill(-pid, 'SIGKILL')
     } catch {
-        // Process group is already gone.
+        // The group kill failed (e.g. the group was already
+        // reaped, or the pid is not a group leader). Fall back
+        // to killing the process directly so a still-running
+        // pid never escapes the kill.
+        try {
+            process.kill(pid, 'SIGKILL')
+        } catch {
+            // Process is already gone.
+        }
     }
 }
 
@@ -632,10 +640,13 @@ export function killProcessGroup (pid:number|undefined):void {
 // instead of leaving them running after the orchestrator exits.
 const runningAgents = new Set<number>()
 
-export function killRunningAgents ():void {
+export function killRunningAgents ():number {
+    let killed = 0
     for (const pid of runningAgents) {
         killProcessGroup(pid)
+        killed++
     }
+    return killed
 }
 
 export function spawnAgent (opts:{
@@ -1949,6 +1960,13 @@ export async function runWavesIsolated (opts:{
                             }
                         }
                     } else {
+                        // Without this the ticket stays
+                        // ready-for-agent and the wave loop
+                        // would re-run it forever; excluding it
+                        // from later waves of this run ends the
+                        // loop while the file keeps its status
+                        // for the next run.
+                        failedNums.add(ticket.num)
                         d.log(
                             `  ${ticket.filename}: merge failed, ` +
                             'staying ready-for-agent'

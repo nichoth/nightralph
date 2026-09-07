@@ -4,11 +4,11 @@
 
 **Blocked by:** 01: commitProgress skips an unchanged file.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `saveProgress` helper logs commit failures instead of throwing
-- [ ] `runWavesIsolated` and `runWaves` maintain a per-run `failedNums:Set<number>`
-- [ ] `findReadyTickets` results are filtered by `failedNums`
-- [ ] Failed tickets are added to `failedNums` on `worktree-error`, `no-commits`, and `failed` outcomes (not `merge-failed`)
-- [ ] Final summary line includes failed count
-- [ ] A test with two waves verifies that a ticket that fails in wave 1 is not re-run in wave 2, and the sibling ticket proceeds
+- [x] `saveProgress` helper logs commit failures instead of throwing
+- [x] `runWavesIsolated` and `runWaves` maintain a per-run `failedNums:Set<number>`
+- [x] `findReadyTickets` results are filtered by `failedNums`
+- [x] Failed tickets are added to `failedNums` on `worktree-error`, `no-commits`, and `failed` outcomes (not `merge-failed`)
+- [x] Final summary line includes failed count
+- [x] A test with two waves verifies that a ticket that fails in wave 1 is not re-run in wave 2, and the sibling ticket proceeds

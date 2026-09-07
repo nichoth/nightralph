@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `renderPrompt` includes rules about staying in the current directory and not running `git push`
-- [ ] `renderMergePrompt` includes a rule against `git push`
-- [ ] Tests verify both prompts contain the expected rule text
+- [x] `renderPrompt` includes rules about staying in the current directory and not running `git push`
+- [x] `renderMergePrompt` includes a rule against `git push`
+- [x] Tests verify both prompts contain the expected rule text

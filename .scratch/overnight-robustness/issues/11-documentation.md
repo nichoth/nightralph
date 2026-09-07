@@ -4,10 +4,10 @@
 
 **Blocked by:** 01, 02, 03, 04, 05, 06, 07, 08, 09, 10.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] README flags table includes `--retry-delay`
-- [ ] README Notes cover retry backoff, signal handling, process groups, `.scratch` gitignore, timeout guidance, and publish-after-upgrade
-- [ ] README `pi` provider bullet clarifies `--approve`
-- [ ] AGENTS.md contracts updated for orchestrator, progress, worktree, and display modules
-- [ ] `Last verified` date updated in AGENTS.md
+- [x] README flags table includes `--retry-delay`
+- [x] README Notes cover retry backoff, signal handling, process groups, `.scratch` gitignore, timeout guidance, and publish-after-upgrade
+- [x] README `pi` provider bullet clarifies `--approve`
+- [x] AGENTS.md contracts updated for orchestrator, progress, worktree, and display modules
+- [x] `Last verified` date updated in AGENTS.md

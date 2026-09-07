@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `spawn` call uses `detached:true`
-- [ ] `killProcessGroup(proc)` sends SIGKILL to `-proc.pid`, falling back to `proc.kill('SIGKILL')`
-- [ ] An `exit` handler destroys stdio after `CLOSE_GRACE_MS` (2000 ms)
-- [ ] A mock agent that spawns a long-lived child sharing stdio resolves within a few seconds of the timeout, and the child process is killed
+- [x] `spawn` call uses `detached:true`
+- [x] `killProcessGroup(proc)` sends SIGKILL to `-proc.pid`, falling back to `proc.kill('SIGKILL')`
+- [x] An `exit` handler destroys stdio after `CLOSE_GRACE_MS` (2000 ms)
+- [x] A mock agent that spawns a long-lived child sharing stdio resolves within a few seconds of the timeout, and the child process is killed

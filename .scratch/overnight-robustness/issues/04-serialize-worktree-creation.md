@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The existing `createWorktree` body moves to a private `createWorktreeNow`
-- [ ] A module-level promise queue serializes calls through `enqueue()`
-- [ ] A test runs 50 concurrent `createWorktree` calls across 5 rounds with zero failures
+- [x] The existing `createWorktree` body moves to a private `createWorktreeNow`
+- [x] A module-level promise queue serializes calls through `enqueue()`
+- [x] A test runs 50 concurrent `createWorktree` calls across 5 rounds with zero failures

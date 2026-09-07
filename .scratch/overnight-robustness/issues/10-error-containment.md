@@ -4,9 +4,9 @@
 
 **Blocked by:** 08: A failed ticket is recorded once and not re-run this run; 05: Backoff between retries.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `TicketOutcome` gains `{ kind:'error'; error:unknown }`
-- [ ] `runTicketAttempts` catches errors around `runTicketAttempt` and returns the error outcome
-- [ ] The outcome loop in `runWavesIsolated` handles the `error` kind: adds to `failedNums`, sets status to failed, logs the error
-- [ ] A mock agent that deletes its own working directory for ticket 01 fails that ticket while the sibling ticket in the same wave succeeds
+- [x] `TicketOutcome` gains `{ kind:'error'; error:unknown }`
+- [x] `runTicketAttempts` catches errors around `runTicketAttempt` and returns the error outcome
+- [x] The outcome loop in `runWavesIsolated` handles the `error` kind: adds to `failedNums`, sets status to failed, logs the error
+- [x] A mock agent that deletes its own working directory for ticket 01 fails that ticket while the sibling ticket in the same wave succeeds

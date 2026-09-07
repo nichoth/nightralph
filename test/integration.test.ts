@@ -18,6 +18,7 @@ import {
     scanTickets,
     spawnAgent,
     killRunningAgents,
+    killProcessGroup,
 } from '../src/orchestrator.js'
 
 function tmp ():string {
@@ -2567,7 +2568,8 @@ test('killRunningAgents - kills a tracked agent\'s ' +
         // register itself before we try to kill it.
         await new Promise(r => setTimeout(r, 300))
 
-        killRunningAgents()
+        const killed = killRunningAgents()
+        t.ok(killed >= 1, `killRunningAgents returns a count (${killed})`)
 
         const start = Date.now()
         const result = await resultPromise
@@ -2601,6 +2603,27 @@ test('killRunningAgents - is a no-op when no agents ' +
     t.equal(
         threw, false,
         'calling with an empty registry does not throw'
+    )
+    t.equal(
+        killRunningAgents(), 0,
+        'empty registry reports a count of 0'
+    )
+})
+
+test('killProcessGroup - falls back to a direct kill ' +
+    'when the pid is not a group leader', async t => {
+    // The child was not spawned detached, so it is not its own
+    // process group leader; the group kill (-pid) fails and the
+    // fallback must kill the child directly.
+    const child = spawn('sleep', ['30'])
+    t.ok(child.pid, 'child spawned')
+    killProcessGroup(child.pid)
+    const signal = await new Promise<string|null>(
+        resolve => child.once('exit', (_c, s) => resolve(s))
+    )
+    t.equal(
+        signal, 'SIGKILL',
+        'child was killed by the direct-kill fallback'
     )
 })
 

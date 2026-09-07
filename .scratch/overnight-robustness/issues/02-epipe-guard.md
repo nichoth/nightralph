@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `spawnAgent` installs an error listener on `proc.stdin` before writing the prompt
-- [ ] The listener writes the error to the log stream, never throws
-- [ ] A mock agent that exits without reading stdin, paired with a 2 MB prompt, resolves cleanly with exit code 1
+- [x] `spawnAgent` installs an error listener on `proc.stdin` before writing the prompt
+- [x] The listener writes the error to the log stream, never throws
+- [x] A mock agent that exits without reading stdin, paired with a 2 MB prompt, resolves cleanly with exit code 1
