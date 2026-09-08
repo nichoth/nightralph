@@ -108,11 +108,29 @@ Small orchestrator that runs a single-agent session per issue.
   `pi` (file-based prompt via `@tmpfile`, JSON
   mode output parsed by `createPiStreamFormatter`)
 - **COMPLETED_RE**: regex matching `[x] <text>` lines
-  from agent output; used to detect which checklist
-  items the agent has completed
+  from agent output, with an optional leading markdown
+  bullet (`- [x] <text>` also matches, the form agents
+  actually emit most often); used to detect which
+  checklist items the agent has completed. Collected
+  per line (a whole multi-line text block counts as
+  multiple reports) and deduplicated
 - **checkItems(ticket, items)**: checks off specific
   `- [ ]` items in a ticket file by matching text;
-  called with completed items from agent output
+  called with completed items from agent output.
+  Items are matched against the ticket's checklist
+  with whitespace runs collapsed and case-insensitive,
+  so items wrapped across multiple lines in the file
+  match a single-line echo (and vice versa); code
+  fences are skipped. Re-reads the ticket file from
+  disk before writing so it never clobbers changes
+  that arrived after the ticket was scanned
+- **markDone(ticket)**: sets `**Status:**` to done and
+  checks off every remaining unchecked checklist item
+  (a done ticket's items are complete by definition,
+  so the file must not claim done with unchecked items
+  left over when the agent never echoed `[x]` lines);
+  re-reads the ticket file from disk first so merged
+  agent edits are preserved
 - **EFFORT_LADDERS**: per-provider effort levels,
   mapping provider names to their supported ladder. pi:
   `off, minimal, low, medium, high, xhigh, max`; claude:
@@ -163,7 +181,8 @@ Small orchestrator that runs a single-agent session per issue.
   error listener so an agent that exits before reading
   its prompt (EPIPE) does not crash the run; collects
   `[x] <text>` lines from agent stdout via
-  `COMPLETED_RE`; resolves within `CLOSE_GRACE_MS`
+  `COMPLETED_RE` (matched per line, so multi-line text
+  blocks yield every reported item); resolves within `CLOSE_GRACE_MS`
   (2s) of exit even when a grandchild holds the stdout
   pipe; the grace-timer callback calls
   `killProcessGroup(proc.pid)` before destroying

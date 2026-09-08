@@ -582,6 +582,15 @@ test('COMPLETED_RE is case insensitive', t => {
     t.equal(match![1], 'uppercase marker')
 })
 
+test('COMPLETED_RE matches markdown bullet [x] lines', t => {
+    // The form agents actually emit: a markdown checklist line.
+    const match = '- [x] first item'.match(COMPLETED_RE)
+    t.ok(match, 'matches - [x] line')
+    t.equal(match![1], 'first item')
+    t.ok('* [x] star bullet'.match(COMPLETED_RE))
+    t.ok('+ [x] plus bullet'.match(COMPLETED_RE))
+})
+
 test('COMPLETED_RE ignores non-matching lines', t => {
     t.equal(
         'some other output'.match(COMPLETED_RE),
@@ -744,6 +753,215 @@ test('checkItems handles special regex characters', t => {
     t.ok(
         onDisk.includes(`- [x] ${itemText}`),
         'item with special chars checked'
+    )
+})
+
+test('checkItems checks items wrapped across lines', t => {
+    const dir = tmp()
+    const filepath = join(dir, '01-wrapped.md')
+    // The real-world shape: items wrap with indented
+    // continuation lines, while the agent echoes each item
+    // as one long line.
+    const body = [
+        '# Test ticket',
+        '',
+        '**Status:** ready-for-agent',
+        '',
+        '- [ ] A fragment request to each route returns JSON ' +
+            'with status 200, a JSON',
+        '      content type, and the correct `page`.',
+        '- [ ] Another item that stays unchecked',
+    ].join('\n')
+    writeFileSync(filepath, body)
+
+    const ticket:Ticket = {
+        num:1,
+        slug:'wrapped',
+        filename:'01-wrapped.md',
+        filepath,
+        body,
+        status:'ready-for-agent',
+        blockers:[],
+    }
+
+    checkItems(ticket, [
+        'A fragment request to each route returns JSON ' +
+            'with status 200, a JSON content type, and the ' +
+            'correct `page`.',
+    ])
+
+    const onDisk = readFileSync(filepath, 'utf8')
+    t.ok(
+        onDisk.includes(
+            '- [x] A fragment request to each route returns ' +
+                'JSON with status 200, a JSON'
+        ),
+        'wrapped item checked without reflowing the file'
+    )
+    t.ok(
+        onDisk.includes(
+            '      content type, and the correct `page`.'
+        ),
+        'continuation line preserved verbatim'
+    )
+    t.ok(
+        onDisk.includes('- [ ] Another item that stays unchecked'),
+        'other item untouched'
+    )
+})
+
+test('checkItems matches bullet-prefixed echoes case-insensitively', t => {
+    const dir = tmp()
+    const filepath = join(dir, '01-bullet.md')
+    const body = [
+        '# Test ticket',
+        '',
+        '- [ ] First Item Here',
+    ].join('\n')
+    writeFileSync(filepath, body)
+
+    const ticket:Ticket = {
+        num:1,
+        slug:'bullet',
+        filename:'01-bullet.md',
+        filepath,
+        body,
+        status:'ready-for-agent',
+        blockers:[],
+    }
+
+    checkItems(ticket, ['- [x] first item here'])
+
+    const onDisk = readFileSync(filepath, 'utf8')
+    t.ok(
+        onDisk.includes('- [x] First Item Here'),
+        'item matched across bullet prefix and case'
+    )
+})
+
+test('checkItems does not touch items inside code fences', t => {
+    const dir = tmp()
+    const filepath = join(dir, '01-fence.md')
+    const itemText = 'real item'
+    const body = [
+        '# Test ticket',
+        '',
+        '```md',
+        '- [ ] fenced example not an item',
+        '```',
+        '',
+        `- [ ] ${itemText}`,
+    ].join('\n')
+    writeFileSync(filepath, body)
+
+    const ticket:Ticket = {
+        num:1,
+        slug:'fence',
+        filename:'01-fence.md',
+        filepath,
+        body,
+        status:'ready-for-agent',
+        blockers:[],
+    }
+
+    checkItems(ticket, ['fenced example not an item', itemText])
+
+    const onDisk = readFileSync(filepath, 'utf8')
+    t.ok(
+        onDisk.includes('- [ ] fenced example not an item'),
+        'fenced line untouched'
+    )
+    t.ok(
+        onDisk.includes(`- [x] ${itemText}`),
+        'real item checked'
+    )
+})
+
+test('markDone checks off all remaining items', t => {
+    const dir = tmp()
+    const filepath = join(dir, '01-done-items.md')
+    const body = [
+        '# Test ticket',
+        '',
+        '**Status:** ready-for-agent',
+        '',
+        '- [ ] first item',
+        '- [x] second item',
+        '- [ ] third item',
+    ].join('\n')
+    writeFileSync(filepath, body)
+
+    const ticket:Ticket = {
+        num:1,
+        slug:'done-items',
+        filename:'01-done-items.md',
+        filepath,
+        body,
+        status:'ready-for-agent',
+        blockers:[],
+    }
+
+    markDone(ticket)
+
+    const onDisk = readFileSync(filepath, 'utf8')
+    t.ok(
+        onDisk.includes('**Status:** done'),
+        'status set to done'
+    )
+    t.equal(
+        onDisk.includes('- [ ]'),
+        false,
+        'no unchecked items remain'
+    )
+    t.equal(ticket.status, 'done', 'in-memory status')
+})
+
+test('markDone keeps on-disk edits missing from ticket.body', t => {
+    const dir = tmp()
+    const filepath = join(dir, '01-merged.md')
+    const scanned = [
+        '# Test ticket',
+        '',
+        '**Status:** ready-for-agent',
+        '',
+        '- [ ] first item',
+    ].join('\n')
+    // Simulates the merge bringing the agent's own edits into
+    // the ticket file after the ticket was scanned.
+    const merged = [
+        '# Test ticket',
+        '',
+        '**Status:** ready-for-agent',
+        '',
+        '- [x] first item',
+        '- [ ] a new later item',
+    ].join('\n')
+    writeFileSync(filepath, merged)
+
+    const ticket:Ticket = {
+        num:1,
+        slug:'merged',
+        filename:'01-merged.md',
+        filepath,
+        body:scanned,
+        status:'ready-for-agent',
+        blockers:[],
+    }
+
+    markDone(ticket)
+
+    const onDisk = readFileSync(filepath, 'utf8')
+    t.ok(
+        onDisk.includes('- [x] first item'),
+        'merged checked item preserved'
+    )
+    t.ok(
+        onDisk.includes('- [x] a new later item'),
+        'new item from disk also checked'
+    )
+    t.ok(
+        !onDisk.includes('- [ ] first item'),
+        'stale scanned body was not written back'
     )
 })
 

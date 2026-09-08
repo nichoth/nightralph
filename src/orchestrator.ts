@@ -143,33 +143,150 @@ export function findReadyTickets (
     })
 }
 
-export const COMPLETED_RE = /^\[x\]\s+(.+)$/i
+// Matches an agent-reported completed item. Agents echo items
+// as markdown checklist lines (`- [x] item`) as often as bare
+// `[x] item` lines, so the bullet prefix is optional.
+export const COMPLETED_RE = /^\s*[-*+]?\s*\[x\]\s+(.+)$/i
 export const TOOL_USE_RE = /^\[[\w.]+\]/
+
+// Matches one checklist line in a ticket file: optional indent
+// and bullet, the `[ ]` / `[x]` box, and the item text.
+const CHECKBOX_RE = /^(\s*[-*+] )\[( |x|X)\]( .*)$/
+
+// The unchecked-box variant, used for the actual flip to [x].
+const UNCHECKED_BOX_RE = /^(\s*[-*+] )\[( )\]/
+
+// Normalizes checklist text for matching: agents echo an item as
+// one logical line while ticket files wrap items across lines,
+// so compare with whitespace runs collapsed, case-insensitively.
+function normalizeItemText (s:string):string {
+    return s.replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+// Drops an optional markdown bullet/checkbox prefix so items match
+// whether or not the caller already stripped the `[x]` marker.
+function stripCheckboxPrefix (s:string):string {
+    return s.replace(/^\s*[-*+]?\s*\[[ xX]\]\s+/, '')
+}
+
+type ParsedItem = { start:number; text:string }
+
+// Parses the checklist items out of a ticket body. An item is its
+// checkbox line plus any immediately following indented lines
+// (wrapped text), so items written across multiple lines can be
+// matched by their full text. Code fences are skipped.
+function parseChecklistItems (
+    lines:string[]
+):ParsedItem[] {
+    const items:ParsedItem[] = []
+    let inFence = false
+    let i = 0
+    while (i < lines.length) {
+        if (/^\s*```/.test(lines[i])) {
+            inFence = !inFence
+            i++
+            continue
+        }
+        if (inFence) {
+            i++
+            continue
+        }
+        const m = lines[i].match(CHECKBOX_RE)
+        if (!m) {
+            i++
+            continue
+        }
+        const start = i
+        let text = m[3]
+        i++
+        while (
+            i < lines.length &&
+            /^\s+\S/.test(lines[i]) &&
+            !CHECKBOX_RE.test(lines[i])
+        ) {
+            text += ' ' + lines[i].trim()
+            i++
+        }
+        items.push({
+            start,
+            text:normalizeItemText(text),
+        })
+    }
+    return items
+}
 
 export function checkItems (
     ticket:Ticket,
     completedItems:string[]
 ):void {
     if (completedItems.length === 0) return
-    let body = ticket.body
-    for (const item of completedItems) {
-        const escaped = item.replace(
-            /[.*+?^${}()|[\]\\]/g, '\\$&'
-        )
-        body = body.replace(
-            new RegExp(
-                `- \\[ \\] ${escaped}`,
-                'i'
-            ),
-            `- [x] ${item}`
-        )
+    // Read from disk: a merge or respawn may have changed the
+    // file since the ticket was scanned, and writing the stale
+    // body would drop those edits.
+    let body:string
+    try {
+        body = readFileSync(ticket.filepath, 'utf8')
+    } catch {
+        body = ticket.body
     }
+    const wanted = new Set(
+        completedItems.map(item =>
+            normalizeItemText(stripCheckboxPrefix(item))
+        )
+    )
+    const lines = body.split('\n')
+    let changed = false
+    for (const item of parseChecklistItems(lines)) {
+        if (!wanted.has(item.text)) continue
+        const flipped = lines[item.start].replace(
+            UNCHECKED_BOX_RE,
+            '$1[x]'
+        )
+        if (flipped !== lines[item.start]) {
+            lines[item.start] = flipped
+            changed = true
+        }
+    }
+    if (!changed) return
+    body = lines.join('\n')
     writeFileSync(ticket.filepath, body)
     ticket.body = body
 }
 
+// Checks off every remaining unchecked item in a ticket body,
+// ignoring fenced code blocks.
+function checkAllItems (body:string):string {
+    const lines = body.split('\n')
+    let inFence = false
+    for (let i = 0; i < lines.length; i++) {
+        if (/^\s*```/.test(lines[i])) {
+            inFence = !inFence
+            continue
+        }
+        if (inFence) continue
+        lines[i] = lines[i].replace(
+            UNCHECKED_BOX_RE,
+            '$1[x]'
+        )
+    }
+    return lines.join('\n')
+}
+
 export function markDone (ticket:Ticket):void {
-    const updated = ticket.body.replace(
+    // Re-read from disk: the merge may have brought the agent's
+    // own edits to the ticket file into the repo, and writing
+    // the body scanned at startup would drop them.
+    let body:string
+    try {
+        body = readFileSync(ticket.filepath, 'utf8')
+    } catch {
+        body = ticket.body
+    }
+    // A done ticket's items are complete by definition, so check
+    // off anything the agent did not report instead of leaving
+    // the file claiming done with unchecked items.
+    body = checkAllItems(body)
+    const updated = body.replace(
         /\*\*Status:\*\*\s*.+/i,
         '**Status:** done'
     )
@@ -741,10 +858,21 @@ export function spawnAgent (opts:{
         null
 
     const completedItems:string[] = []
+    const seenItems = new Set<string>()
 
     function collectCompleted (text:string):void {
-        const match = text.match(COMPLETED_RE)
-        if (match) completedItems.push(match[1])
+        // Reported items arrive as one multi-line text block
+        // (claude), as drained single lines (pi), or as raw
+        // lines (other providers); matching per line covers all
+        // three, including summaries with several [x] lines.
+        for (const line of text.split('\n')) {
+            const match = line.match(COMPLETED_RE)
+            if (!match) continue
+            const item = match[1].trim()
+            if (!item || seenItems.has(item)) continue
+            seenItems.add(item)
+            completedItems.push(item)
+        }
     }
 
     const rl = createInterface({ input:proc.stdout })
