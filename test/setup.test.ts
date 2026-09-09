@@ -271,6 +271,49 @@ test('setup with tracker:local copies local markdown template', t => {
     )
 })
 
+test('local ticket publishing uses the runnable status convention', t => {
+    const {
+        projectDir,
+    } = makeTempProject()
+
+    setup({
+        bundledSkillsDir:join(process.cwd(), 'src', 'skills'),
+        docsTemplatesDir:join(
+            process.cwd(), 'src', 'docs-templates'
+        ),
+        projectDir,
+        tracker:'local',
+    })
+
+    const skill = readFileSync(
+        join(
+            projectDir, '.agents', 'skills', 'to-tickets',
+            'SKILL.md'
+        ),
+        'utf8'
+    )
+    const templateStart = skill.indexOf(
+        '<local-ticket-template>'
+    )
+    const templateEnd = skill.indexOf(
+        '</local-ticket-template>'
+    )
+    const localTemplate = skill.slice(templateStart, templateEnd)
+    t.ok(
+        localTemplate.includes('**Status:** ready-for-agent'),
+        'published local tickets should be runnable'
+    )
+
+    const tracker = readFileSync(
+        join(projectDir, 'docs', 'agents', 'issue-tracker.md'),
+        'utf8'
+    )
+    t.ok(
+        tracker.includes('**Status:**'),
+        'tracker docs should describe the runnable status syntax'
+    )
+})
+
 test('setup with tracker:github copies github template', t => {
     const {
         projectDir, bundledSkillsDir, docsTemplatesDir,
