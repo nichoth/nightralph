@@ -642,6 +642,7 @@ test('runWavesIsolated - two independent tickets ' +
                 logsDir,
                 featureName:'test-feature',
                 conflictStrategy:'respawn',
+                testCmd:'true',
             })
 
             t.equal(
@@ -751,6 +752,7 @@ test('runWavesIsolated - a failed ticket is not re-run ' +
                 featureName:'test-feature-no-rerun',
                 conflictStrategy:'respawn',
                 retries:0,
+                testCmd:'true',
             })
 
             t.equal(
@@ -967,6 +969,7 @@ async t => {
                 logsDir,
                 featureName:'test-feature-noop',
                 conflictStrategy:'respawn',
+                testCmd:'true',
             })
 
             t.equal(
@@ -1037,6 +1040,7 @@ async t => {
                 logsDir,
                 featureName:'test-feature-dirty',
                 conflictStrategy:'respawn',
+                testCmd:'true',
             })
 
             t.equal(
@@ -1116,6 +1120,7 @@ test('runWavesIsolated - agent killed at the timeout keeps ' +
                 logsDir,
                 featureName:'test-feature-timeout',
                 conflictStrategy:'respawn',
+                testCmd:'true',
             })
 
             t.equal(
@@ -1189,6 +1194,7 @@ test('runWavesIsolated - worktrees removed after successful merge',
                     logsDir,
                     featureName:'test-feature-cleanup',
                     conflictStrategy:'respawn',
+                    testCmd:'true',
                 })
 
                 t.equal(
@@ -1277,6 +1283,7 @@ test('runWavesIsolated - two-wave scenario with dependency',
                     logsDir,
                     featureName:'test-feature-waves',
                     conflictStrategy:'respawn',
+                    testCmd:'true',
                 })
 
                 t.equal(
@@ -1354,6 +1361,7 @@ test('runWavesIsolated - progress.md committed after each ticket',
                     logsDir,
                     featureName:'test-feature-progress',
                     conflictStrategy:'respawn',
+                    testCmd:'true',
                 })
 
                 // Check git log for progress commits
@@ -1445,6 +1453,7 @@ test('runWavesIsolated - failed ticket worktree is cleaned up',
                     logsDir,
                     featureName:'test-feature-fail',
                     conflictStrategy:'respawn',
+                    testCmd:'true',
                 })
 
                 t.equal(
@@ -1523,6 +1532,7 @@ test('runWavesIsolated - dirty worktree from failed agent is ' +
                 conflictStrategy:'respawn',
                 retryDelay:0,
                 retries:0,
+                testCmd:'true',
             })
 
             t.equal(
@@ -1607,6 +1617,7 @@ test('runWavesIsolated - re-run after a prior failed run does not ' +
                 logsDir,
                 featureName:'test-feature-retry',
                 conflictStrategy:'respawn',
+                testCmd:'true',
             })
 
             t.equal(
@@ -1671,6 +1682,7 @@ test('runWavesIsolated returns allDone:false when agent fails',
                     logsDir,
                     featureName:'test-fail-result',
                     conflictStrategy:'respawn',
+                    testCmd:'true',
                 })
                 t.equal(
                     result.allDone, false,
@@ -1735,6 +1747,7 @@ test('runWavesIsolated - conflictStrategy stop halts on first failure',
                     logsDir,
                     featureName:'test-feature-stop',
                     conflictStrategy:'stop',
+                    testCmd:'true',
                 })
 
                 t.equal(
@@ -1805,6 +1818,7 @@ test('runWavesIsolated - conflictStrategy stop cleans up ' +
                 logsDir,
                 featureName:'test-feature-stop-cleanup',
                 conflictStrategy:'stop',
+                testCmd:'true',
             })
 
             t.equal(
@@ -1920,6 +1934,7 @@ test('runWavesIsolated - agent succeeds but merge conflicts, ' +
                 logsDir,
                 featureName:'test-feature-conflict',
                 conflictStrategy:'respawn',
+                testCmd:'true',
             })
 
             t.equal(
@@ -2041,6 +2056,7 @@ async t => {
                 logsDir,
                 featureName:'test-feature-respawn',
                 conflictStrategy:'respawn',
+                testCmd:'true',
             })
 
             t.equal(
@@ -2119,6 +2135,7 @@ test('runWavesIsolated - respawned agent fails, ' +
                 logsDir,
                 featureName:'test-feature-respawn-fail',
                 conflictStrategy:'respawn',
+                testCmd:'true',
             })
 
             t.equal(
@@ -2916,6 +2933,7 @@ test('runWavesIsolated - a failed pi agent is retried with ' +
                 conflictStrategy:'respawn',
                 retries:2,
                 retryDelay:0,
+                testCmd:'true',
             })
 
             t.equal(result.allDone, true, 'run reports all done')
@@ -2986,6 +3004,7 @@ test('runWavesIsolated - retries:0 disables the retry so the ' +
                 featureName:'test-feature',
                 conflictStrategy:'respawn',
                 retries:0,
+                testCmd:'true',
             })
 
             t.equal(result.allDone, false, 'run is not all done')
@@ -3042,6 +3061,7 @@ test('runWavesIsolated - omitting retryDelay does not ' +
                 featureName:'test-feature',
                 conflictStrategy:'respawn',
                 retries:2,
+                testCmd:'true',
             })
             const elapsed = Date.now() - started
 
@@ -3325,6 +3345,7 @@ test('runWavesIsolated - agent that deletes its worktree ' +
                 conflictStrategy:'respawn',
                 retries:0,
                 retryDelay:0,
+                testCmd:'true',
             })
 
             t.equal(
@@ -3439,6 +3460,7 @@ async t => {
                 logsDir,
                 featureName:'test-feature',
                 conflictStrategy:'respawn',
+                testCmd:'true',
             })
 
             t.equal(

@@ -1279,6 +1279,7 @@ test(
                 null,
                 10,
                 logsDir,
+                'true',
                 display,
             )
         } finally {
@@ -1337,6 +1338,7 @@ test(
                 null,
                 10,
                 logsDir,
+                'true',
                 display,
             )
         } finally {
@@ -1425,6 +1427,7 @@ test(
                 null,
                 10,
                 logsDir,
+                'true',
                 display,
             )
         } finally {

@@ -972,7 +972,8 @@ test('renderPrompt includes spec and ticket', t => {
         num:1,
         filename:'01-thing.md',
     })
-    const prompt = renderPrompt('spec body here', ticket)
+    const prompt = renderPrompt('spec body here', ticket,
+        { testCmd:'npm test' })
     t.ok(
         prompt.includes('spec body here'),
         'contains spec'
@@ -987,6 +988,27 @@ test('renderPrompt includes spec and ticket', t => {
     )
 })
 
+test('renderPrompt instructs agent to use /tdd',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderPrompt(
+            'spec body here', ticket,
+            { testCmd:'npm test' }
+        )
+        t.ok(
+            prompt.includes('/tdd'),
+            'prompt mentions /tdd'
+        )
+        t.ok(
+            prompt.includes('Testing Decisions'),
+            'points the agent at the spec seams'
+        )
+    }
+)
+
 test('renderPrompt instructs agent to report [x] items',
     t => {
         const ticket = makeTicket({
@@ -994,7 +1016,8 @@ test('renderPrompt instructs agent to report [x] items',
             filename:'01-thing.md',
         })
         const prompt = renderPrompt(
-            'spec body here', ticket
+            'spec body here', ticket,
+            { testCmd:'npm test' }
         )
         t.ok(
             prompt.includes('[x]'),
@@ -1003,7 +1026,7 @@ test('renderPrompt instructs agent to report [x] items',
     }
 )
 
-test('renderPrompt includes the test command when given',
+test('renderPrompt includes the test command',
     t => {
         const ticket = makeTicket({
             num:1,
@@ -1017,30 +1040,6 @@ test('renderPrompt includes the test command when given',
             prompt.includes('npm run check'),
             'names the test command'
         )
-        t.ok(
-            prompt.includes('Testing Decisions'),
-            'points the agent at the spec seams'
-        )
-    })
-
-test('renderPrompt omits test rules when no test command',
-    t => {
-        const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
-        })
-        const withNull = renderPrompt(
-            'spec body here', ticket, { testCmd:null }
-        )
-        const withNothing = renderPrompt(
-            'spec body here', ticket
-        )
-        t.equal(withNull, withNothing,
-            'null and omitted produce the same prompt')
-        t.ok(
-            !withNull.includes('Testing Decisions'),
-            'no test rules without a command'
-        )
     })
 
 test('renderPrompt contains git push rule', t => {
@@ -1048,7 +1047,8 @@ test('renderPrompt contains git push rule', t => {
         num:1,
         filename:'01-thing.md',
     })
-    const prompt = renderPrompt('spec body', ticket)
+    const prompt = renderPrompt('spec body', ticket,
+        { testCmd:'npm test' })
     t.ok(
         prompt.toLowerCase().includes('git push'),
         'prompt mentions git push'
@@ -1061,7 +1061,8 @@ test('renderPrompt contains current directory rule',
             num:1,
             filename:'01-thing.md',
         })
-        const prompt = renderPrompt('spec body', ticket)
+        const prompt = renderPrompt('spec body', ticket,
+            { testCmd:'npm test' })
         t.ok(
             prompt.toLowerCase().includes(
                 'current directory'
@@ -1199,6 +1200,7 @@ test('runWaves completes unblocked tickets', async t => {
         await runWaves(
             tickets, 'test spec',
             MOCK_PASS, null, 10, logsDir,
+            'npm test',
         )
     } finally {
         process.chdir(originalCwd)
@@ -1257,6 +1259,7 @@ test('runWaves respects dependency order', async t => {
         await runWaves(
             tickets, 'test spec',
             MOCK_PASS, null, 10, logsDir,
+            'npm test',
         )
     } finally {
         process.chdir(originalCwd)
@@ -1299,6 +1302,7 @@ test('runWaves stops dependents when agent fails', async t => {
         await runWaves(
             tickets, 'test spec',
             MOCK_FAIL, null, 10, logsDir,
+            'npm test',
         )
     } finally {
         process.chdir(originalCwd)
@@ -1337,6 +1341,7 @@ test('runWaves writes log files', async t => {
         await runWaves(
             tickets, 'test spec',
             MOCK_PASS, null, 10, logsDir,
+            'npm test',
         )
     } finally {
         process.chdir(originalCwd)
@@ -1374,6 +1379,7 @@ test('runWaves skips already-done tickets', async t => {
         await runWaves(
             tickets, 'test spec',
             MOCK_PASS, null, 10, logsDir,
+            'npm test',
         )
     } finally {
         process.chdir(originalCwd)
@@ -1429,6 +1435,7 @@ test('runWaves handles parallel independent tickets', async t => {
         await runWaves(
             tickets, 'test spec',
             MOCK_PASS, null, 10, logsDir,
+            'npm test',
         )
     } finally {
         process.chdir(originalCwd)
@@ -1468,6 +1475,7 @@ test('runWaves returns allDone:true when all tickets ' +
         const result = await runWaves(
             tickets, 'test spec',
             MOCK_PASS, null, 10, logsDir,
+            'npm test',
         )
         t.equal(
             result.allDone, true,
@@ -1498,6 +1506,7 @@ test('runWaves returns allDone:false when agent fails',
             const result = await runWaves(
                 tickets, 'test spec',
                 MOCK_FAIL, null, 10, logsDir,
+                'npm test',
             )
             t.equal(
                 result.allDone, false,
@@ -1546,6 +1555,7 @@ test('runWaves - a failed ticket is not re-run in a later wave',
             await runWaves(
                 tickets, 'test spec',
                 MOCK_FAIL_TICKET_01, null, 10, logsDir,
+                'npm test',
                 undefined, undefined, undefined, 0,
             )
 
@@ -2370,6 +2380,7 @@ test('runWaves retries a failed agent with escalated effort',
             const result = await runWaves(
                 tickets, 'test spec',
                 join(binDir, 'pi'), null, 10, logsDir,
+                'npm test',
                 undefined, undefined, undefined, 1, 0,
             )
             t.equal(result.allDone, true, 'all done after retry')
@@ -2411,6 +2422,7 @@ test('runWaves waits retryDelay seconds before a retry', async t => {
         const result = await runWaves(
             tickets, 'test spec',
             join(binDir, 'pi'), null, 10, logsDir,
+            'npm test',
             undefined, undefined, undefined, 1, 1,
         )
         const elapsed = Date.now() - start
@@ -2830,7 +2842,7 @@ test('AC2.3 - Effort resets to starting level for each ' +
             repoName,
             conflictStrategy:'respawn',
             progressPath:'.scratch/feature/progress.md',
-            testCmd:null,
+            testCmd:'true',
             effort:'medium' as EffortLevel,
             retries:1,
             retryDelay:0,

@@ -338,23 +338,8 @@ export function stripSpecSection (
 export function renderPrompt (
     specBody:string,
     ticket:Ticket,
-    opts:{ testCmd?:string|null } = {}
+    opts:{ testCmd:string }
 ):string {
-    const testRules = opts.testCmd ?
-        [
-            '- Work test-first. For each checklist ' +
-                'item, write a failing test at the ' +
-                'seams named in the spec\'s Testing ' +
-                'Decisions section, then write only ' +
-                'enough code to make it pass.',
-            `- Run \`${opts.testCmd}\` before ` +
-                'committing. Do not commit with failing ' +
-                'tests. The orchestrator runs the same ' +
-                'command after you exit and rejects the ' +
-                'ticket if it fails.',
-        ] :
-        []
-
     return [
         '---- SPEC CONTEXT ----',
         specBody,
@@ -365,7 +350,7 @@ export function renderPrompt (
         '',
         '---- AGENT INSTRUCTIONS ----',
         'You are an autonomous coding agent. ' +
-            'Implement the ticket.',
+            'Implement the ticket using /tdd.',
         '',
         'Follow these rules:',
         '- Read the files directly relevant to the ' +
@@ -373,7 +358,17 @@ export function renderPrompt (
         '- Do NOT research external APIs or services ' +
             'via web search. Use the spec and ticket ' +
             'body as your sole reference for API shapes.',
-        ...testRules,
+        '- Use /tdd for every checklist item. For ' +
+            'each item, write a failing test at the ' +
+            'seams named in the spec\'s Testing ' +
+            'Decisions section, then write only ' +
+            'enough code to make it pass, then ' +
+            'refactor.',
+        `- Run \`${opts.testCmd}\` before ` +
+            'committing. Do not commit with failing ' +
+            'tests. The orchestrator runs the same ' +
+            'command after you exit and rejects the ' +
+            'ticket if it fails.',
         '- Do NOT read or modify files outside ' +
             'your current directory (the worktree).',
         '- Do NOT run git push.',
@@ -1031,7 +1026,8 @@ export function spawnAgent (opts:{
 
 export function dryRun (
     tickets:Array<Ticket>,
-    specBody:string
+    specBody:string,
+    testCmd:string
 ):void {
     listTickets(tickets)
 
@@ -1058,7 +1054,8 @@ export function dryRun (
             `(${firstReady[0].filename}):\n`
         )
         console.log(
-            renderPrompt(specBody, firstReady[0])
+            renderPrompt(specBody, firstReady[0],
+                { testCmd })
         )
     }
 }
@@ -1069,7 +1066,7 @@ export function dryRunIsolated (opts:{
     repoName:string
     conflictStrategy:MergeConflictStrategy
     progressPath:string
-    testCmd?:string|null
+    testCmd:string
     effort?:EffortLevel
     retries?:number
     retryDelay?:number
@@ -1122,7 +1119,7 @@ export function dryRunIsolated (opts:{
             'respawn (re-run agent on conflict)' :
             'stop (stop merging on conflict)'
     console.log(
-        `\nTest command: ${opts.testCmd ?? '(none)'}`
+        `\nTest command: ${opts.testCmd}`
     )
     console.log(
         `Effort:       ${opts.effort ?? '(provider default)'}`
@@ -1192,7 +1189,7 @@ async function respawnAndRetryMerge (opts:{
     model:string|null
     timeout:number
     logsDir:string
-    testCmd?:string|null
+    testCmd:string
     maxTurns?:number
     onLine?:(msg:string) => void
 }):Promise<boolean> {
@@ -1249,23 +1246,21 @@ async function respawnAndRetryMerge (opts:{
         return false
     }
 
-    if (opts.testCmd) {
-        const passed = await runTestGate({
-            testCmd:opts.testCmd,
-            ticket:opts.ticket,
-            worktreePath:opts.worktreePath,
-            timeout:opts.timeout,
-            logsDir:opts.logsDir,
-            log,
-            registry:runningAgents,
-        })
-        if (!passed) {
-            log(
-                `  ${opts.ticket.filename}: tests failed ` +
-                'after conflict respawn; not merging'
-            )
-            return false
-        }
+    const passed = await runTestGate({
+        testCmd:opts.testCmd,
+        ticket:opts.ticket,
+        worktreePath:opts.worktreePath,
+        timeout:opts.timeout,
+        logsDir:opts.logsDir,
+        log,
+        registry:runningAgents,
+    })
+    if (!passed) {
+        log(
+            `  ${opts.ticket.filename}: tests failed ` +
+            'after conflict respawn; not merging'
+        )
+        return false
     }
 
     const mergeResult = await mergeBranch(
@@ -1358,7 +1353,7 @@ type TicketAttemptOpts = {
     model:string|null
     timeout:number
     logsDir:string
-    testCmd?:string|null
+    testCmd:string
     maxTurns?:number
     effort?:EffortLevel
     d:Display
@@ -1451,28 +1446,26 @@ async function runTicketAttempt (
         }
     }
 
-    if (opts.testCmd) {
-        const passed = await runTestGate({
-            testCmd:opts.testCmd,
-            ticket,
-            worktreePath:worktree.worktreePath,
-            timeout:opts.timeout,
-            logsDir:opts.logsDir,
-            attempt:opts.attempt,
-            log:(msg) => d.log(msg),
-            registry:runningAgents,
-        })
-        if (!passed) {
-            await removeWorktreeQuietly(
-                worktree.worktreePath, d
-            )
-            return {
-                kind:'failed',
-                reason:'tests',
-                branchName:worktree.branchName,
-                exitCode:1,
-                completedItems:agentResult.completedItems,
-            }
+    const passed = await runTestGate({
+        testCmd:opts.testCmd,
+        ticket,
+        worktreePath:worktree.worktreePath,
+        timeout:opts.timeout,
+        logsDir:opts.logsDir,
+        attempt:opts.attempt,
+        log:(msg) => d.log(msg),
+        registry:runningAgents,
+    })
+    if (!passed) {
+        await removeWorktreeQuietly(
+            worktree.worktreePath, d
+        )
+        return {
+            kind:'failed',
+            reason:'tests',
+            branchName:worktree.branchName,
+            exitCode:1,
+            completedItems:agentResult.completedItems,
         }
     }
 
@@ -1577,6 +1570,7 @@ export async function runWaves (
     model:string|null,
     timeout:number,
     logsDir:string,
+    testCmd:string,
     display?:Display,
     maxTurns?:number,
     effort?:EffortLevel,
@@ -1625,7 +1619,8 @@ export async function runWaves (
 
         const results = await Promise.allSettled(
             ready.map(async t => {
-                const prompt = renderPrompt(specBody, t)
+                const prompt = renderPrompt(specBody, t,
+                    { testCmd })
                 const label = t.filename.replace(
                     /\.md$/, ''
                 )
@@ -1760,7 +1755,7 @@ export async function runWavesIsolated (opts:{
     featureName:string
     conflictStrategy:MergeConflictStrategy
     display?:Display
-    testCmd?:string|null
+    testCmd:string
     maxTurns?:number
     // starting effort level; unset = provider's default
     effort?:EffortLevel
@@ -1802,10 +1797,6 @@ export async function runWavesIsolated (opts:{
         `nightralph: start ${opts.featureName}`,
         d,
     )
-
-    if (!opts.testCmd) {
-        d.log('  Test gate disabled: no test command')
-    }
 
     let totalCompleted = 0
     let waveNum = 0

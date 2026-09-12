@@ -60,8 +60,7 @@ Small orchestrator that runs a single-agent session per issue.
   `'stop'`)
 - `--test-cmd <cmd>` -- command run in each worktree
   after the agent exits; non-zero exit rejects the
-  ticket. Omitted = auto-detect `npm test` from
-  `package.json` at the repo root; `""` = disabled
+  ticket. Defaults to `npm test`
 - `--max-turns <n>` -- max agentic turns per ticket,
   forwarded as `--max-turns` to claude; other
   providers warn and skip (codex and pi do not
@@ -201,16 +200,18 @@ Small orchestrator that runs a single-agent session per issue.
   lines (used by Display integration); for `pi`, writes
   prompt to a temp file and passes `@path` as a positional
   arg instead of piping to stdin
-- **renderPrompt(specBody, ticket, opts?)**: `opts.testCmd`
-  adds test-first rules to the prompt and names the
-  command the orchestrator will run after the agent exits
+- **renderPrompt(specBody, ticket, opts)**: `opts.testCmd`
+  is required; the prompt always includes /tdd
+  instructions and names the test command the
+  orchestrator will run after the agent exits
 - **stripSpecSection(specBody, heading)**: drops one
   markdown section from a spec, ignoring headings
   inside code fences; the CLI uses it to omit
   `User Stories` from the per-ticket prompt
-- **runWaves(...)**: accepts optional `display`
-  parameter (`Display` interface); defaults to
-  `createDisplay()` when omitted; trailing optional
+- **runWaves(...)**: requires `testCmd` (string);
+  accepts optional `display` parameter (`Display`
+  interface), defaults to `createDisplay()` when
+  omitted; trailing optional
   `effort`, `retries`, and `retryDelay` -- a
   non-zero exit is retried up to `retries` times
   with an escalated level and exponential backoff
@@ -224,8 +225,9 @@ Small orchestrator that runs a single-agent session per issue.
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
-  updates; accepts optional `display`, `testCmd`,
-  `effort`, `retries`, and `retryDelay` in opts
+  updates; requires `testCmd` (string); accepts
+  optional `display`, `effort`, `retries`, and
+  `retryDelay` in opts
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; a failed attempt
   (non-zero exit, exit 0 with no new commits, or a red
@@ -257,9 +259,8 @@ Small orchestrator that runs a single-agent session per issue.
   `checkTicket` + `saveProgress` with `done:false`;
   merge failures are also recorded with `done:false`;
   respawned agents receive `renderMergePrompt`
-  instead of `renderPrompt`; when `testCmd` is set, a
-  red suite in the worktree records the ticket
-  `done:false`, writes
+  instead of `renderPrompt`; a red test suite in the
+  worktree records the ticket `done:false`, writes
   `<logsDir>/<ticket>.test.log`, and never queues the
   branch for merge -- this holds both after the first
   agent run and after a merge-conflict respawn;
@@ -267,8 +268,8 @@ Small orchestrator that runs a single-agent session per issue.
   agent to its worktree directory and prohibit
   `git push`
 - **dryRunIsolated(opts)**: prints simulated wave order
-  with worktree paths and branch names; accepts
-  `testCmd`, `effort`, `retries`, and `retryDelay`
+  with worktree paths and branch names; requires
+  `testCmd`; accepts `effort`, `retries`, and `retryDelay`
   in opts and prints them
 
 ### testcmd module (`src/testcmd.ts`)

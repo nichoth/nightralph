@@ -116,9 +116,7 @@ yargs(hideBin(process.argv))
                 describe:'Command run in each worktree ' +
                     'after the agent exits; non-zero ' +
                     'exit rejects the ticket. Defaults ' +
-                    'to "npm test" when package.json ' +
-                    'has a test script. Pass "" to ' +
-                    'disable.',
+                    'to "npm test".',
             })
             .option('X', {
                 type:'boolean',
@@ -259,13 +257,11 @@ async function runExecute (argv:{
 
     const logsDir = join(dirname(dir), 'logs')
     const timeout = argv.timeout ?? 900
-    const testCmd = argv.testCmd === undefined ?
-        detectTestCmd(
-            isGitRepo() ?
-                getRepoRoot() :
-                process.cwd()
-        ) :
-        (argv.testCmd || null)
+    const testCmd = argv.testCmd || detectTestCmd(
+        isGitRepo() ?
+            getRepoRoot() :
+            process.cwd()
+    ) || 'npm test'
     const featureName = extractFeatureName(spec)
     const conflictStrategy = argv.stopOnConflict ?
         'stop' :
@@ -289,7 +285,7 @@ async function runExecute (argv:{
                 retryDelay:argv.retryDelay,
             })
         } else {
-            dryRun(tickets, specBody)
+            dryRun(tickets, specBody, testCmd)
         }
         return
     }
@@ -329,6 +325,7 @@ async function runExecute (argv:{
             argv.provider, argv.model ?? null,
             timeout,
             logsDir,
+            testCmd,
             display,
             argv.maxTurns,
             argv.effort,
