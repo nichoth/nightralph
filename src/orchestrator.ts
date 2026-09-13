@@ -354,7 +354,13 @@ export function renderPrompt (
         '',
         'Follow these rules:',
         '- Read the files directly relevant to the ' +
-            'ticket before writing code.',
+            'ticket before writing code. Also read any ' +
+            'AGENTS.md in or above the directories you ' +
+            'will touch, plus CONTEXT.md and the ' +
+            'relevant docs/adr/ entries if they exist. ' +
+            'If they do not exist, proceed silently.',
+        '- Work ONLY on this ticket. Do not fix ' +
+            'unrelated problems you notice.',
         '- Do NOT research external APIs or services ' +
             'via web search. Use the spec and ticket ' +
             'body as your sole reference for API shapes.',
@@ -364,18 +370,41 @@ export function renderPrompt (
             'Decisions section, then write only ' +
             'enough code to make it pass, then ' +
             'refactor.',
-        `- Run \`${opts.testCmd}\` before ` +
-            'committing. Do not commit with failing ' +
-            'tests. The orchestrator runs the same ' +
-            'command after you exit and rejects the ' +
-            'ticket if it fails.',
+        '- While iterating, run only the tests ' +
+            'relevant to what you changed. Run ' +
+            `\`${opts.testCmd}\` in full once, as the ` +
+            'final gate before your last commit. Do ' +
+            'not commit with failing tests. The ' +
+            'orchestrator runs the same command after ' +
+            'you exit and rejects the ticket if it ' +
+            'fails.',
+        '- If the project has a lint script, run it ' +
+            'and fix what it reports.',
+        '- INTEGRITY: never delete, skip, weaken, or ' +
+            'write tautological tests to force a green ' +
+            'result. Only report a checklist item done ' +
+            'when its real tests genuinely pass. If an ' +
+            'item cannot be completed honestly, leave ' +
+            'it unchecked and say what blocked you.',
         '- Do NOT read or modify files outside ' +
             'your current directory (the worktree).',
         '- Do NOT run git push.',
-        '- Commit your work when finished.',
+        '- Commit after each checklist item, and make ' +
+            'sure everything is committed when finished.',
         '- After completing each checklist item in the ' +
             'ticket, print a line: [x] <item text> ' +
             '(matching the checklist text exactly).',
+        '- Before your final commit, record reusable ' +
+            'learnings in the nearest AGENTS.md (in or ' +
+            'above the directories you modified; ' +
+            'prefer that over the repo root). Good ' +
+            'additions: module conventions, gotchas, ' +
+            'files that must change together, how to ' +
+            'test that area, environment requirements. ' +
+            'Do NOT add ticket-specific details or ' +
+            'temporary debugging notes. Only write ' +
+            'when you have knowledge that would help ' +
+            'future work in that directory.',
         '',
     ].join('\n')
 }
@@ -405,8 +434,11 @@ export function renderMergePrompt (
         'Your task:',
         '1. Find and resolve all conflict markers ' +
             '(<<<<<<< / ======= / >>>>>>>).',
-        '2. Make sure the code compiles and tests pass.',
-        '3. Commit the resolved files.',
+        '2. When AGENTS.md or other docs conflict, ' +
+            'keep both sides\' additions rather than ' +
+            'picking one.',
+        '3. Make sure the code compiles and tests pass.',
+        '4. Commit the resolved files.',
         '',
         'Do NOT re-implement the ticket from scratch.',
         'Do NOT read or modify files outside your ' +

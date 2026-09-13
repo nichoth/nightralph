@@ -55,6 +55,20 @@ export function writeManagedSection (
     }
 }
 
+function ensureGitAttribute (
+    filePath:string,
+    line:string,
+):void {
+    if (!existsSync(filePath)) {
+        writeFileSync(filePath, line + '\n')
+        return
+    }
+    const existing = readFileSync(filePath, 'utf8')
+    if (existing.split('\n').includes(line)) return
+    const sep = existing.endsWith('\n') ? '' : '\n'
+    writeFileSync(filePath, existing + sep + line + '\n')
+}
+
 export function checkGhAuth ():boolean {
     try {
         execSync('gh auth status', { stdio:'ignore' })
@@ -181,6 +195,12 @@ export function setup (opts:SetupOpts):void {
     const agentsPath = join(projectDir, 'AGENTS.md')
     writeManagedSection(agentsPath, managedContent)
     console.log('\n  AGENTS.md (updated)')
+
+    ensureGitAttribute(
+        join(projectDir, '.gitattributes'),
+        'AGENTS.md merge=union',
+    )
+    console.log('  .gitattributes (AGENTS.md merge=union)')
 
     console.log(
         `\nSource: ${upstream.repo} @ ${upstream.commit}`

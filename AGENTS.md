@@ -43,7 +43,11 @@ Small orchestrator that runs a single-agent session per issue.
   from `.claude/skills/` to `.agents/skills/` for
   every skill; always overwrites `issue-tracker.md`
   (not skip-if-exists like other templates); always
-  writes AGENTS.md to the target project
+  writes AGENTS.md to the target project; always
+  ensures `.gitattributes` contains
+  `AGENTS.md merge=union` (appends to an existing
+  file, never duplicates the line) so parallel
+  agents' AGENTS.md additions merge without conflict
 
 ### CLI (`src/index.ts`)
 - `nightralph init` -- prompts for tracker
@@ -203,7 +207,14 @@ Small orchestrator that runs a single-agent session per issue.
 - **renderPrompt(specBody, ticket, opts)**: `opts.testCmd`
   is required; the prompt always includes /tdd
   instructions and names the test command the
-  orchestrator will run after the agent exits
+  orchestrator will run after the agent exits; it
+  also tells the agent to read nearby AGENTS.md,
+  CONTEXT.md and docs/adr/ first, to commit after
+  each checklist item, to never weaken tests or
+  fake `[x]` lines (leave the item unchecked and
+  say what blocked it), and to record reusable
+  learnings in the nearest AGENTS.md before the
+  final commit
 - **stripSpecSection(specBody, heading)**: drops one
   markdown section from a spec, ignoring headings
   inside code fences; the CLI uses it to omit
@@ -221,7 +232,9 @@ Small orchestrator that runs a single-agent session per issue.
   later waves
 - **renderMergePrompt(specBody, ticket)**: prompt for
   a respawned agent resolving a merge conflict; tells
-  the agent to resolve conflict markers, not re-implement
+  the agent to resolve conflict markers, not
+  re-implement, and to keep both sides' additions
+  when AGENTS.md or other docs conflict
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress

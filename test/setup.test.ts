@@ -551,3 +551,65 @@ test(
         )
     }
 )
+
+test('setup writes AGENTS.md merge=union to .gitattributes',
+    t => {
+        const {
+            projectDir, bundledSkillsDir, docsTemplatesDir,
+        } = makeTempProject()
+        setup({
+            bundledSkillsDir,
+            docsTemplatesDir,
+            projectDir,
+            tracker:'local',
+        })
+        const attrs = readFileSync(
+            join(projectDir, '.gitattributes'), 'utf8'
+        )
+        t.ok(
+            attrs.split('\n').includes('AGENTS.md merge=union'),
+            'contains the union merge rule'
+        )
+    }
+)
+
+test('setup preserves existing .gitattributes entries', t => {
+    const {
+        projectDir, bundledSkillsDir, docsTemplatesDir,
+    } = makeTempProject()
+    const attrsPath = join(projectDir, '.gitattributes')
+    writeFileSync(attrsPath, '*.png binary\n')
+    setup({
+        bundledSkillsDir,
+        docsTemplatesDir,
+        projectDir,
+        tracker:'local',
+    })
+    const lines = readFileSync(attrsPath, 'utf8').split('\n')
+    t.ok(lines.includes('*.png binary'), 'keeps existing rule')
+    t.ok(
+        lines.includes('AGENTS.md merge=union'),
+        'adds the union merge rule'
+    )
+})
+
+test('setup does not duplicate the .gitattributes rule', t => {
+    const {
+        projectDir, bundledSkillsDir, docsTemplatesDir,
+    } = makeTempProject()
+    const opts = {
+        bundledSkillsDir,
+        docsTemplatesDir,
+        projectDir,
+        tracker:'local' as const,
+    }
+    setup(opts)
+    setup(opts)
+    const lines = readFileSync(
+        join(projectDir, '.gitattributes'), 'utf8'
+    ).split('\n')
+    const count = lines.filter(
+        l => l === 'AGENTS.md merge=union'
+    ).length
+    t.equal(count, 1, 'rule appears exactly once')
+})

@@ -1095,6 +1095,93 @@ test('renderMergePrompt contains current directory rule', t => {
     )
 })
 
+test('renderPrompt asks agent to record learnings in AGENTS.md',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderPrompt('spec body', ticket,
+            { testCmd:'npm test' })
+        t.ok(
+            prompt.includes('AGENTS.md'),
+            'prompt mentions AGENTS.md'
+        )
+        t.ok(
+            prompt.toLowerCase().includes('nearest'),
+            'prefers the nearest AGENTS.md over the root'
+        )
+    })
+
+test('renderPrompt contains test integrity rule', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderPrompt('spec body', ticket,
+        { testCmd:'npm test' })
+    const lower = prompt.toLowerCase()
+    t.ok(
+        lower.includes('weaken'),
+        'forbids weakening tests to get green'
+    )
+    t.ok(
+        lower.includes('leave it unchecked'),
+        'tells the agent not to fake [x] lines'
+    )
+})
+
+test('renderPrompt asks agent to read nearby docs first',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderPrompt('spec body', ticket,
+            { testCmd:'npm test' })
+        t.ok(
+            prompt.includes('CONTEXT.md'),
+            'prompt mentions CONTEXT.md'
+        )
+        t.ok(
+            prompt.includes('docs/adr/'),
+            'prompt mentions ADRs'
+        )
+    })
+
+test('renderPrompt asks for a commit per checklist item',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderPrompt('spec body', ticket,
+            { testCmd:'npm test' })
+        t.ok(
+            prompt.toLowerCase().includes(
+                'commit after each checklist item'
+            ),
+            'prompt asks for per-item commits'
+        )
+    })
+
+test('renderMergePrompt keeps both sides of doc conflicts',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const prompt = renderMergePrompt('spec body', ticket)
+        t.ok(
+            prompt.includes('AGENTS.md'),
+            'merge prompt mentions AGENTS.md'
+        )
+        t.ok(
+            prompt.toLowerCase().includes('both sides'),
+            'merge prompt says to keep both sides'
+        )
+    })
+
 // -- spawnAgent --
 
 test('spawnAgent with cwd option runs in that directory',
