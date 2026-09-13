@@ -38,6 +38,7 @@ so they can't drift as long as you install the skills with this package.
     + [Claude Sonnet 5](#claude-sonnet-5)
     + [`pi` + OpenRouter model](#pi--openrouter-model)
     + [`codex` + Luna](#codex--luna)
+    + [`codex` + Terra](#codex--terra)
 
 <!-- tocstop -->
 
