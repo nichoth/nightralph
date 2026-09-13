@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import {
     createWriteStream,
     mkdirSync,
@@ -10,6 +10,9 @@ import {
 import { tmpdir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
 import { createInterface } from 'node:readline'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
 import {
     getRepoRoot,
     getRepoName,
@@ -70,6 +73,45 @@ async function removeWorktreeQuietly (
         d.log(
             '  Failed to remove worktree ' +
             `${worktreePath}: ` +
+            formatErrorMessage(err)
+        )
+    }
+}
+
+async function commitTicketFiles (
+    repoRoot:string,
+    tickets:Ticket[],
+    d:Display
+):Promise<void> {
+    const paths = tickets.map(t => t.filepath)
+    if (paths.length === 0) return
+    try {
+        await execFileAsync(
+            'git',
+            ['add', '--force', ...paths],
+            { cwd:repoRoot }
+        )
+        try {
+            await execFileAsync(
+                'git',
+                ['diff', '--cached', '--quiet',
+                    '--', ...paths],
+                { cwd:repoRoot }
+            )
+            return
+        } catch {
+            // staged files differ from HEAD
+        }
+        await execFileAsync(
+            'git',
+            ['commit', '-m',
+                'nightralph: update ticket checklists',
+                '--', ...paths],
+            { cwd:repoRoot }
+        )
+    } catch (err) {
+        d.log(
+            '  Failed to commit ticket updates: ' +
             formatErrorMessage(err)
         )
     }
@@ -2009,6 +2051,15 @@ export async function runWavesIsolated (opts:{
         }
 
         if (successfulBranches.length > 0) {
+            await commitTicketFiles(
+                repoRoot,
+                successfulBranches
+                    .map(sb =>
+                        ticketsByNum.get(sb.ticketNum)!
+                    ),
+                d,
+            )
+
             const mergeResult = await mergeWave({
                 repoRoot,
                 baseBranch,
