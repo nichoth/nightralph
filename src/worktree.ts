@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
-import { basename, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import type { Ticket } from './orchestrator.js'
 
@@ -16,7 +16,12 @@ export function getRepoRoot ():string {
 }
 
 export function getRepoName ():string {
-    return basename(getRepoRoot())
+    const commonDir = execFileSync(
+        'git',
+        ['rev-parse', '--git-common-dir'],
+        { encoding:'utf8' }
+    ).trim()
+    return basename(dirname(resolve(commonDir)))
 }
 
 export function getCurrentBranch ():string {

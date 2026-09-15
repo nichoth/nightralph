@@ -77,7 +77,7 @@ function makeTestTicket (overrides?:Partial<Ticket>):Ticket {
 
 // -- getRepoName --
 
-test('getRepoName returns the directory basename', t => {
+test('getRepoName returns the main repo basename', t => {
     const dir = initTempRepo()
     const originalCwd = process.cwd()
     try {
@@ -86,12 +86,46 @@ test('getRepoName returns the directory basename', t => {
         t.equal(
             basename(dir),
             name,
-            'should return current repo basename'
+            'should return main repo basename'
         )
     } finally {
         process.chdir(originalCwd)
     }
 })
+
+test(
+    'getRepoName returns the main repo name from a ' +
+    'linked worktree',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+        const ticket = makeTestTicket({
+            num:99, slug:'name-check',
+        })
+
+        const { worktreePath } = await createWorktree({
+            repoRoot,
+            repoName,
+            baseBranch,
+            ticket,
+        })
+
+        const originalCwd = process.cwd()
+        try {
+            process.chdir(worktreePath)
+            const name = getRepoName()
+            t.equal(
+                name,
+                repoName,
+                'should return main repo name, not ' +
+                'worktree directory name'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    }
+)
 
 // -- getCurrentBranch --
 
