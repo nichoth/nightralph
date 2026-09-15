@@ -300,7 +300,7 @@ keep the machine awake, but the display can still go dark.
 #### Claude Opus 4.6
 
 ```sh
-caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort high
+caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort low
 ```
 
 #### Claude Sonnet 5
@@ -312,12 +312,8 @@ caffeinate -i npx nightralph claude -m claude-sonnet-5 --effort high
 #### `pi` + OpenRouter model
 
 ```sh
-caffeinate -i npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --thinking high
+caffeinate -i npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --effort high
 ```
-
-##### pi `--thinking` levels
-
-`off`, `minimal`, `low`, `medium`,`high`, and `xhigh`
 
 #### `codex` + Luna
 
@@ -328,5 +324,11 @@ caffeinate -i npx nightralph codex -m gpt-5.6-luna --effort high
 #### `codex` + Terra
 
 ```sh
-caffeinate -i npx nightralph codex -m gpt-5.6-luna --effort medium
+caffeinate -i npx nightralph codex -m gpt-5.6-terra --effort medium
+```
+
+#### Mercury
+
+```sh
+caffeinate -i npx nightralph pi -m openrouter/inception/mercury-2.5 --effort high
 ```
