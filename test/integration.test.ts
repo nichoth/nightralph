@@ -1600,7 +1600,7 @@ test('runWavesIsolated - re-run after a prior failed run does not ' +
         // Simulate a branch left over from a prior failed run,
         // with no worktree currently attached to it.
         execSync(
-            `git branch ${repoName}/01-retry`,
+            `git branch ${repoName}--01-retry`,
             { cwd:projectDir }
         )
 
@@ -1786,7 +1786,7 @@ test('runWavesIsolated - conflictStrategy stop cleans up ' +
     'worktrees for un-merged branches', async t => {
     const projectDir = initTempGitRepo()
     const repoName = projectDir.split('/').pop()
-    const failBranch = `${repoName}/01-first`
+    const failBranch = `${repoName}--01-first`
     const fakeGit = installMergeFailingGit(failBranch)
     try {
         const issuesDir = join(projectDir, 'issues')
@@ -1906,7 +1906,7 @@ test('runWavesIsolated - agent succeeds but merge conflicts, ' +
     'ticket stays ready-for-agent', async t => {
     const projectDir = initTempGitRepo()
     const repoName = projectDir.split('/').pop()
-    const failBranch = `${repoName}/01-conflict`
+    const failBranch = `${repoName}--01-conflict`
     const fakeGit = installMergeFailingGit(failBranch)
     try {
         const issuesDir = join(projectDir, 'issues')
@@ -2024,7 +2024,7 @@ test('runWavesIsolated - two-branch wave, second branch ' +
 async t => {
     const projectDir = initTempGitRepo()
     const repoName = projectDir.split('/').pop()
-    const failBranch = `${repoName}/02-second`
+    const failBranch = `${repoName}--02-second`
     const fakeGit = installMergeFailOnceGit(failBranch)
     try {
         const issuesDir = join(projectDir, 'issues')
@@ -2107,7 +2107,7 @@ test('runWavesIsolated - respawned agent fails, ' +
     'ticket stays ready-for-agent', async t => {
     const projectDir = initTempGitRepo()
     const repoName = projectDir.split('/').pop()
-    const failBranch = `${repoName}/01-conflict`
+    const failBranch = `${repoName}--01-conflict`
     const fakeGit = installMergeFailingGit(failBranch)
     try {
         const issuesDir = join(projectDir, 'issues')
@@ -2181,7 +2181,7 @@ test('runWavesIsolated - test gate runs again after a ' +
     'merge-conflict respawn', async t => {
     const projectDir = initTempGitRepo()
     const repoName = projectDir.split('/').pop()
-    const failBranch = `${repoName}/01-first`
+    const failBranch = `${repoName}--01-first`
     const fakeGit = installMergeFailOnceGit(failBranch)
     // Lives outside the worktree so the gate cannot dirty
     // the tree it is judging.

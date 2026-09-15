@@ -19,6 +19,7 @@ import {
     getCurrentBranch,
     createWorktree,
     removeWorktree,
+    buildBranchName,
     hasNewCommits,
     isDirty,
     commitDirty,
@@ -1157,8 +1158,9 @@ export function dryRunIsolated (opts:{
         )
         for (const t of ready) {
             const num = String(t.num).padStart(2, '0')
-            const branchName =
-                `${opts.repoName}/${num}-${t.slug}`
+            const branchName = buildBranchName(
+                opts.repoName, t
+            )
             const worktreePath =
                 `../${opts.repoName}.${num}-${t.slug}`
             console.log(`    worktree: ${worktreePath}`)

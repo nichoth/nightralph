@@ -1751,7 +1751,7 @@ test('dryRunIsolated shows worktree paths and branches',
                 'includes worktree path'
             )
             t.ok(
-                fullOutput.includes('myapp/01-add-auth'),
+                fullOutput.includes('myapp--01-add-auth'),
                 'includes branch name'
             )
             t.ok(

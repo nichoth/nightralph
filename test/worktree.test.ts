@@ -13,6 +13,7 @@ import {
     getCurrentBranch,
     createWorktree,
     removeWorktree,
+    buildBranchName,
     listWorktrees,
     hasNewCommits,
     isDirty,
@@ -192,7 +193,7 @@ test(
             ticket,
         })
 
-        const expectedBranch = `${repoName}/02-add-logging`
+        const expectedBranch = `${repoName}--02-add-logging`
         t.equal(
             result.branchName,
             expectedBranch,
@@ -258,7 +259,7 @@ test(
         ).toString()
         t.ok(
             worktreeBranches.includes(
-                `${repoName}/03-test-branch`
+                `${repoName}--03-test-branch`
             ),
             'worktree should have the feature branch'
         )
@@ -273,7 +274,7 @@ test(
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
         const ticket = makeTestTicket({ num:7, slug:'retry-branch' })
-        const branchName = `${repoName}/07-retry-branch`
+        const branchName = `${repoName}--07-retry-branch`
 
         // Simulate a leftover branch from a previous failed run,
         // with no worktree attached to it.
@@ -331,6 +332,56 @@ test(
         t.ok(
             existsSync(second.worktreePath),
             'worktree directory should exist after re-creation'
+        )
+    }
+)
+
+test(
+    'buildBranchName uses -- separator',
+    t => {
+        const ticket = makeTestTicket({
+            num:1, slug:'clean-prefix',
+        })
+        const name = buildBranchName('myrepo', ticket)
+        t.equal(
+            name,
+            'myrepo--01-clean-prefix',
+            'uses -- separator'
+        )
+    }
+)
+
+test(
+    'createWorktree succeeds when repoName matches ' +
+    'an existing branch',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+
+        execSync(
+            `git branch ${repoName}`,
+            { cwd:repoRoot }
+        )
+
+        const ticket = makeTestTicket({
+            num:9, slug:'ref-conflict',
+        })
+        const result = await createWorktree({
+            repoRoot,
+            repoName,
+            baseBranch,
+            ticket,
+        })
+
+        t.equal(
+            result.branchName,
+            `${repoName}--09-ref-conflict`,
+            'uses flat separator to avoid conflict'
+        )
+        t.ok(
+            existsSync(result.worktreePath),
+            'worktree created successfully'
         )
     }
 )

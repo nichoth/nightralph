@@ -350,13 +350,19 @@ Small orchestrator that runs a single-agent session per issue.
 
 ### worktree module (`src/worktree.ts`)
 - **Exposes**: `getRepoRoot()`, `getRepoName()`,
-  `getCurrentBranch()`, `createWorktree(opts)`,
+  `getCurrentBranch()`, `buildBranchName(repoRoot,
+  repoName, ticket)`, `createWorktree(opts)`,
   `removeWorktree(path, opts?)`,
   `listWorktrees(repoRoot)`
+- **buildBranchName**: returns the branch name for a
+  ticket as `<repo>--<num>-<slug>`; uses `--`
+  instead of `/` to avoid the git ref hierarchy
+  conflict that prevents creating
+  `refs/heads/X/Y` when `refs/heads/X` exists
 - **createWorktree**: creates a git worktree in a
   sibling directory named
-  `<repo>.<num>-<slug>` on branch
-  `<repo>/<num>-<slug>`; calls are serialized
+  `<repo>.<num>-<slug>` on a branch named by
+  `buildBranchName`; calls are serialized
   module-wide via a promise chain so concurrent
   invocations do not race on shared git refs;
   before creating, cleans up any stale worktree at

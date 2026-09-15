@@ -49,6 +49,14 @@ async function branchExists (
     }
 }
 
+export function buildBranchName (
+    repoName:string,
+    ticket:Ticket
+):string {
+    const num = String(ticket.num).padStart(2, '0')
+    return `${repoName}--${num}-${ticket.slug}`
+}
+
 async function createWorktreeNow (
     opts:{
         repoRoot:string
@@ -58,9 +66,7 @@ async function createWorktreeNow (
     }
 ):Promise<{ worktreePath:string; branchName:string }> {
     const { repoRoot, repoName, baseBranch, ticket } = opts
-    const branchName = `${repoName}/${String(
-        ticket.num
-    ).padStart(2, '0')}-${ticket.slug}`
+    const branchName = buildBranchName(repoName, ticket)
     const worktreePath = join(
         repoRoot,
         '..',
