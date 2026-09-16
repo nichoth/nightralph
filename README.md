@@ -39,6 +39,7 @@ so they can't drift as long as you install the skills with this package.
     + [`pi` + OpenRouter model](#pi--openrouter-model)
     + [`codex` + Luna](#codex--luna)
     + [`codex` + Terra](#codex--terra)
+    + [Mercury](#mercury)
 
 <!-- tocstop -->
 
