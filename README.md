@@ -165,6 +165,7 @@ Flags:
 | `--effort <level>` | no | -- | Starting effort/reasoning level. Each provider has its own ladder: `claude` supports `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--effort`); `codex` supports `low`, `medium`, `high` (forwarded as `-c model_reasoning_effort=<level>`); `pi` supports `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--thinking`). Omitted = provider default. Each retry steps up from here (see `--retries`) |
 | `--retries <n>` | no | `3` | Extra attempts per ticket after a failed run. Each retry starts from a fresh worktree and raises the effort level one rung (see Notes). `0` disables retries |
 | `--retry-delay <n>` | no | `30` | Seconds to wait before the first retry; doubles each further retry (30s, 60s, 120s, ...). `0` disables the wait |
+| `--concurrency <n>` | no | `5` | Max agents running at once within a wave. A wave with more ready tickets than this runs them through a pool: as one agent exits, the next ticket starts. The wave still finishes fully before its branches are merged |
 
 
 **Notes**:
@@ -310,6 +311,12 @@ caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort low
 caffeinate -i npx nightralph claude -m claude-sonnet-5 --effort high
 ```
 
+#### Claude Fable 5.1
+
+```sh
+caffeinate -i npx nightralph claude -m claude-fable-5-1 --effort low
+```
+
 #### `pi` + OpenRouter model
 
 ```sh
@@ -328,7 +335,7 @@ caffeinate -i npx nightralph codex -m gpt-5.6-luna --effort high
 caffeinate -i npx nightralph codex -m gpt-5.6-terra --effort medium
 ```
 
-#### Mercury
+#### Mercury + `pi`
 
 ```sh
 caffeinate -i npx nightralph pi -m openrouter/inception/mercury-2.5 --effort high

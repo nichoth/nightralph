@@ -1145,6 +1145,7 @@ export function dryRunIsolated (opts:{
     effort?:EffortLevel
     retries?:number
     retryDelay?:number
+    concurrency?:number
 }):void {
     listTickets(opts.tickets)
 
@@ -1206,6 +1207,10 @@ export function dryRunIsolated (opts:{
     console.log(
         'Retry delay:  ' +
         `${opts.retryDelay ?? 0}s`
+    )
+    console.log(
+        'Concurrency:  ' +
+        `${opts.concurrency ?? DEFAULT_CONCURRENCY}`
     )
     console.log(
         `\nMerge strategy: ${strategyDesc}`
@@ -1369,6 +1374,44 @@ export const DEFAULT_RETRIES = 3
 // doubles the wait so a provider outage is waited out instead
 // of burning every attempt back to back.
 export const DEFAULT_RETRY_DELAY = 30
+
+// Max agents running at the same time within a wave.
+export const DEFAULT_CONCURRENCY = 5
+
+// Runs `fn` over `items`, at most `limit` at a time, and
+// resolves with the results in item order. Each call is
+// settled individually so one rejection does not stop
+// the others.
+export async function runPool<T, R> (
+    items:T[],
+    limit:number,
+    fn:(item:T) => Promise<R>,
+):Promise<PromiseSettledResult<R>[]> {
+    const size = Math.max(1, Math.floor(limit))
+    const results:PromiseSettledResult<R>[] = new Array(
+        items.length
+    )
+    let next = 0
+    async function worker ():Promise<void> {
+        while (next < items.length) {
+            const i = next++
+            try {
+                results[i] = {
+                    status:'fulfilled',
+                    value:await fn(items[i]),
+                }
+            } catch (reason) {
+                results[i] = { status:'rejected', reason }
+            }
+        }
+    }
+    const workers = Array.from(
+        { length:Math.min(size, items.length) },
+        () => worker()
+    )
+    await Promise.all(workers)
+    return results
+}
 
 export function retryDelayFor (base:number, attempt:number):number {
     return base * 2 ** (attempt - 2)
@@ -1652,12 +1695,14 @@ export async function runWaves (
     effort?:EffortLevel,
     retries?:number,
     retryDelay?:number,
+    concurrency?:number,
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
     const d = display ?? createDisplay()
     const maxAttempts = (retries ?? DEFAULT_RETRIES) + 1
     const delayBase = retryDelay ?? 0
+    const poolSize = concurrency ?? DEFAULT_CONCURRENCY
     const providerName = basename(agentCmd)
     const isKnown = providerName in EFFORT_LADDERS
     let totalWaves = 0
@@ -1693,8 +1738,8 @@ export async function runWaves (
             })),
         )
 
-        const results = await Promise.allSettled(
-            ready.map(async t => {
+        const results = await runPool(
+            ready, poolSize, async t => {
                 const prompt = renderPrompt(specBody, t,
                     { testCmd })
                 const label = t.filename.replace(
@@ -1757,7 +1802,7 @@ export async function runWaves (
                     })
                 }
                 return { ticket:t, result }
-            })
+            }
         )
 
         let waveCompleted = 0
@@ -1839,12 +1884,15 @@ export async function runWavesIsolated (opts:{
     retries?:number
     // seconds to wait before the first retry; default 30
     retryDelay?:number
+    // max agents running at once within a wave; default 5
+    concurrency?:number
 }):Promise<{ allDone:boolean }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
     const d = opts.display ?? createDisplay()
     const retries = opts.retries ?? DEFAULT_RETRIES
     const retryDelay = opts.retryDelay ?? 0
+    const poolSize = opts.concurrency ?? DEFAULT_CONCURRENCY
     let totalWaves = 0
     for (const _ of simulateWaves(opts.tickets)) totalWaves++
 
@@ -1904,11 +1952,12 @@ export async function runWavesIsolated (opts:{
             })),
         )
 
-        // Each ticket runs its own attempt loop in parallel.
-        // Progress is recorded afterwards, sequentially, so
-        // commits on the base branch never race each other.
-        const outcomes = await Promise.all(
-            ready.map(t => runTicketAttempts({
+        // Each ticket runs its own attempt loop, at most
+        // `poolSize` at a time. Progress is recorded
+        // afterwards, sequentially, so commits on the base
+        // branch never race each other.
+        const settled = await runPool(
+            ready, poolSize, t => runTicketAttempts({
                 ticket:t,
                 repoRoot,
                 repoName,
@@ -1924,7 +1973,15 @@ export async function runWavesIsolated (opts:{
                 retries,
                 retryDelay,
                 d,
-            }))
+            })
+        )
+        // runTicketAttempts never rejects (a throw inside an
+        // attempt becomes an 'error' outcome), so every
+        // result here is fulfilled.
+        const outcomes:TicketOutcome[] = settled.map(r =>
+            r.status === 'fulfilled' ?
+                r.value :
+                { kind:'error', error:r.reason }
         )
 
         let waveCompleted = 0

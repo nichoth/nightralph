@@ -16,6 +16,7 @@ import {
     ALL_EFFORT_LEVELS,
     DEFAULT_RETRIES,
     DEFAULT_RETRY_DELAY,
+    DEFAULT_CONCURRENCY,
     killRunningAgents,
     type EffortLevel,
 } from './orchestrator.js'
@@ -150,6 +151,12 @@ yargs(hideBin(process.argv))
                 describe:'Seconds to wait before the ' +
                     'first retry; doubles each further ' +
                     'retry. 0 disables the wait.',
+            })
+            .option('concurrency', {
+                type:'number',
+                default:DEFAULT_CONCURRENCY,
+                describe:'Max agents running at once ' +
+                    'within a wave.',
             }),
         async argv => {
             await runExecute({
@@ -169,6 +176,8 @@ yargs(hideBin(process.argv))
                 retries:argv.retries as
                     number|undefined,
                 retryDelay:argv.retryDelay as
+                    number|undefined,
+                concurrency:argv.concurrency as
                     number|undefined,
             })
         }
@@ -211,6 +220,7 @@ async function runExecute (argv:{
     effort?:EffortLevel
     retries?:number
     retryDelay?:number
+    concurrency?:number
 }):Promise<void> {
     const { dir, spec } = await resolveIssuesDir(
         argv.spec
@@ -283,6 +293,7 @@ async function runExecute (argv:{
                 effort:argv.effort,
                 retries:argv.retries,
                 retryDelay:argv.retryDelay,
+                concurrency:argv.concurrency,
             })
         } else {
             dryRun(tickets, specBody, testCmd)
@@ -318,6 +329,7 @@ async function runExecute (argv:{
             effort:argv.effort,
             retries:argv.retries,
             retryDelay:argv.retryDelay,
+            concurrency:argv.concurrency,
         })
     } else {
         result = await runWaves(
@@ -331,6 +343,7 @@ async function runExecute (argv:{
             argv.effort,
             argv.retries,
             argv.retryDelay,
+            argv.concurrency,
         )
     }
 

@@ -3501,3 +3501,97 @@ async t => {
         rmSync(projectDir, { recursive:true, force:true })
     }
 })
+
+// -- concurrency --
+
+const MOCK_CONCURRENT = join(
+    process.cwd(), 'test', 'mock-agent-concurrent.js'
+)
+
+test('runWavesIsolated never runs more agents than ' +
+    'concurrency allows', async t => {
+    const projectDir = initTempGitRepo()
+    const originalCwd = process.cwd()
+    const originalEnv = process.env.MOCK_CONCURRENCY_DIR
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        const markerDir = join(tmpdir(), `nr-markers-${Date.now()}`)
+        mkdirSync(issuesDir)
+        mkdirSync(markerDir, { recursive:true })
+
+        for (let i = 1; i <= 5; i++) {
+            writeFileSync(
+                join(issuesDir, `0${i}-t${i}.md`),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+        }
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        process.chdir(projectDir)
+        process.env.MOCK_CONCURRENCY_DIR = markerDir
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_CONCURRENT,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                testCmd:'true',
+                retries:0,
+                concurrency:2,
+            })
+        } finally {
+            process.chdir(originalCwd)
+        }
+
+        const peaks = readFileSync(join(markerDir, 'peaks'), 'utf8')
+            .trim().split('\n').map(Number)
+        t.equal(peaks.length, 5, 'every agent ran')
+        const peak = Math.max(...peaks)
+        t.ok(peak <= 2,
+            `peak concurrent agents ${peak} is at most 2`)
+        t.ok(peak >= 2, 'the cap was actually used, not 1')
+        rmSync(markerDir, { recursive:true, force:true })
+    } finally {
+        if (originalEnv === undefined) {
+            delete process.env.MOCK_CONCURRENCY_DIR
+        } else {
+            process.env.MOCK_CONCURRENCY_DIR = originalEnv
+        }
+        cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - --concurrency is accepted and shown ' +
+    'in dry-run output', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        writeFileSync(
+            join(issuesDir, '01-alpha.md'),
+            makeTicketBody({ status:'ready-for-agent' }),
+        )
+        commitAll(projectDir, 'add tickets')
+
+        const { code, stdout, stderr } = await spawnCli([
+            MOCK_AGENT,
+            '--spec', FEAT,
+            '--dry-run',
+            '--concurrency', '2',
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, `exit code 0 (stderr: ${stderr})`)
+        t.ok(
+            stdout.includes('Concurrency:  2'),
+            'dry-run output shows the concurrency cap',
+        )
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})

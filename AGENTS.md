@@ -81,6 +81,8 @@ Small orchestrator that runs a single-agent session per issue.
 - `--retry-delay <n>` -- seconds to wait before the
   first retry; doubles each further retry; default
   `DEFAULT_RETRY_DELAY` (30); `0` disables the wait
+- `--concurrency <n>` -- max agents running at once
+  within a wave; default `DEFAULT_CONCURRENCY` (5)
 - `--dry-run` -- shows wave order without running;
   auto-detects git repo and shows worktree/branch
   layout when inside one
@@ -94,6 +96,7 @@ Small orchestrator that runs a single-agent session per issue.
   `COMPLETED_RE`, `EFFORT_LADDERS`, `ProviderName`,
   `EffortLevel`, `ALL_EFFORT_LEVELS`,
   `DEFAULT_RETRIES`, `DEFAULT_RETRY_DELAY`,
+  `DEFAULT_CONCURRENCY`, `runPool(items, limit, fn)`,
   `escalateEffort(provider, level?)`, `retryDelayFor(base, attempt)`,
   `scanTickets(dir)`,
   `findReadyTickets(tickets)`, `checkItems(ticket, items)`,
@@ -160,6 +163,12 @@ Small orchestrator that runs a single-agent session per issue.
   and `branchName?:string`; `'worktree-error'`
   carries only `error:unknown`
 - **DEFAULT_RETRY_DELAY**: exported as `30` (seconds)
+- **DEFAULT_CONCURRENCY**: exported as `5`
+- **runPool(items, limit, fn)**: runs `fn` over `items`
+  with at most `limit` in flight at once (clamped to a
+  minimum of 1) and resolves with
+  `PromiseSettledResult[]` in item order; one rejection
+  never stops the others
 - **retryDelayFor(base, attempt)**: returns
   `base * 2^(attempt-2)` -- e.g. `retryDelayFor(30,2)`
   is 30, `retryDelayFor(30,3)` is 60,
@@ -223,7 +232,10 @@ Small orchestrator that runs a single-agent session per issue.
   accepts optional `display` parameter (`Display`
   interface), defaults to `createDisplay()` when
   omitted; trailing optional
-  `effort`, `retries`, and `retryDelay` -- a
+  `effort`, `retries`, `retryDelay`, and
+  `concurrency` (default `DEFAULT_CONCURRENCY`; at
+  most that many agents run at once within a wave,
+  via `runPool`) -- a
   non-zero exit is retried up to `retries` times
   with an escalated level and exponential backoff
   (timeouts are not retried); a per-run `failedNums`
@@ -239,8 +251,11 @@ Small orchestrator that runs a single-agent session per issue.
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
   updates; requires `testCmd` (string); accepts
-  optional `display`, `effort`, `retries`, and
-  `retryDelay` in opts
+  optional `display`, `effort`, `retries`,
+  `retryDelay`, and `concurrency` in opts; a wave
+  with more ready tickets than `concurrency` runs
+  them through `runPool`, so the wave still finishes
+  fully before any branch is merged
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; a failed attempt
   (non-zero exit, exit 0 with no new commits, or a red
@@ -282,8 +297,8 @@ Small orchestrator that runs a single-agent session per issue.
   `git push`
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; requires
-  `testCmd`; accepts `effort`, `retries`, and `retryDelay`
-  in opts and prints them
+  `testCmd`; accepts `effort`, `retries`, `retryDelay`,
+  and `concurrency` in opts and prints them
 
 ### testcmd module (`src/testcmd.ts`)
 - **Exposes**: `TestResult`,

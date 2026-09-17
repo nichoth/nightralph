@@ -21,6 +21,7 @@ import {
     renderMergePrompt,
     stripSpecSection,
     runWaves,
+    DEFAULT_CONCURRENCY,
     spawnAgent,
     dryRun,
     dryRunIsolated,
@@ -1934,6 +1935,61 @@ test('dryRunIsolated prints 0s retry delay when omitted',
         )
     })
 
+test('dryRunIsolated prints the concurrency cap', t => {
+    const tickets:Array<Ticket> = [
+        makeTicket({
+            num:1,
+            filename:'01-test.md',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+    ]
+
+    const output:Array<string> = []
+    const originalLog = console.log
+    console.log = function (msg:unknown) {
+        output.push(String(msg))
+    }
+
+    let withDefault = ''
+    let withValue = ''
+    try {
+        dryRunIsolated({
+            tickets,
+            specBody:'test spec body',
+            repoName:'myapp',
+            conflictStrategy:'respawn',
+            progressPath:'.scratch/f/progress.md',
+            testCmd:'npm test',
+        })
+        withDefault = output.join('\n')
+        output.length = 0
+        dryRunIsolated({
+            tickets,
+            specBody:'test spec body',
+            repoName:'myapp',
+            conflictStrategy:'respawn',
+            progressPath:'.scratch/f/progress.md',
+            testCmd:'npm test',
+            concurrency:2,
+        })
+        withValue = output.join('\n')
+    } finally {
+        console.log = originalLog
+    }
+
+    t.ok(
+        withDefault.includes(
+            `Concurrency:  ${DEFAULT_CONCURRENCY}`
+        ),
+        'prints the default when concurrency is omitted'
+    )
+    t.ok(
+        withValue.includes('Concurrency:  2'),
+        'prints the given concurrency'
+    )
+})
+
 // -- US-003: provider adapter argument construction --
 
 test('getProviderArgs - claude provider adds stream flags',
@@ -3210,3 +3266,67 @@ test(
         }
     }
 )
+
+// -- concurrency --
+
+const MOCK_CONCURRENT = join(
+    process.cwd(), 'test', 'mock-agent-concurrent.js'
+)
+
+function readPeak (dir:string):number {
+    const lines = readFileSync(join(dir, 'peaks'), 'utf8')
+        .trim().split('\n')
+    return Math.max(...lines.map(Number))
+}
+
+test('runWaves never runs more agents than concurrency ' +
+    'allows', async t => {
+    const base = initTempGitRepo()
+    const issuesDir = join(base, 'issues')
+    const logsDir = join(base, 'logs')
+    const markerDir = join(base, 'markers')
+    mkdirSync(issuesDir)
+    mkdirSync(markerDir)
+
+    for (let i = 1; i <= 5; i++) {
+        writeFileSync(
+            join(issuesDir, `0${i}-t${i}.md`),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+    }
+
+    const tickets = scanTickets(issuesDir)
+
+    const originalCwd = process.cwd()
+    const originalEnv = process.env.MOCK_CONCURRENCY_DIR
+    process.chdir(base)
+    process.env.MOCK_CONCURRENCY_DIR = markerDir
+    try {
+        await runWaves(
+            tickets, 'test spec',
+            MOCK_CONCURRENT, null, 10, logsDir,
+            'npm test',
+            undefined, undefined, undefined,
+            0, 0,
+            2,
+        )
+    } finally {
+        process.chdir(originalCwd)
+        if (originalEnv === undefined) {
+            delete process.env.MOCK_CONCURRENCY_DIR
+        } else {
+            process.env.MOCK_CONCURRENCY_DIR = originalEnv
+        }
+    }
+
+    for (const ticket of tickets) {
+        t.equal(ticket.status, 'done',
+            `${ticket.filename} completed`)
+    }
+    const peak = readPeak(markerDir)
+    t.ok(
+        peak <= 2,
+        `peak concurrent agents ${peak} is at most 2`
+    )
+    t.ok(peak >= 2, 'the cap was actually used, not 1')
+})
