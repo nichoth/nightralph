@@ -36,10 +36,11 @@ so they can't drift as long as you install the skills with this package.
   * [Mac OS](#mac-os)
     + [Claude Opus 4.6](#claude-opus-46)
     + [Claude Sonnet 5](#claude-sonnet-5)
+    + [Claude Fable 5.1](#claude-fable-51)
     + [`pi` + OpenRouter model](#pi--openrouter-model)
     + [`codex` + Luna](#codex--luna)
     + [`codex` + Terra](#codex--terra)
-    + [Mercury](#mercury)
+    + [Mercury + `pi`](#mercury--pi)
 
 <!-- tocstop -->
 
