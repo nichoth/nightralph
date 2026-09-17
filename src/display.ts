@@ -113,6 +113,22 @@ export function fitLine (line:string, width:number):string {
     return visible.slice(0, width)
 }
 
+/**
+ * Split a line into rows of at most `width` visible columns,
+ * the way a terminal would wrap it. Short lines keep their
+ * ANSI styling; long lines are wrapped on visible text only,
+ * so `render` can count every row it emits.
+ */
+export function wrapLine (line:string, width:number):Array<string> {
+    const visible = line.replace(ANSI_RE, '')
+    if (visible.length <= width) return [line]
+    const rows:Array<string> = []
+    for (let i = 0; i < visible.length; i += width) {
+        rows.push(visible.slice(i, i + width))
+    }
+    return rows
+}
+
 export function renderDot (status:TicketStatus):string {
     switch (status) {
         case 'pending':
@@ -356,9 +372,12 @@ export class StatusDisplay implements Display {
             0,
             termHeight - 3 - renderedTicketCount,
         )
-        const visibleMessages = this.messages.slice(-logRows)
-        for (const msg of visibleMessages) {
-            output += `${fitLine(msg, width)}\n`
+        const wrapped = this.messages.flatMap(
+            msg => wrapLine(msg, width),
+        )
+        const visibleMessages = wrapped.slice(-logRows)
+        for (const row of visibleMessages) {
+            output += `${row}\n`
         }
         const emptyRows = logRows - visibleMessages.length
         for (let i = 0; i < emptyRows; i++) {

@@ -437,6 +437,50 @@ test('rendered lines never exceed terminal width', t => {
     )
 })
 
+test('long log messages wrap instead of being cut off', t => {
+    const stream = createMockStream()
+    stream.columns = 40
+    const display = new StatusDisplay({
+        stream,
+    })
+
+    display.startWave(1, 1, createTestTickets())
+    stream.clear()
+    display.log('x'.repeat(100))
+
+    const esc = String.fromCharCode(27)
+    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
+    const plain = stream.getOutput().replace(ansiRe, '')
+    const xCount = (plain.match(/x/g) ?? []).length
+    t.equal(xCount, 100, 'every character of the message is rendered')
+    const tooLong = plain.split('\n').filter(l => l.length > 40)
+    t.equal(tooLong.length, 0, 'wrapped rows stay within columns')
+})
+
+test('wrapped log rows still fit the terminal height', t => {
+    const stream = createMockStream()
+    stream.columns = 40
+    // rows=8, 3 tickets -> 2 log rows
+    stream.rows = 8
+    const display = new StatusDisplay({
+        stream,
+    })
+
+    display.startWave(1, 1, createTestTickets())
+    stream.clear()
+    display.log('a'.repeat(100) + 'END')
+
+    const esc = String.fromCharCode(27)
+    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
+    const plain = stream.getOutput().replace(ansiRe, '')
+    const nlCount = (plain.match(/\n/g) ?? []).length
+    t.ok(
+        nlCount <= stream.rows - 1,
+        'newlines (' + nlCount + ') must not exceed rows-1'
+    )
+    t.ok(plain.includes('END'), 'the tail of the message is shown')
+})
+
 // -- Tests for scroll prevention --
 
 test('render output never exceeds termHeight - 1 newlines', t => {

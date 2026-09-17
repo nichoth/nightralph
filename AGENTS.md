@@ -309,7 +309,8 @@ Small orchestrator that runs a single-agent session per issue.
   `PlainDisplay` (class), `createDisplay()`,
   `TicketStatus`, `DisplayTicket`, `WaveState`,
   `DisplayConfig`, `RunProgress`, `ansi`, `color`,
-  `renderDot`, `fitLine(line, width)`
+  `renderDot`, `fitLine(line, width)`,
+  `wrapLine(line, width)`
 - **Display interface**:
   `startWave(waveNum, totalWaves, tickets, progress?,
   remaining?)`,
@@ -325,11 +326,15 @@ Small orchestrator that runs a single-agent session per issue.
   is omitted the percent falls back to per-wave
   (done-in-wave / tickets-in-wave). The orchestrator
   always passes it, derived from `ticket.status`
-- **Guarantees**: `StatusDisplay` clamps every rendered
-  line to `stream.columns - 1` visible characters
-  (`fitLine`) so lines never wrap; a wrapped line would
-  occupy more rows than the erase count and leave
-  stale rows behind on the next render
+- **Guarantees**: `StatusDisplay` never emits a row
+  wider than `stream.columns - 1` visible characters;
+  ticket names are clamped (`fitLine`) and log messages
+  are split into rows (`wrapLine`) so long output is
+  shown in full rather than cut off. A row the terminal
+  wrapped on its own would occupy more rows than the
+  erase count and leave stale rows behind on the next
+  render, so `render` counts wrapped rows itself and
+  the last `logRows` of them are shown
 - **DisplayConfig**: `{ stream }` -- the log message
   area dynamically fills remaining terminal rows after
   the ticket grid and separator
