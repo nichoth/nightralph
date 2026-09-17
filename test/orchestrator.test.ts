@@ -33,6 +33,8 @@ import {
     DEFAULT_RETRY_DELAY,
     DEFAULT_RETRIES,
     ALL_EFFORT_LEVELS,
+    renderFinishSummary,
+    HUMAN_STATUS,
     type Ticket,
     type EffortLevel,
 } from '../src/orchestrator.js'
@@ -3330,3 +3332,118 @@ test('runWaves never runs more agents than concurrency ' +
     )
     t.ok(peak >= 2, 'the cap was actually used, not 1')
 })
+
+test('renderFinishSummary is one line with no human tickets', t => {
+    const tickets = [
+        makeTicket({ num:1, filename:'01-a.md', status:'done' }),
+        makeTicket({
+            num:2, filename:'02-b.md', status:'ready-for-agent',
+        }),
+    ]
+    const out = renderFinishSummary(tickets, 1, new Set([2]))
+    t.equal(out.split('\n').length, 1, 'single line')
+    t.ok(out.includes('1 completed'), 'counts completed')
+    t.ok(out.includes('1 remaining'), 'counts remaining')
+    t.ok(out.includes('1 failed'), 'counts failed')
+    t.ok(!out.includes(HUMAN_STATUS), 'no human section')
+})
+
+test('renderFinishSummary names every ready-for-human ticket', t => {
+    const tickets = [
+        makeTicket({ num:1, filename:'01-a.md', status:'done' }),
+        makeTicket({
+            num:7, filename:'07-secret.md', status:HUMAN_STATUS,
+        }),
+        makeTicket({
+            num:8, filename:'08-staging.md', status:HUMAN_STATUS,
+        }),
+    ]
+    const out = renderFinishSummary(tickets, 1, new Set())
+    t.ok(out.includes('2 need a human'), 'counts human tickets')
+    t.ok(out.includes(HUMAN_STATUS), 'names the status')
+    t.ok(out.includes('07-secret.md'), 'lists first ticket')
+    t.ok(out.includes('08-staging.md'), 'lists second ticket')
+    t.ok(!out.includes('01-a.md'), 'does not list done ticket')
+    t.ok(
+        !/\d+ remaining/.test(out),
+        'no ready-for-agent tickets remain'
+    )
+})
+
+test(
+    'renderFinishSummary lists agent tickets blocked by human ones',
+    t => {
+        const tickets = [
+            makeTicket({
+                num:7, filename:'07-secret.md', status:HUMAN_STATUS,
+            }),
+            makeTicket({
+                num:9,
+                filename:'09-after.md',
+                status:'ready-for-agent',
+                blockers:[7],
+            }),
+            makeTicket({
+                num:10,
+                filename:'10-free.md',
+                status:'ready-for-agent',
+            }),
+        ]
+        const out = renderFinishSummary(tickets, 0, new Set())
+        t.ok(out.includes('2 remaining'), 'counts remaining')
+        t.ok(out.includes('07-secret.md'), 'lists human ticket')
+        const after = out.indexOf('09-after.md')
+        t.ok(after > out.indexOf('07-secret.md'),
+            'blocked ticket listed after the human one')
+        t.ok(!out.includes('10-free.md'),
+            'unblocked ticket is not listed as blocked')
+        t.ok(out.includes('run nightralph again'),
+            'tells the user to rerun')
+    }
+)
+
+test('runWaves with only human tickets logs them and is allDone',
+    async t => {
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-done.md'),
+            makeTicketBody({ status:'done' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-human.md'),
+            makeTicketBody({ status:HUMAN_STATUS })
+        )
+        const tickets = scanTickets(issuesDir)
+        const logs:string[] = []
+        const display = {
+            startWave () {
+                t.fail('no wave should start')
+            },
+            setTicketStatus () {},
+            log (m:string) { logs.push(m) },
+            cleanup () {},
+        }
+
+        const originalCwd = process.cwd()
+        process.chdir(base)
+        try {
+            const result = await runWaves(
+                tickets, 'test spec',
+                MOCK_PASS, null, 10, logsDir,
+                'npm test', display,
+            )
+            t.equal(result.allDone, true,
+                'nothing left for an agent, so allDone')
+        } finally {
+            process.chdir(originalCwd)
+        }
+        const all = logs.join('\n')
+        t.ok(all.includes('02-human.md'),
+            'summary names the human ticket')
+        t.ok(all.includes(HUMAN_STATUS),
+            'summary names the status')
+    }
+)

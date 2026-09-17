@@ -237,6 +237,14 @@ export class StatusDisplay implements Display {
     }
 
     log (message:string):void {
+        // Before the first wave there is no grid to repaint,
+        // so a message would otherwise be dropped. Write it
+        // straight to the stream instead. A later render
+        // never erases these rows, since renderedLines is 0.
+        if (!this.wave) {
+            this.config.stream.write(message + '\n')
+            return
+        }
         for (const line of message.split('\n')) {
             this.messages.push(line)
         }

@@ -1675,6 +1675,75 @@ async function saveProgress (
     }
 }
 
+export const HUMAN_STATUS = 'ready-for-human'
+
+function indentFilenames (tickets:ReadonlyArray<Ticket>):string {
+    return tickets.map(t => `  ${t.filename}`).join('\n')
+}
+
+/**
+ * The text logged when a run ends. The first line is the
+ * count summary. When tickets marked ready-for-human are
+ * still open, further lines name them and say that an
+ * agent cannot finish them, so a run that exits with open
+ * tickets never looks like it silently gave up.
+ */
+export function renderFinishSummary (
+    tickets:ReadonlyArray<Ticket>,
+    totalCompleted:number,
+    failedNums:ReadonlySet<number>,
+):string {
+    const remaining = tickets.filter(
+        t => t.status === 'ready-for-agent'
+    )
+    const human = tickets.filter(t => t.status === HUMAN_STATUS)
+    const humanNums = new Set(human.map(t => t.num))
+    const blockedByHuman = remaining.filter(t =>
+        !failedNums.has(t.num) &&
+        t.blockers.some(b => humanNums.has(b))
+    )
+
+    const counts = `Finished: ${totalCompleted} completed` +
+        (remaining.length > 0 ?
+            `, ${remaining.length} remaining` :
+            '') +
+        (failedNums.size > 0 ?
+            `, ${failedNums.size} failed` :
+            '') +
+        (human.length > 0 ?
+            `, ${human.length} need a human` :
+            '')
+    if (human.length === 0) return counts
+
+    const noun = human.length === 1 ? 'ticket is' : 'tickets are'
+    const lines = [
+        counts,
+        '',
+        (remaining.length === 0 && failedNums.size === 0 ?
+            `All remaining ${noun} marked ${HUMAN_STATUS}. ` :
+            `${human.length} ${noun} marked ${HUMAN_STATUS}. `) +
+        'nightralph only runs ready-for-agent tickets, ' +
+        'so an agent cannot finish these:',
+        indentFilenames(human),
+    ]
+    if (blockedByHuman.length > 0) {
+        const n = blockedByHuman.length
+        lines.push(
+            `${n} ready-for-agent ticket${n === 1 ? ' is' : 's are'} ` +
+            'blocked until they are done:',
+            indentFilenames(blockedByHuman),
+        )
+    }
+    lines.push(
+        'Do that work by hand, then set each ticket\'s ' +
+        '**Status:** to done' +
+        (blockedByHuman.length > 0 ?
+            ' and run nightralph again.' :
+            '.')
+    )
+    return lines.join('\n')
+}
+
 function runProgress (tickets:ReadonlyArray<Ticket>):RunProgress {
     return {
         completed:tickets.filter(t => t.status === 'done').length,
@@ -1852,15 +1921,9 @@ export async function runWaves (
     const remaining = tickets.filter(
         t => t.status === 'ready-for-agent'
     )
-    d.log(
-        `\nFinished: ${totalCompleted} completed` +
-        (remaining.length > 0 ?
-            `, ${remaining.length} remaining` :
-            '') +
-        (failedNums.size > 0 ?
-            `, ${failedNums.size} failed` :
-            '')
-    )
+    d.log('\n' + renderFinishSummary(
+        tickets, totalCompleted, failedNums
+    ))
     d.cleanup()
 
     return { allDone:remaining.length === 0 }
@@ -2306,15 +2369,9 @@ export async function runWavesIsolated (opts:{
     const remaining = opts.tickets.filter(
         t => t.status === 'ready-for-agent'
     )
-    d.log(
-        `\nFinished: ${totalCompleted} completed` +
-        (remaining.length > 0 ?
-            `, ${remaining.length} remaining` :
-            '') +
-        (failedNums.size > 0 ?
-            `, ${failedNums.size} failed` :
-            '')
-    )
+    d.log('\n' + renderFinishSummary(
+        opts.tickets, totalCompleted, failedNums
+    ))
     d.cleanup()
 
     return { allDone:remaining.length === 0 }

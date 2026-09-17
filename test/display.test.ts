@@ -698,6 +698,20 @@ test('setTicketStatus updates ticket status and triggers render', t => {
 
 // -- Test cleanup --
 
+test('log before any wave writes straight to the stream', t => {
+    const stream = new MockStream()
+    const display = new StatusDisplay({ stream:stream as any })
+    display.log('nothing to run')
+    t.ok(
+        stream.getOutput().includes('nothing to run'),
+        'message reaches the terminal without a wave'
+    )
+    t.ok(
+        !stream.getOutput().includes('Wave '),
+        'no status line is drawn'
+    )
+})
+
 test('cleanup restores cursor visibility', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({

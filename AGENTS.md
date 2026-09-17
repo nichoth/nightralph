@@ -108,7 +108,8 @@ Small orchestrator that runs a single-agent session per issue.
   `killProcessGroup(pid)`, `killRunningAgents()`,
   `dryRun(tickets, specBody)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
-  `runWavesIsolated(opts)`
+  `runWavesIsolated(opts)`, `HUMAN_STATUS`,
+  `renderFinishSummary(tickets, totalCompleted, failedNums)`
 - **Supported providers**: `claude` (stdin prompt,
   stream-json output), `codex` (stdin prompt),
   `pi` (file-based prompt via `@tmpfile`, JSON
@@ -295,6 +296,19 @@ Small orchestrator that runs a single-agent session per issue.
   `renderPrompt` and `renderMergePrompt` confine the
   agent to its worktree directory and prohibit
   `git push`
+- **HUMAN_STATUS**: `'ready-for-human'`, the ticket status
+  that means an agent must not pick the ticket up
+- **renderFinishSummary(tickets, totalCompleted, failedNums)**:
+  pure; returns the text both `runWaves` variants log
+  before `cleanup()`. The first line is the count summary
+  (`Finished: N completed[, N remaining][, N failed][, N
+  need a human]`). When any ticket is `ready-for-human`
+  it adds a paragraph naming those tickets, saying an
+  agent cannot finish them, listing any
+  `ready-for-agent` tickets blocked on them, and telling
+  the user to do the work and set the status to done.
+  This is why a run whose only open tickets are human
+  ones exits 0 with an explanation instead of silently
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; requires
   `testCmd`; accepts `effort`, `retries`, `retryDelay`,
@@ -361,6 +375,11 @@ Small orchestrator that runs a single-agent session per issue.
 - **createDisplay()**: factory that returns
   `StatusDisplay` when stdout is a TTY,
   `PlainDisplay` otherwise
+- **Guarantees**: `StatusDisplay.log()` called before any
+  `startWave()` writes the message straight to the
+  stream instead of dropping it (`render` is a no-op
+  without a wave); this is how the finish summary reaches
+  the terminal when a run has no runnable tickets
 - **Guarantees**: `StatusDisplay` does not install
   process-level signal handlers (SIGINT/SIGTERM are
   handled by the CLI in `src/index.ts` via
