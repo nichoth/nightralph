@@ -1644,12 +1644,13 @@ async function runTicketAttempts (
             )
             return { kind:'error', error }
         }
-        if (
-            outcome.kind === 'ready' ||
-            outcome.kind === 'worktree-error'
-        ) {
+        if (outcome.kind === 'ready') {
+            // The agent is no longer running, but the branch is
+            // only merged once the whole wave has finished.
+            d.setTicketStatus(ticket.num, 'awaiting-merge')
             return outcome
         }
+        if (outcome.kind === 'worktree-error') return outcome
     }
     return outcome
 }

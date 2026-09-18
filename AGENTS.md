@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-09-05
+Last verified: 2026-09-17
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -345,6 +345,17 @@ Small orchestrator that runs a single-agent session per issue.
   remaining?)`,
   `setTicketStatus(num, status)`, `log(message)`,
   `cleanup()`
+- **TicketStatus**: `'pending'|'in-progress'|
+  'awaiting-merge'|'done'|'failed'`. `renderDot` draws
+  them as a dim empty dot, then yellow, cyan, green and
+  red filled dots. `in-progress` means the ticket holds a
+  concurrency slot (agent running, test gate running, or
+  waiting out a retry backoff), so at most `concurrency`
+  dots are yellow at once. `awaiting-merge` means the
+  attempt succeeded and the branch waits for the rest of
+  the wave; `runTicketAttempts` sets it when an attempt
+  is `'ready'`, so only `runWavesIsolated` uses it. It
+  does not count toward the percent; only `done` does
 - **remaining**: optional array of tickets not in the
   current wave but still pending; rendered with empty
   dots after wave tickets in `StatusDisplay`

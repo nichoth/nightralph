@@ -1,6 +1,7 @@
 export type TicketStatus =
     | 'pending'
     | 'in-progress'
+    | 'awaiting-merge'
     | 'done'
     | 'failed'
 
@@ -87,6 +88,9 @@ export const color = {
     red (text:string):string {
         return `${ESC}31m${text}${ESC}0m`
     },
+    cyan (text:string):string {
+        return `${ESC}36m${text}${ESC}0m`
+    },
     dim (text:string):string {
         return `${ESC}2m${text}${ESC}0m`
     },
@@ -135,6 +139,10 @@ export function renderDot (status:TicketStatus):string {
             return color.dim(EMPTY_DOT)
         case 'in-progress':
             return color.yellow(FILLED_DOT)
+        // The agent and its test gate are finished; the branch
+        // waits for the rest of the wave before it is merged.
+        case 'awaiting-merge':
+            return color.cyan(FILLED_DOT)
         case 'done':
             return color.green(FILLED_DOT)
         case 'failed':

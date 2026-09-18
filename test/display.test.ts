@@ -11,11 +11,12 @@ import {
     PlainDisplay,
     createDisplay,
     color,
+    renderDot,
     type DisplayTicket,
     type Display,
 } from '../src/display.js'
 import {
-    spawnAgent, runWaves, scanTickets,
+    spawnAgent, runWaves, runWavesIsolated, scanTickets,
 } from '../src/orchestrator.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -1512,6 +1513,76 @@ test(
         t.ok(
             hasTicketRef,
             'log should include ticket-related messages'
+        )
+    }
+)
+
+test('awaiting-merge dot differs from the running and ' +
+    'done dots', t => {
+    const waiting = renderDot('awaiting-merge')
+    t.equal(typeof waiting, 'string', 'renders a dot')
+    t.notEqual(
+        waiting, renderDot('in-progress'),
+        'a finished agent must not look like a running one'
+    )
+    t.notEqual(
+        waiting, renderDot('done'),
+        'an unmerged ticket must not look done'
+    )
+    t.notEqual(
+        waiting, renderDot('pending'),
+        'a finished agent must not look unstarted'
+    )
+})
+
+test(
+    'runWavesIsolated marks a ticket awaiting-merge ' +
+    'between its agent finishing and the merge',
+    async t => {
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-test.md'),
+            makeTicketBody('ready-for-agent')
+        )
+        const tickets = scanTickets(issuesDir)
+        execSync('git add -A', { cwd:base })
+        execSync(
+            'git commit -m "add tickets" --no-verify',
+            { cwd:base }
+        )
+
+        const display = new RecordingDisplay()
+        const originalCwd = process.cwd()
+        process.chdir(base)
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_AGENT_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                testCmd:'true',
+                display,
+            })
+        } finally {
+            process.chdir(originalCwd)
+        }
+
+        const statuses = display
+            .getCallsByMethod('setTicketStatus')
+            .filter(args => args[0] === 1)
+            .map(args => args[1])
+        t.deepEqual(
+            statuses,
+            ['in-progress', 'awaiting-merge', 'done'],
+            'status moves from running to awaiting-merge ' +
+            'to done'
         )
     }
 )
