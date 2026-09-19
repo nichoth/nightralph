@@ -105,6 +105,7 @@ function makeTicket (overrides:Partial<Ticket>&{
         }),
         status:overrides.status ?? 'ready-for-agent',
         blockers:overrides.blockers ?? [],
+        feature:overrides.feature ?? '',
         ...overrides,
     }
 }
@@ -271,6 +272,36 @@ test('scanTickets returns sorted by number', t => {
         tickets.map(t => t.num),
         [2, 3, 10],
         'numeric sort'
+    )
+})
+
+test('scanTickets populates feature on every ticket', t => {
+    const dir = tmp()
+    writeFileSync(
+        join(dir, '01-first.md'),
+        makeTicketBody({
+            status:'ready-for-agent',
+            blockers:[],
+        })
+    )
+    writeFileSync(
+        join(dir, '02-second.md'),
+        makeTicketBody({
+            status:'ready-for-agent',
+            blockers:[1],
+        })
+    )
+
+    const tickets = scanTickets(dir, 'auth')
+    t.equal(
+        tickets[0].feature,
+        'auth',
+        'first ticket has feature set'
+    )
+    t.equal(
+        tickets[1].feature,
+        'auth',
+        'second ticket has feature set'
     )
 })
 
@@ -456,6 +487,51 @@ test('findReadyTickets unblocks on done status', t => {
     t.equal(ready[0].num, 2, 'ticket 2 is ready')
 })
 
+test(
+    'findReadyTickets compound identity: completing ' +
+    'feature-A/01 does not unblock feature-B/02',
+    t => {
+        const tickets:Ticket[] = [
+            makeTicket({
+                num:1,
+                filename:'01-setup.md',
+                status:'done',
+                feature:'auth',
+            }),
+            makeTicket({
+                num:1,
+                filename:'01-base.md',
+                status:'ready-for-agent',
+                feature:'payments',
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-charge.md',
+                status:'ready-for-agent',
+                blockers:[1],
+                feature:'payments',
+            }),
+        ]
+
+        const ready = findReadyTickets(tickets)
+        t.equal(
+            ready.length,
+            1,
+            'only payments/01 is ready'
+        )
+        t.equal(
+            ready[0].feature,
+            'payments',
+            'the ready ticket is from payments'
+        )
+        t.equal(
+            ready[0].num,
+            1,
+            'the ready ticket is num 1'
+        )
+    }
+)
+
 // -- simulateWaves / detectDeadlocks (via dryRun) --
 
 test(
@@ -484,17 +560,17 @@ test(
 
         try {
             dryRun(tickets, 'spec body')
-            const fullOutput = output.join('\n')
-            t.ok(
-                !fullOutput.includes(
-                    'Wave 1: 02-b.md'
-                ),
-                'ticket 2 does not appear as ready ' +
-                    'while its blocker is only claimed'
-            )
         } finally {
             console.log = originalLog
         }
+        const fullOutput = output.join('\n')
+        t.ok(
+            !fullOutput.includes(
+                'Wave 1: 02-b.md'
+            ),
+            'ticket 2 does not appear as ready ' +
+                'while its blocker is only claimed'
+        )
     }
 )
 
@@ -525,15 +601,109 @@ test(
 
         try {
             dryRun(tickets, 'spec body')
-            const fullOutput = output.join('\n')
-            t.ok(
-                fullOutput.includes('Deadlocked tickets:') &&
-                    fullOutput.includes('02-b.md'),
-                'ticket 2 is reported as deadlocked'
-            )
         } finally {
             console.log = originalLog
         }
+        const fullOutput = output.join('\n')
+        t.ok(
+            fullOutput.includes('Deadlocked tickets:') &&
+                fullOutput.includes('02-b.md'),
+            'ticket 2 is reported as deadlocked'
+        )
+    }
+)
+
+test(
+    'dryRun compound identity: overlapping nums across ' +
+    'features simulate correctly',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-base.md',
+                status:'ready-for-agent',
+                feature:'auth',
+            }),
+            makeTicket({
+                num:1,
+                filename:'01-base.md',
+                status:'ready-for-agent',
+                feature:'payments',
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-after.md',
+                status:'ready-for-agent',
+                blockers:[1],
+                feature:'payments',
+            }),
+        ]
+
+        const output:Array<string> = []
+        const originalLog = console.log
+        console.log = function (msg:unknown) {
+            output.push(String(msg))
+        }
+
+        try {
+            dryRun(tickets, 'spec body', 'npm test')
+        } finally {
+            console.log = originalLog
+        }
+        const fullOutput = output.join('\n')
+        t.ok(
+            fullOutput.includes('Wave 1:'),
+            'has wave 1'
+        )
+        t.ok(
+            fullOutput.includes('Wave 2:'),
+            'has wave 2 for payments/02'
+        )
+        t.ok(
+            !fullOutput.includes('Deadlocked'),
+            'no deadlock -- payments/02 waits for ' +
+            'payments/01, not auth/01'
+        )
+    }
+)
+
+test(
+    'dryRun compound identity: cross-feature blocker ' +
+    'deadlocks correctly',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-base.md',
+                status:'done',
+                feature:'auth',
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-needs-1.md',
+                status:'ready-for-agent',
+                blockers:[1],
+                feature:'payments',
+            }),
+        ]
+
+        const output:Array<string> = []
+        const originalLog = console.log
+        console.log = function (msg:unknown) {
+            output.push(String(msg))
+        }
+
+        try {
+            dryRun(tickets, 'spec body', 'npm test')
+        } finally {
+            console.log = originalLog
+        }
+        const fullOutput = output.join('\n')
+        t.ok(
+            fullOutput.includes('Deadlocked'),
+            'payments/02 blocked by payments/01 ' +
+            'which does not exist, so deadlocked'
+        )
     }
 )
 
@@ -555,6 +725,7 @@ test('markDone updates file and ticket object', t => {
         body,
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
     }
 
     markDone(ticket)
@@ -680,6 +851,7 @@ test('checkItems checks off matching items on disk', t => {
         body,
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
     }
 
     checkItems(ticket, ['first item', 'third item'])
@@ -719,6 +891,7 @@ test('checkItems is a no-op for empty list', t => {
         body,
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
     }
 
     checkItems(ticket, [])
@@ -748,6 +921,7 @@ test('checkItems handles special regex characters', t => {
         body,
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
     }
 
     checkItems(ticket, [itemText])
@@ -785,6 +959,7 @@ test('checkItems checks items wrapped across lines', t => {
         body,
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
     }
 
     checkItems(ticket, [
@@ -831,6 +1006,7 @@ test('checkItems matches bullet-prefixed echoes case-insensitively', t => {
         body,
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
     }
 
     checkItems(ticket, ['- [x] first item here'])
@@ -865,6 +1041,7 @@ test('checkItems does not touch items inside code fences', t => {
         body,
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
     }
 
     checkItems(ticket, ['fenced example not an item', itemText])
@@ -902,6 +1079,7 @@ test('markDone checks off all remaining items', t => {
         body,
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
     }
 
     markDone(ticket)
@@ -949,6 +1127,7 @@ test('markDone keeps on-disk edits missing from ticket.body', t => {
         body:scanned,
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
     }
 
     markDone(ticket)

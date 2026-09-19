@@ -54,6 +54,7 @@ export type Ticket = {
     body:string
     status:string
     blockers:number[]
+    feature:string
 }
 
 export function formatErrorMessage (error:unknown):string {
@@ -147,7 +148,10 @@ export function parseBlockers (body:string):number[] {
     return nums
 }
 
-export function scanTickets (dir:string):Ticket[] {
+export function scanTickets (
+    dir:string,
+    feature:string = ''
+):Ticket[] {
     const files = readdirSync(dir)
         .filter(f => TICKET_RE.test(f))
         .sort((a, b) => a.localeCompare(
@@ -168,21 +172,28 @@ export function scanTickets (dir:string):Ticket[] {
             body,
             status:parseStatus(body),
             blockers:parseBlockers(body),
+            feature,
         }
     })
+}
+
+function ticketKey (feature:string, num:number):string {
+    return `${feature}:${num}`
 }
 
 export function findReadyTickets (
     tickets:ReadonlyArray<Ticket>
 ):Ticket[] {
-    const doneNums = new Set(
+    const doneKeys = new Set(
         tickets
             .filter(t => t.status === 'done')
-            .map(t => t.num)
+            .map(t => ticketKey(t.feature, t.num))
     )
     return tickets.filter(t => {
         if (t.status !== 'ready-for-agent') return false
-        return t.blockers.every(b => doneNums.has(b))
+        return t.blockers.every(b =>
+            doneKeys.has(ticketKey(t.feature, b))
+        )
     })
 }
 
@@ -507,27 +518,36 @@ function * simulateWaves (
     tickets:ReadonlyArray<Ticket>
 ):Generator<{ wave:number; ready:Array<Ticket> }> {
     const sim = new Map(
-        tickets.map(t => [t.num, t.status])
+        tickets.map(t => [
+            ticketKey(t.feature, t.num),
+            t.status,
+        ])
     )
     let wave = 1
     while (true) {
-        const doneNums = new Set(
+        const doneKeys = new Set(
             [...sim.entries()]
                 .filter(([, s]) => s === 'done')
-                .map(([n]) => n)
+                .map(([k]) => k)
         )
         const ready = [...tickets].filter(t => {
-            if (sim.get(t.num) !== 'ready-for-agent') {
+            const key = ticketKey(t.feature, t.num)
+            if (sim.get(key) !== 'ready-for-agent') {
                 return false
             }
-            return t.blockers.every(
-                b => doneNums.has(b)
+            return t.blockers.every(b =>
+                doneKeys.has(
+                    ticketKey(t.feature, b)
+                )
             )
         })
         if (ready.length === 0) break
         yield { wave, ready }
         for (const t of ready) {
-            sim.set(t.num, 'done')
+            sim.set(
+                ticketKey(t.feature, t.num),
+                'done'
+            )
         }
         wave++
     }
@@ -536,36 +556,41 @@ function * simulateWaves (
 function detectDeadlocks (
     tickets:ReadonlyArray<Ticket>
 ):Array<Ticket> {
-    const doneNums = new Set<number>()
-    const ready = new Set<number>()
+    const doneKeys = new Set<string>()
+    const readyKeys = new Set<string>()
 
     for (const t of tickets) {
+        const key = ticketKey(t.feature, t.num)
         if (t.status === 'ready-for-agent') {
-            ready.add(t.num)
+            readyKeys.add(key)
         } else if (t.status === 'done') {
-            doneNums.add(t.num)
+            doneKeys.add(key)
         }
     }
 
     let changed = true
     while (changed) {
         changed = false
-        for (const num of ready) {
+        for (const key of readyKeys) {
             const ticket = tickets.find(t =>
-                t.num === num
+                ticketKey(t.feature, t.num) === key
             )!
-            if (ticket.blockers.every(
-                b => doneNums.has(b)
+            if (ticket.blockers.every(b =>
+                doneKeys.has(
+                    ticketKey(ticket.feature, b)
+                )
             )) {
-                doneNums.add(num)
-                ready.delete(num)
+                doneKeys.add(key)
+                readyKeys.delete(key)
                 changed = true
             }
         }
     }
 
-    return [...ready].map(num =>
-        tickets.find(t => t.num === num)!
+    return [...readyKeys].map(key =>
+        tickets.find(t =>
+            ticketKey(t.feature, t.num) === key
+        )!
     )
 }
 

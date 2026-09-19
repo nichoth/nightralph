@@ -30,6 +30,7 @@ function makeTestTicket (overrides?:Partial<Ticket>):Ticket {
         body:'# Test ticket',
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
         ...overrides,
     }
 }

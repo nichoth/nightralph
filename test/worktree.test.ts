@@ -72,6 +72,7 @@ function makeTestTicket (overrides?:Partial<Ticket>):Ticket {
         body:'# Test ticket',
         status:'ready-for-agent',
         blockers:[],
+        feature:'',
         ...overrides,
     }
 }
@@ -347,6 +348,60 @@ test(
             name,
             'myrepo--01-clean-prefix',
             'uses -- separator'
+        )
+    }
+)
+
+test(
+    'createWorktree uses feature-prefixed path',
+    async t => {
+        const repoRoot = initTempRepo()
+        const repoName = basename(repoRoot)
+        const baseBranch = getDefaultBranch(repoRoot)
+        const ticket = makeTestTicket({
+            num:1, slug:'add-auth', feature:'auth',
+        })
+
+        const result = await createWorktree({
+            repoRoot,
+            repoName,
+            baseBranch,
+            ticket,
+        })
+
+        const expectedPath = join(
+            repoRoot, '..',
+            `${repoName}.auth-01-add-auth`
+        )
+        t.equal(
+            result.worktreePath,
+            expectedPath,
+            'worktree path includes feature prefix'
+        )
+        t.ok(
+            existsSync(expectedPath),
+            'feature-prefixed worktree exists'
+        )
+        t.equal(
+            result.branchName,
+            `${repoName}--auth-01-add-auth`,
+            'branch name includes feature prefix'
+        )
+    }
+)
+
+test(
+    'buildBranchName includes feature when set',
+    t => {
+        const ticket = makeTestTicket({
+            num:1, slug:'clean-prefix',
+            feature:'auth',
+        })
+        const name = buildBranchName('myrepo', ticket)
+        t.equal(
+            name,
+            'myrepo--auth-01-clean-prefix',
+            'feature-prefixed branch name'
         )
     }
 )
