@@ -117,6 +117,51 @@ test('findFeatureDirs - ignores non-directory entries',
         }
     })
 
+test('findFeatureDirs - excludes completed specs', t => {
+    const dir = tmp()
+    try {
+        const scratch = join(dir, '.scratch')
+        mkdirSync(
+            join(scratch, 'done-feat', 'issues'),
+            { recursive:true },
+        )
+        writeFileSync(
+            join(scratch, 'done-feat', 'spec.md'),
+            '# spec',
+        )
+        writeFileSync(
+            join(scratch, 'done-feat', 'progress.md'),
+            [
+                '# Progress: done-feat',
+                '',
+                'Started: 2026-01-01T00:00:00.000Z',
+                '',
+                '- [x] 01-task.md',
+                '  branch: repo--01-task',
+                '  exit: 0',
+                '  completed: 2026-01-01T00:01:00.000Z',
+            ].join('\n') + '\n',
+        )
+
+        mkdirSync(
+            join(scratch, 'open-feat', 'issues'),
+            { recursive:true },
+        )
+        writeFileSync(
+            join(scratch, 'open-feat', 'spec.md'),
+            '# spec',
+        )
+
+        const result = findFeatureDirs(dir)
+        t.equal(result.length, 1,
+            'only the incomplete spec is returned')
+        t.equal(result[0].name, 'open-feat',
+            'returns the open feature')
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
 test('resolveIssuesDir - resolves name to .scratch/',
     async t => {
         const dir = tmp()

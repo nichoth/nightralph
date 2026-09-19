@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { select } from '@inquirer/prompts'
+import { isSpecComplete } from './progress.js'
 
 export function getScriptDir (metaUrl:string):string {
     return dirname(fileURLToPath(metaUrl))
@@ -26,13 +27,16 @@ export function findFeatureDirs (cwd:string):{
         const specFile = join(
             scratchDir, entry.name, 'spec.md'
         )
-        if (existsSync(issuesDir)) {
-            results.push({
-                name:entry.name,
-                dir:issuesDir,
-                spec:specFile,
-            })
-        }
+        if (!existsSync(issuesDir)) continue
+        const progressFile = join(
+            scratchDir, entry.name, 'progress.md'
+        )
+        if (isSpecComplete(progressFile)) continue
+        results.push({
+            name:entry.name,
+            dir:issuesDir,
+            spec:specFile,
+        })
     }
     return results
 }

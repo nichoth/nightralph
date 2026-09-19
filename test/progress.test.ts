@@ -15,6 +15,7 @@ import {
     readProgress,
     mergeProgress,
     commitProgress,
+    isSpecComplete,
 } from '../src/progress.js'
 import type { Ticket } from '../src/orchestrator.js'
 
@@ -702,3 +703,65 @@ test(
         )
     }
 )
+
+// -- isSpecComplete --
+
+test('isSpecComplete - returns false when file missing',
+    t => {
+        t.equal(
+            isSpecComplete('/nonexistent/progress.md'),
+            false,
+            'missing file is not complete'
+        )
+    })
+
+test('isSpecComplete - returns false when tickets ' +
+    'are incomplete', t => {
+    const dir = mkdtempSync(
+        join(tmpdir(), 'nightralph-isc-')
+    )
+    const path = join(dir, 'progress.md')
+    writeFileSync(path, [
+        '# Progress: feat',
+        '',
+        'Started: 2026-01-01T00:00:00.000Z',
+        '',
+        '- [x] 01-done.md',
+        '  branch: repo--01-done',
+        '  exit: 0',
+        '  completed: 2026-01-01T00:01:00.000Z',
+        '- [ ] 02-todo.md',
+    ].join('\n') + '\n')
+    t.equal(
+        isSpecComplete(path),
+        false,
+        'partial progress is not complete'
+    )
+})
+
+test('isSpecComplete - returns true when all ' +
+    'tickets checked', t => {
+    const dir = mkdtempSync(
+        join(tmpdir(), 'nightralph-isc-')
+    )
+    const path = join(dir, 'progress.md')
+    writeFileSync(path, [
+        '# Progress: feat',
+        '',
+        'Started: 2026-01-01T00:00:00.000Z',
+        '',
+        '- [x] 01-first.md',
+        '  branch: repo--01-first',
+        '  exit: 0',
+        '  completed: 2026-01-01T00:01:00.000Z',
+        '- [x] 02-second.md',
+        '  branch: repo--02-second',
+        '  exit: 0',
+        '  completed: 2026-01-01T00:02:00.000Z',
+    ].join('\n') + '\n')
+    t.equal(
+        isSpecComplete(path),
+        true,
+        'all checked off means complete'
+    )
+})

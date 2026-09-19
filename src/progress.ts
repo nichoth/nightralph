@@ -42,6 +42,15 @@ export function generateProgress (
     }
 }
 
+export function isSpecComplete (
+    progressPath:string
+):boolean {
+    const data = readProgress(progressPath)
+    if (!data) return false
+    if (data.tickets.length === 0) return false
+    return data.tickets.every(t => t.done)
+}
+
 export function readProgress (
     progressPath:string
 ):ProgressData|null {
