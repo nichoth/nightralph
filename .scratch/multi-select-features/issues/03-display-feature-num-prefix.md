@@ -17,8 +17,8 @@ branch naming
 
 **Status:** ready-for-agent
 
-- [ ] `DisplayTicket` has an optional `feature?:string` field
-- [ ] `StatusDisplay` renders each ticket row as `feature/num` when `feature` is present, otherwise falls back to filename
-- [ ] `PlainDisplay.startWave` includes the `feature/num` format in its output when feature is present
-- [ ] `setTicketStatus` matches tickets by compound identity (feature + num) when feature is present, by num alone when absent
-- [ ] Display tests verify `feature/num` rendering with tickets from multiple features
+- [x] `DisplayTicket` has an optional `feature?:string` field
+- [x] `StatusDisplay` renders each ticket row as `feature/num` when `feature` is present, otherwise falls back to filename
+- [x] `PlainDisplay.startWave` includes the `feature/num` format in its output when feature is present
+- [x] `setTicketStatus` matches tickets by compound identity (feature + num) when feature is present, by num alone when absent
+- [x] Display tests verify `feature/num` rendering with tickets from multiple features
