@@ -3640,3 +3640,106 @@ test('CLI subprocess - --concurrency is accepted and shown ' +
         rmSync(projectDir, { recursive:true, force:true })
     }
 })
+
+test('runWavesIsolated - multi-feature tickets write ' +
+    'per-feature progress files', async t => {
+    const projectDir = initTempGitRepo()
+    const originalCwd = process.cwd()
+    try {
+        const authDir = join(
+            projectDir, '.scratch', 'auth', 'issues'
+        )
+        const payDir = join(
+            projectDir, '.scratch', 'payments', 'issues'
+        )
+        mkdirSync(authDir, { recursive:true })
+        mkdirSync(payDir, { recursive:true })
+
+        writeFileSync(
+            join(authDir, '01-login.md'),
+            makeTicketBody({ status:'ready-for-agent' }),
+        )
+        writeFileSync(
+            join(payDir, '01-stripe.md'),
+            makeTicketBody({ status:'ready-for-agent' }),
+        )
+
+        const authTickets = scanTickets(authDir, 'auth')
+        const payTickets = scanTickets(payDir, 'payments')
+        const allTickets = [...authTickets, ...payTickets]
+
+        commitAll(projectDir, 'add tickets')
+
+        const logsDir = join(projectDir, '.scratch', 'logs')
+        const authProgressPath = join(
+            projectDir, '.scratch', 'auth', 'progress.md'
+        )
+        const payProgressPath = join(
+            projectDir, '.scratch', 'payments',
+            'progress.md'
+        )
+
+        const specBodies = new Map([
+            ['auth', '# Auth spec'],
+            ['payments', '# Payments spec'],
+        ])
+        const progressPaths = new Map([
+            ['auth', authProgressPath],
+            ['payments', payProgressPath],
+        ])
+
+        const logs:string[] = []
+        const display = {
+            startWave () {},
+            setTicketStatus () {},
+            log (m:string) { logs.push(m) },
+            cleanup () {},
+        }
+
+        process.chdir(projectDir)
+
+        await runWavesIsolated({
+            tickets:allTickets,
+            specBody:'# fallback',
+            specBodies,
+            agentCmd:MOCK_PASS,
+            model:null,
+            timeout:30,
+            logsDir,
+            featureName:'auth',
+            conflictStrategy:'respawn',
+            display,
+            testCmd:'true',
+            retries:0,
+            progressPaths,
+        })
+
+        t.ok(
+            existsSync(authProgressPath),
+            'auth progress file created'
+        )
+        t.ok(
+            existsSync(payProgressPath),
+            'payments progress file created'
+        )
+
+        const authProgress = readFileSync(
+            authProgressPath, 'utf8'
+        )
+        const payProgress = readFileSync(
+            payProgressPath, 'utf8'
+        )
+        t.ok(
+            authProgress.includes('auth'),
+            'auth progress names the feature'
+        )
+        t.ok(
+            payProgress.includes('payments'),
+            'payments progress names the feature'
+        )
+    } finally {
+        process.chdir(originalCwd)
+        cleanupWorktrees(projectDir)
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})

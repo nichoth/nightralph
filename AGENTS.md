@@ -109,8 +109,9 @@ Small orchestrator that runs a single-agent session per issue.
   `dryRun(tickets, specBody)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
   `runWavesIsolated(opts)`, `HUMAN_STATUS`,
-  `renderFinishSummary(tickets, totalCompleted, failedNums)`,
-  `lookupSpec(specBodies, fallback, feature)`
+  `renderFinishSummary(tickets, totalCompleted, failedKeys)`,
+  `lookupSpec(specBodies, fallback, feature)`,
+  `ticketKey(feature, num)`
 - **Supported providers**: `claude` (stdin prompt,
   stream-json output), `codex` (stdin prompt),
   `pi` (file-based prompt via `@tmpfile`, JSON
@@ -240,10 +241,10 @@ Small orchestrator that runs a single-agent session per issue.
   via `runPool`) -- a
   non-zero exit is retried up to `retries` times
   with an escalated level and exponential backoff
-  (timeouts are not retried); a per-run `failedNums`
-  set excludes tickets that exhausted their attempts
-  or whose merge conflict was not recovered from
-  later waves
+  (timeouts are not retried); a per-run `failedKeys`
+  set (compound `ticketKey` strings) excludes tickets
+  that exhausted their attempts or whose merge conflict
+  was not recovered from later waves
 - **renderMergePrompt(specBody, ticket)**: prompt for
   a respawned agent resolving a merge conflict; tells
   the agent to resolve conflict markers, not
@@ -286,9 +287,10 @@ Small orchestrator that runs a single-agent session per issue.
   inside a ticket attempt (e.g. agent deletes its own
   worktree) fails that ticket with an `'error'` outcome
   but does not crash the wave -- other tickets continue;
-  a per-run `failedNums` set excludes tickets that
-  exhausted their attempts or whose merge conflict was
-  not recovered from later waves; failed
+  a per-run `failedKeys` set (compound `ticketKey`
+  strings) excludes tickets that exhausted their
+  attempts or whose merge conflict was not recovered
+  from later waves; failed
   and stopped worktrees are removed with `force:true`
   so dirty files do not prevent cleanup; every
   terminal failure -- `worktree-error` (exitCode:-1),
@@ -308,9 +310,13 @@ Small orchestrator that runs a single-agent session per issue.
   `git push`
 - **HUMAN_STATUS**: `'ready-for-human'`, the ticket status
   that means an agent must not pick the ticket up
-- **renderFinishSummary(tickets, totalCompleted, failedNums)**:
-  pure; returns the text both `runWaves` variants log
-  before `cleanup()`. The first line is the count summary
+- **ticketKey(feature, num)**: returns `${feature}:${num}`,
+  the compound identity used for all internal maps
+- **renderFinishSummary(tickets, totalCompleted, failedKeys)**:
+  pure; `failedKeys` is `ReadonlySet<string>` of compound
+  `ticketKey` values; returns the text both `runWaves`
+  variants log before `cleanup()`. The first line is the
+  count summary
   (`Finished: N completed[, N remaining][, N failed][, N
   need a human]`). When tickets span more than one
   distinct `feature`, a per-feature breakdown follows

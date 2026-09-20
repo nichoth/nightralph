@@ -35,6 +35,7 @@ import {
     ALL_EFFORT_LEVELS,
     renderFinishSummary,
     lookupSpec,
+    ticketKey,
     HUMAN_STATUS,
     type Ticket,
     type EffortLevel,
@@ -2204,6 +2205,60 @@ test('dryRunIsolated prints the concurrency cap', t => {
     )
 })
 
+test(
+    'dryRunIsolated multi-feature shows feature-prefixed ' +
+    'worktree paths',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-login.md',
+                status:'ready-for-agent',
+                feature:'auth',
+            }),
+            makeTicket({
+                num:1,
+                filename:'01-stripe.md',
+                status:'ready-for-agent',
+                feature:'payments',
+            }),
+        ]
+
+        const output:Array<string> = []
+        const originalLog = console.log
+        console.log = function (msg:unknown) {
+            output.push(String(msg))
+        }
+
+        try {
+            dryRunIsolated({
+                tickets,
+                specBody:'test spec body',
+                repoName:'myapp',
+                conflictStrategy:'respawn',
+                progressPath:'.scratch/f/progress.md',
+                testCmd:'npm test',
+            })
+        } finally {
+            console.log = originalLog
+        }
+
+        const fullOutput = output.join('\n')
+        t.ok(
+            fullOutput.includes(
+                '../myapp.auth.01-login'
+            ),
+            'auth worktree path has feature prefix'
+        )
+        t.ok(
+            fullOutput.includes(
+                '../myapp.payments.01-stripe'
+            ),
+            'payments worktree path has feature prefix'
+        )
+    }
+)
+
 // -- US-003: provider adapter argument construction --
 
 test('getProviderArgs - claude provider adds stream flags',
@@ -3552,7 +3607,9 @@ test('renderFinishSummary is one line with no human tickets', t => {
             num:2, filename:'02-b.md', status:'ready-for-agent',
         }),
     ]
-    const out = renderFinishSummary(tickets, 1, new Set([2]))
+    const out = renderFinishSummary(
+        tickets, 1, new Set([ticketKey('', 2)])
+    )
     t.equal(out.split('\n').length, 1, 'single line')
     t.ok(out.includes('1 completed'), 'counts completed')
     t.ok(out.includes('1 remaining'), 'counts remaining')
@@ -3688,6 +3745,55 @@ test(
         t.ok(
             !out.includes('auth'),
             'does not name the feature'
+        )
+    }
+)
+
+test(
+    'renderFinishSummary compound keys disambiguate ' +
+    'same-numbered tickets across features',
+    t => {
+        const tickets = [
+            makeTicket({
+                num:1,
+                filename:'01-a.md',
+                status:'done',
+                feature:'auth',
+            }),
+            makeTicket({
+                num:1,
+                filename:'01-b.md',
+                status:'ready-for-agent',
+                feature:'payments',
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-c.md',
+                status:'ready-for-agent',
+                feature:'auth',
+            }),
+        ]
+        const failedKeys = new Set([
+            ticketKey('auth', 2),
+        ])
+        const out = renderFinishSummary(
+            tickets, 1, failedKeys
+        )
+        t.ok(
+            out.includes('1 failed'),
+            'counts exactly 1 failed'
+        )
+        t.ok(
+            out.includes('1 completed'),
+            'counts 1 completed'
+        )
+        t.ok(
+            out.includes('1 remaining'),
+            'counts 1 remaining'
+        )
+        t.ok(
+            out.includes('auth') && out.includes('payments'),
+            'per-feature breakdown present'
         )
     }
 )

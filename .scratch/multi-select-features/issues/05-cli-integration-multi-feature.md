@@ -25,9 +25,9 @@ branch naming, 02: Multi-select resolveIssuesDir,
 
 **Status:** ready-for-agent
 
-- [ ] `runExecute` iterates the array from `resolveIssuesDir`, scans tickets per feature, and merges them into one pool
-- [ ] Each ticket in the pool carries the correct `feature` and its spec body is looked up from the feature's `spec.md`
-- [ ] `runWaves` and `runWavesIsolated` use compound `feature:num` keys for `failedNums`, `ticketsByNum`, `worktreePathsByNum`, and `readyNums`
-- [ ] `--dry-run` prints the unified wave plan with feature-prefixed branch names and worktree paths across all selected features
-- [ ] Per-feature progress files are written to the correct `.scratch/<feature>/progress.md` path
-- [ ] `startWave` and `setTicketStatus` calls pass feature information to the display
+- [x] `runExecute` iterates the array from `resolveIssuesDir`, scans tickets per feature, and merges them into one pool
+- [x] Each ticket in the pool carries the correct `feature` and its spec body is looked up from the feature's `spec.md`
+- [x] `runWaves` and `runWavesIsolated` use compound `feature:num` keys for `failedNums`, `ticketsByNum`, `worktreePathsByNum`, and `readyNums`
+- [x] `--dry-run` prints the unified wave plan with feature-prefixed branch names and worktree paths across all selected features
+- [x] Per-feature progress files are written to the correct `.scratch/<feature>/progress.md` path
+- [x] `startWave` and `setTicketStatus` calls pass feature information to the display

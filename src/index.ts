@@ -19,6 +19,7 @@ import {
     DEFAULT_CONCURRENCY,
     killRunningAgents,
     type EffortLevel,
+    type Ticket,
 } from './orchestrator.js'
 import { detectTestCmd } from './testcmd.js'
 import { createDisplay } from './display.js'
@@ -226,7 +227,12 @@ async function runExecute (argv:{
         argv.spec
     )
 
-    let anyFailed = false
+    const allTickets:Ticket[] = []
+    const specBodies = new Map<string, string>()
+    const progressPaths = new Map<string, string>()
+    let firstFeatureName = ''
+    let firstLogsDir = ''
+
     for (const selection of selections) {
         const { dir, spec, name } = selection
 
@@ -247,7 +253,7 @@ async function runExecute (argv:{
             readFileSync(spec, 'utf8'),
             'User Stories'
         )
-        const tickets = scanTickets(dir)
+        const tickets = scanTickets(dir, name)
 
         if (tickets.length === 0) {
             console.log(
@@ -280,94 +286,103 @@ async function runExecute (argv:{
             )
         }
 
-        const logsDir = join(dirname(dir), 'logs')
-        const timeout = argv.timeout ?? 900
-        const testCmd = argv.testCmd || detectTestCmd(
-            isGitRepo() ?
-                getRepoRoot() :
-                process.cwd()
-        ) || 'npm test'
-        const featureName = extractFeatureName(spec)
-        const conflictStrategy = argv.stopOnConflict ?
-            'stop' :
-            'respawn'
-        const progressPath = join(
-            dirname(dir), 'progress.md'
+        specBodies.set(name, specBody)
+        progressPaths.set(
+            name, join(dirname(dir), 'progress.md')
         )
+        allTickets.push(...tickets)
 
-        if (argv.dryRun) {
-            if (isGitRepo()) {
-                const repoName = getRepoName()
-                dryRunIsolated({
-                    tickets,
-                    specBody,
-                    repoName,
-                    conflictStrategy,
-                    progressPath,
-                    testCmd,
-                    effort:argv.effort,
-                    retries:argv.retries,
-                    retryDelay:argv.retryDelay,
-                    concurrency:argv.concurrency,
-                })
-            } else {
-                dryRun(tickets, specBody, testCmd)
-            }
-            continue
+        if (!firstFeatureName) {
+            firstFeatureName = extractFeatureName(spec)
+            firstLogsDir = join(dirname(dir), 'logs')
         }
+    }
 
-        const display = createDisplay()
+    if (allTickets.length === 0) return
 
-        function onSignal (exitCode:number):void {
-            killRunningAgents()
-            display.cleanup()
-            process.exit(exitCode)
-        }
-        process.on('SIGINT', () => onSignal(130))
-        process.on('SIGTERM', () => onSignal(143))
+    const timeout = argv.timeout ?? 900
+    const testCmd = argv.testCmd || detectTestCmd(
+        isGitRepo() ?
+            getRepoRoot() :
+            process.cwd()
+    ) || 'npm test'
+    const conflictStrategy = argv.stopOnConflict ?
+        'stop' :
+        'respawn'
+    const logsDir = firstLogsDir
+    const fallbackSpec = specBodies.values().next().value!
 
-        let result:{ allDone:boolean }
-
+    if (argv.dryRun) {
         if (isGitRepo()) {
-            result = await runWavesIsolated({
-                tickets,
-                specBody,
-                agentCmd:argv.provider,
-                model:argv.model ?? null,
-                timeout,
-                logsDir,
-                featureName,
+            const repoName = getRepoName()
+            dryRunIsolated({
+                tickets:allTickets,
+                specBody:fallbackSpec,
+                repoName,
                 conflictStrategy,
-                display,
+                progressPath:progressPaths.values()
+                    .next().value!,
                 testCmd,
-                maxTurns:argv.maxTurns,
                 effort:argv.effort,
                 retries:argv.retries,
                 retryDelay:argv.retryDelay,
                 concurrency:argv.concurrency,
             })
         } else {
-            result = await runWaves(
-                tickets, specBody,
-                argv.provider, argv.model ?? null,
-                timeout,
-                logsDir,
-                testCmd,
-                display,
-                argv.maxTurns,
-                argv.effort,
-                argv.retries,
-                argv.retryDelay,
-                argv.concurrency,
-            )
+            dryRun(allTickets, fallbackSpec, testCmd)
         }
-
-        if (!result.allDone) {
-            anyFailed = true
-        }
+        return
     }
 
-    if (anyFailed) {
+    const display = createDisplay()
+
+    function onSignal (exitCode:number):void {
+        killRunningAgents()
+        display.cleanup()
+        process.exit(exitCode)
+    }
+    process.on('SIGINT', () => onSignal(130))
+    process.on('SIGTERM', () => onSignal(143))
+
+    let result:{ allDone:boolean }
+
+    if (isGitRepo()) {
+        result = await runWavesIsolated({
+            tickets:allTickets,
+            specBody:fallbackSpec,
+            specBodies,
+            agentCmd:argv.provider,
+            model:argv.model ?? null,
+            timeout,
+            logsDir,
+            featureName:firstFeatureName,
+            conflictStrategy,
+            display,
+            testCmd,
+            maxTurns:argv.maxTurns,
+            effort:argv.effort,
+            retries:argv.retries,
+            retryDelay:argv.retryDelay,
+            concurrency:argv.concurrency,
+            progressPaths,
+        })
+    } else {
+        result = await runWaves(
+            allTickets, fallbackSpec,
+            argv.provider, argv.model ?? null,
+            timeout,
+            logsDir,
+            testCmd,
+            display,
+            argv.maxTurns,
+            argv.effort,
+            argv.retries,
+            argv.retryDelay,
+            argv.concurrency,
+        )
+    }
+
+    if (!result.allDone) {
         process.exit(1)
     }
 }

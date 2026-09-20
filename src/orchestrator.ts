@@ -180,7 +180,7 @@ export function scanTickets (
     })
 }
 
-function ticketKey (feature:string, num:number):string {
+export function ticketKey (feature:string, num:number):string {
     return `${feature}:${num}`
 }
 
@@ -1199,8 +1199,10 @@ export function dryRunIsolated (opts:{
             const branchName = buildBranchName(
                 opts.repoName, t
             )
+            const prefix = t.feature ?
+                `${t.feature}.` : ''
             const worktreePath =
-                `../${opts.repoName}.${num}-${t.slug}`
+                `../${opts.repoName}.${prefix}${num}-${t.slug}`
             console.log(`    worktree: ${worktreePath}`)
             console.log(`    branch:   ${branchName}`)
         }
@@ -1536,7 +1538,9 @@ async function runTicketAttempt (
         return { kind:'worktree-error', error }
     }
 
-    d.setTicketStatus(ticket.num, 'in-progress')
+    d.setTicketStatus(
+        ticket.num, 'in-progress', ticket.feature
+    )
     const ticketSpec = lookupSpec(
         opts.specBodies, opts.specBody, ticket.feature
     )
@@ -1688,7 +1692,10 @@ async function runTicketAttempts (
         if (outcome.kind === 'ready') {
             // The agent is no longer running, but the branch is
             // only merged once the whole wave has finished.
-            d.setTicketStatus(ticket.num, 'awaiting-merge')
+            d.setTicketStatus(
+                ticket.num, 'awaiting-merge',
+                ticket.feature,
+            )
             return outcome
         }
         if (outcome.kind === 'worktree-error') return outcome
@@ -1733,7 +1740,7 @@ function indentFilenames (tickets:ReadonlyArray<Ticket>):string {
 export function renderFinishSummary (
     tickets:ReadonlyArray<Ticket>,
     totalCompleted:number,
-    failedNums:ReadonlySet<number>,
+    failedKeys:ReadonlySet<string>,
 ):string {
     const remaining = tickets.filter(
         t => t.status === 'ready-for-agent'
@@ -1741,7 +1748,7 @@ export function renderFinishSummary (
     const human = tickets.filter(t => t.status === HUMAN_STATUS)
     const humanNums = new Set(human.map(t => t.num))
     const blockedByHuman = remaining.filter(t =>
-        !failedNums.has(t.num) &&
+        !failedKeys.has(ticketKey(t.feature, t.num)) &&
         t.blockers.some(b => humanNums.has(b))
     )
 
@@ -1749,8 +1756,8 @@ export function renderFinishSummary (
         (remaining.length > 0 ?
             `, ${remaining.length} remaining` :
             '') +
-        (failedNums.size > 0 ?
-            `, ${failedNums.size} failed` :
+        (failedKeys.size > 0 ?
+            `, ${failedKeys.size} failed` :
             '') +
         (human.length > 0 ?
             `, ${human.length} need a human` :
@@ -1771,7 +1778,9 @@ export function renderFinishSummary (
                 t => t.status === 'done'
             ).length
             const failed = ft.filter(
-                t => failedNums.has(t.num)
+                t => failedKeys.has(
+                    ticketKey(t.feature, t.num)
+                )
             ).length
             const rem = ft.filter(
                 t => t.status === 'ready-for-agent'
@@ -1790,7 +1799,7 @@ export function renderFinishSummary (
         'tickets are'
     lines.push(
         '',
-        (remaining.length === 0 && failedNums.size === 0 ?
+        (remaining.length === 0 && failedKeys.size === 0 ?
             `All remaining ${noun} marked ${HUMAN_STATUS}. ` :
             `${human.length} ${noun} marked ${HUMAN_STATUS}. `) +
         'nightralph only runs ready-for-agent tickets, ' +
@@ -1850,19 +1859,23 @@ export async function runWaves (
 
     let totalCompleted = 0
     let waveNum = 0
-    const failedNums = new Set<number>()
+    const failedKeys = new Set<string>()
 
     while (true) {
         const ready = findReadyTickets(tickets).filter(
-            t => !failedNums.has(t.num)
+            t => !failedKeys.has(
+                ticketKey(t.feature, t.num)
+            )
         )
         if (ready.length === 0) break
 
         waveNum++
-        const readyNums = new Set(ready.map(t => t.num))
+        const readyKeys = new Set(
+            ready.map(t => ticketKey(t.feature, t.num))
+        )
         const remaining = tickets.filter(t =>
             t.status === 'ready-for-agent' &&
-            !readyNums.has(t.num)
+            !readyKeys.has(ticketKey(t.feature, t.num))
         )
         d.startWave(
             waveNum,
@@ -1870,11 +1883,13 @@ export async function runWaves (
             ready.map(t => ({
                 num:t.num,
                 filename:t.filename,
+                feature:t.feature,
             })),
             runProgress(tickets),
             remaining.map(t => ({
                 num:t.num,
                 filename:t.filename,
+                feature:t.feature,
             })),
         )
 
@@ -1885,7 +1900,9 @@ export async function runWaves (
                 const label = t.filename.replace(
                     /\.md$/, ''
                 )
-                d.setTicketStatus(t.num, 'in-progress')
+                d.setTicketStatus(
+                    t.num, 'in-progress', t.feature
+                )
                 d.log(`  Starting ${t.filename}`)
                 let level = effort
                 let result = await spawnAgent({
@@ -1950,8 +1967,12 @@ export async function runWaves (
             if (r.status === 'rejected') continue
             const { ticket, result } = r.value
             if (result.exitCode !== 0) {
-                failedNums.add(ticket.num)
-                d.setTicketStatus(ticket.num, 'failed')
+                failedKeys.add(
+                    ticketKey(ticket.feature, ticket.num)
+                )
+                d.setTicketStatus(
+                    ticket.num, 'failed', ticket.feature
+                )
                 d.log(
                     `  ${ticket.filename}: ` +
                     `agent exited ${result.exitCode}`
@@ -1963,7 +1984,9 @@ export async function runWaves (
             markDone(ticket)
             waveCompleted++
             totalCompleted++
-            d.setTicketStatus(ticket.num, 'done')
+            d.setTicketStatus(
+                ticket.num, 'done', ticket.feature
+            )
             d.log(
                 `  ${ticket.filename}: done`
             )
@@ -1971,7 +1994,9 @@ export async function runWaves (
 
         if (waveCompleted === 0) {
             const remaining = findReadyTickets(tickets)
-                .filter(t => !failedNums.has(t.num))
+                .filter(t => !failedKeys.has(
+                    ticketKey(t.feature, t.num)
+                ))
             if (remaining.length === 0) {
                 d.log(
                     '\nNo tickets completed this wave ' +
@@ -1993,7 +2018,7 @@ export async function runWaves (
         t => t.status === 'ready-for-agent'
     )
     d.log('\n' + renderFinishSummary(
-        tickets, totalCompleted, failedNums
+        tickets, totalCompleted, failedKeys
     ))
     d.cleanup()
 
@@ -2102,19 +2127,23 @@ export async function runWavesIsolated (opts:{
 
     let totalCompleted = 0
     let waveNum = 0
-    const failedNums = new Set<number>()
+    const failedKeys = new Set<string>()
 
     while (true) {
         const ready = findReadyTickets(opts.tickets).filter(
-            t => !failedNums.has(t.num)
+            t => !failedKeys.has(
+                ticketKey(t.feature, t.num)
+            )
         )
         if (ready.length === 0) break
 
         waveNum++
-        const readyNums = new Set(ready.map(t => t.num))
+        const readyKeys = new Set(
+            ready.map(t => ticketKey(t.feature, t.num))
+        )
         const remaining = opts.tickets.filter(t =>
             t.status === 'ready-for-agent' &&
-            !readyNums.has(t.num)
+            !readyKeys.has(ticketKey(t.feature, t.num))
         )
         d.startWave(
             waveNum,
@@ -2122,11 +2151,13 @@ export async function runWavesIsolated (opts:{
             ready.map(t => ({
                 num:t.num,
                 filename:t.filename,
+                feature:t.feature,
             })),
             runProgress(opts.tickets),
             remaining.map(t => ({
                 num:t.num,
                 filename:t.filename,
+                feature:t.feature,
             })),
         )
 
@@ -2169,16 +2200,20 @@ export async function runWavesIsolated (opts:{
             ticketNum:number
             worktreePath:string
         }> = []
-        const ticketsByNum = new Map<number, Ticket>()
-        const worktreePathsByNum = new Map<number, string>()
+        const ticketsByKey = new Map<string, Ticket>()
+        const worktreePathsByKey = new Map<string, string>()
+        const branchToKey = new Map<string, string>()
 
         for (let i = 0; i < outcomes.length; i++) {
             const outcome = outcomes[i]
             const ticket = ready[i]
+            const key = ticketKey(ticket.feature, ticket.num)
 
             if (outcome.kind === 'worktree-error') {
-                failedNums.add(ticket.num)
-                d.setTicketStatus(ticket.num, 'failed')
+                failedKeys.add(key)
+                d.setTicketStatus(
+                    ticket.num, 'failed', ticket.feature
+                )
                 d.log(
                     `  ${ticket.filename}: failed to create ` +
                     `worktree: ${formatErrorMessage(outcome.error)}`
@@ -2200,8 +2235,10 @@ export async function runWavesIsolated (opts:{
             }
 
             if (outcome.kind === 'error') {
-                failedNums.add(ticket.num)
-                d.setTicketStatus(ticket.num, 'failed')
+                failedKeys.add(key)
+                d.setTicketStatus(
+                    ticket.num, 'failed', ticket.feature
+                )
                 d.log(
                     `  ${ticket.filename}: attempt error: ` +
                     formatErrorMessage(outcome.error)
@@ -2222,8 +2259,10 @@ export async function runWavesIsolated (opts:{
             }
 
             if (outcome.kind === 'no-commits') {
-                failedNums.add(ticket.num)
-                d.setTicketStatus(ticket.num, 'failed')
+                failedKeys.add(key)
+                d.setTicketStatus(
+                    ticket.num, 'failed', ticket.feature
+                )
                 d.log(
                     `  ${ticket.filename}: agent exited 0 ` +
                     'but made no changes; leaving ticket ' +
@@ -2246,8 +2285,10 @@ export async function runWavesIsolated (opts:{
             }
 
             if (outcome.kind === 'failed') {
-                failedNums.add(ticket.num)
-                d.setTicketStatus(ticket.num, 'failed')
+                failedKeys.add(key)
+                d.setTicketStatus(
+                    ticket.num, 'failed', ticket.feature
+                )
                 if (outcome.reason === 'exit') {
                     checkItems(ticket, outcome.completedItems)
                 }
@@ -2274,10 +2315,11 @@ export async function runWavesIsolated (opts:{
                 `  ${ticket.filename}: agent finished, ` +
                 'awaiting merge'
             )
-            ticketsByNum.set(ticket.num, ticket)
-            worktreePathsByNum.set(
-                ticket.num, outcome.worktreePath
+            ticketsByKey.set(key, ticket)
+            worktreePathsByKey.set(
+                key, outcome.worktreePath
             )
+            branchToKey.set(outcome.branchName, key)
             successfulBranches.push({
                 branch:outcome.branchName,
                 ticketNum:ticket.num,
@@ -2289,9 +2331,10 @@ export async function runWavesIsolated (opts:{
             await commitTicketFiles(
                 repoRoot,
                 successfulBranches
-                    .map(sb =>
-                        ticketsByNum.get(sb.ticketNum)!
-                    ),
+                    .map(sb => {
+                        const k = branchToKey.get(sb.branch)!
+                        return ticketsByKey.get(k)!
+                    }),
                 d,
             )
 
@@ -2303,16 +2346,21 @@ export async function runWavesIsolated (opts:{
             })
 
             for (const branchResult of mergeResult.merged) {
-                const ticket = ticketsByNum.get(
-                    branchResult.ticketNum
+                const bk = branchToKey.get(
+                    branchResult.branch
                 )
+                const ticket = bk ?
+                    ticketsByKey.get(bk) :
+                    undefined
                 if (!ticket) continue
 
                 if (branchResult.merged) {
                     markDone(ticket)
                     waveCompleted++
                     totalCompleted++
-                    d.setTicketStatus(ticket.num, 'done')
+                    d.setTicketStatus(
+                        ticket.num, 'done', ticket.feature
+                    )
                     d.log(
                         `  ${ticket.filename}: done`
                     )
@@ -2328,18 +2376,21 @@ export async function runWavesIsolated (opts:{
                         d,
                     )
 
-                    const worktreePath = worktreePathsByNum.get(
-                        ticket.num
-                    )
+                    const worktreePath = bk ?
+                        worktreePathsByKey.get(bk) :
+                        undefined
                     if (worktreePath) {
                         await removeWorktreeQuietly(
                             worktreePath, d
                         )
                     }
                 } else {
-                    const worktreePath = worktreePathsByNum.get(
-                        ticket.num
+                    const wtKey = branchToKey.get(
+                        branchResult.branch
                     )
+                    const worktreePath = wtKey ?
+                        worktreePathsByKey.get(wtKey) :
+                        undefined
                     const recovered =
                         opts.conflictStrategy === 'respawn' &&
                         worktreePath ?
@@ -2368,7 +2419,10 @@ export async function runWavesIsolated (opts:{
                         markDone(ticket)
                         waveCompleted++
                         totalCompleted++
-                        d.setTicketStatus(ticket.num, 'done')
+                        d.setTicketStatus(
+                            ticket.num, 'done',
+                            ticket.feature,
+                        )
                         d.log(
                             `  ${ticket.filename}: done ` +
                             '(resolved via respawn)'
@@ -2401,13 +2455,9 @@ export async function runWavesIsolated (opts:{
                             }
                         }
                     } else {
-                        // Without this the ticket stays
-                        // ready-for-agent and the wave loop
-                        // would re-run it forever; excluding it
-                        // from later waves of this run ends the
-                        // loop while the file keeps its status
-                        // for the next run.
-                        failedNums.add(ticket.num)
+                        failedKeys.add(
+                            ticketKey(ticket.feature, ticket.num)
+                        )
                         d.log(
                             `  ${ticket.filename}: merge failed, ` +
                             'staying ready-for-agent'
@@ -2442,7 +2492,10 @@ export async function runWavesIsolated (opts:{
                 )
 
                 for (const sb of successfulBranches) {
-                    const ticket = ticketsByNum.get(sb.ticketNum)
+                    const sbk = branchToKey.get(sb.branch)
+                    const ticket = sbk ?
+                        ticketsByKey.get(sbk) :
+                        undefined
                     if (ticket && ticket.status === 'done') continue
                     try {
                         await removeWorktree(
@@ -2465,7 +2518,9 @@ export async function runWavesIsolated (opts:{
         if (waveCompleted === 0) {
             const remaining = findReadyTickets(
                 opts.tickets
-            ).filter(t => !failedNums.has(t.num))
+            ).filter(t => !failedKeys.has(
+                ticketKey(t.feature, t.num)
+            ))
             if (remaining.length === 0) {
                 d.log(
                     '\nNo tickets completed this wave ' +
@@ -2487,7 +2542,7 @@ export async function runWavesIsolated (opts:{
         t => t.status === 'ready-for-agent'
     )
     d.log('\n' + renderFinishSummary(
-        opts.tickets, totalCompleted, failedNums
+        opts.tickets, totalCompleted, failedKeys
     ))
     d.cleanup()
 
