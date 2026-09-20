@@ -171,13 +171,13 @@ test('resolveIssuesDir - resolves name to .scratch/',
                 dir,
             )
             t.equal(
-                result.dir,
+                result[0].dir,
                 join(dir, '.scratch', 'my-feature',
                     'issues'),
                 'dir resolves to .scratch/<name>/issues',
             )
             t.equal(
-                result.spec,
+                result[0].spec,
                 join(dir, '.scratch', 'my-feature',
                     'spec.md'),
                 'spec resolves to .scratch/<name>/spec.md',

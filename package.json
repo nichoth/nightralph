@@ -25,7 +25,7 @@
     "version": "npm run toc && git add README.md",
     "postversion": "git push --follow-tags && npm publish",
     "demo": "npm run build && node test/demo-display.mjs",
-    "test": "esbuild test/setup.test.ts test/orchestrator.test.ts test/worktree.test.ts test/progress.test.ts test/merge.test.ts test/display.test.ts test/testcmd.test.ts test/integration.test.ts --format=esm --bundle --packages=external --outdir=dist/test --sourcemap && node dist/test/setup.test.js && node dist/test/orchestrator.test.js && node dist/test/worktree.test.js && node dist/test/progress.test.js && node dist/test/merge.test.js && node dist/test/display.test.js && node dist/test/testcmd.test.js && node dist/test/integration.test.js"
+    "test": "esbuild test/setup.test.ts test/orchestrator.test.ts test/worktree.test.ts test/progress.test.ts test/merge.test.ts test/display.test.ts test/testcmd.test.ts test/resolve.test.ts test/integration.test.ts --format=esm --bundle --packages=external --outdir=dist/test --sourcemap && node dist/test/setup.test.js && node dist/test/orchestrator.test.js && node dist/test/worktree.test.js && node dist/test/progress.test.js && node dist/test/merge.test.js && node dist/test/display.test.js && node dist/test/testcmd.test.js && node dist/test/resolve.test.js && node dist/test/integration.test.js"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.7.0",

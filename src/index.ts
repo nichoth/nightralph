@@ -222,132 +222,152 @@ async function runExecute (argv:{
     retryDelay?:number
     concurrency?:number
 }):Promise<void> {
-    const { dir, spec } = await resolveIssuesDir(
+    const selections = await resolveIssuesDir(
         argv.spec
     )
 
-    if (!existsSync(dir)) {
-        console.error(`Directory not found: ${dir}`)
-        process.exit(2)
-    }
-    if (!existsSync(spec)) {
-        console.error(`Spec file not found: ${spec}`)
-        process.exit(2)
-    }
+    let anyFailed = false
+    for (const selection of selections) {
+        const { dir, spec, name } = selection
 
-    const specBody = stripSpecSection(
-        readFileSync(spec, 'utf8'),
-        'User Stories'
-    )
-    const tickets = scanTickets(dir)
+        if (!existsSync(dir)) {
+            console.error(
+                `Directory not found: ${dir}`
+            )
+            process.exit(2)
+        }
+        if (!existsSync(spec)) {
+            console.error(
+                `Spec file not found: ${spec}`
+            )
+            process.exit(2)
+        }
 
-    if (tickets.length === 0) {
-        console.log('No ticket files found. Exiting.')
-        return
-    }
-
-    console.log(`Found ${tickets.length} tickets`)
-
-    const knownNums = new Set(tickets.map(t => t.num))
-    for (const t of tickets) {
-        const unknown = t.blockers.filter(
-            b => !knownNums.has(b)
+        const specBody = stripSpecSection(
+            readFileSync(spec, 'utf8'),
+            'User Stories'
         )
-        if (unknown.length > 0) {
-            console.warn(
-                `${t.filename}: blockers ` +
-                `[${unknown.join(', ')}] ` +
-                'not found in directory'
+        const tickets = scanTickets(dir)
+
+        if (tickets.length === 0) {
+            console.log(
+                `No ticket files found for ` +
+                `${name}. Skipping.`
+            )
+            continue
+        }
+
+        console.log(
+            `[${name}] Found ${tickets.length} tickets`
+        )
+
+        const knownNums = new Set(
+            tickets.map(t => t.num)
+        )
+        for (const t of tickets) {
+            const unknown = t.blockers.filter(
+                b => !knownNums.has(b)
+            )
+            if (unknown.length > 0) {
+                console.warn(
+                    `${t.filename}: blockers ` +
+                    `[${unknown.join(', ')}] ` +
+                    'not found in directory'
+                )
+            }
+            t.blockers = t.blockers.filter(
+                b => knownNums.has(b)
             )
         }
-        t.blockers = t.blockers.filter(
-            b => knownNums.has(b)
+
+        const logsDir = join(dirname(dir), 'logs')
+        const timeout = argv.timeout ?? 900
+        const testCmd = argv.testCmd || detectTestCmd(
+            isGitRepo() ?
+                getRepoRoot() :
+                process.cwd()
+        ) || 'npm test'
+        const featureName = extractFeatureName(spec)
+        const conflictStrategy = argv.stopOnConflict ?
+            'stop' :
+            'respawn'
+        const progressPath = join(
+            dirname(dir), 'progress.md'
         )
-    }
 
-    const logsDir = join(dirname(dir), 'logs')
-    const timeout = argv.timeout ?? 900
-    const testCmd = argv.testCmd || detectTestCmd(
-        isGitRepo() ?
-            getRepoRoot() :
-            process.cwd()
-    ) || 'npm test'
-    const featureName = extractFeatureName(spec)
-    const conflictStrategy = argv.stopOnConflict ?
-        'stop' :
-        'respawn'
-    const progressPath = join(
-        dirname(dir), 'progress.md'
-    )
+        if (argv.dryRun) {
+            if (isGitRepo()) {
+                const repoName = getRepoName()
+                dryRunIsolated({
+                    tickets,
+                    specBody,
+                    repoName,
+                    conflictStrategy,
+                    progressPath,
+                    testCmd,
+                    effort:argv.effort,
+                    retries:argv.retries,
+                    retryDelay:argv.retryDelay,
+                    concurrency:argv.concurrency,
+                })
+            } else {
+                dryRun(tickets, specBody, testCmd)
+            }
+            continue
+        }
 
-    if (argv.dryRun) {
+        const display = createDisplay()
+
+        function onSignal (exitCode:number):void {
+            killRunningAgents()
+            display.cleanup()
+            process.exit(exitCode)
+        }
+        process.on('SIGINT', () => onSignal(130))
+        process.on('SIGTERM', () => onSignal(143))
+
+        let result:{ allDone:boolean }
+
         if (isGitRepo()) {
-            const repoName = getRepoName()
-            dryRunIsolated({
+            result = await runWavesIsolated({
                 tickets,
                 specBody,
-                repoName,
+                agentCmd:argv.provider,
+                model:argv.model ?? null,
+                timeout,
+                logsDir,
+                featureName,
                 conflictStrategy,
-                progressPath,
+                display,
                 testCmd,
+                maxTurns:argv.maxTurns,
                 effort:argv.effort,
                 retries:argv.retries,
                 retryDelay:argv.retryDelay,
                 concurrency:argv.concurrency,
             })
         } else {
-            dryRun(tickets, specBody, testCmd)
+            result = await runWaves(
+                tickets, specBody,
+                argv.provider, argv.model ?? null,
+                timeout,
+                logsDir,
+                testCmd,
+                display,
+                argv.maxTurns,
+                argv.effort,
+                argv.retries,
+                argv.retryDelay,
+                argv.concurrency,
+            )
         }
-        return
+
+        if (!result.allDone) {
+            anyFailed = true
+        }
     }
 
-    const display = createDisplay()
-
-    function onSignal (exitCode:number):void {
-        killRunningAgents()
-        display.cleanup()
-        process.exit(exitCode)
-    }
-    process.on('SIGINT', () => onSignal(130))
-    process.on('SIGTERM', () => onSignal(143))
-
-    let result:{ allDone:boolean }
-
-    if (isGitRepo()) {
-        result = await runWavesIsolated({
-            tickets,
-            specBody,
-            agentCmd:argv.provider,
-            model:argv.model ?? null,
-            timeout,
-            logsDir,
-            featureName,
-            conflictStrategy,
-            display,
-            testCmd,
-            maxTurns:argv.maxTurns,
-            effort:argv.effort,
-            retries:argv.retries,
-            retryDelay:argv.retryDelay,
-            concurrency:argv.concurrency,
-        })
-    } else {
-        result = await runWaves(
-            tickets, specBody,
-            argv.provider, argv.model ?? null,
-            timeout,
-            logsDir,
-            testCmd,
-            display,
-            argv.maxTurns,
-            argv.effort,
-            argv.retries,
-            argv.retryDelay,
-            argv.concurrency,
-        )
-    }
-
-    if (!result.allDone) {
+    if (anyFailed) {
         process.exit(1)
     }
 }

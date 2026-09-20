@@ -22,12 +22,12 @@ and `Separator` from `@inquirer/prompts`, update
 `resolveIssuesDir` call site type), `test/resolve.test.ts`
 (new file)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `resolveIssuesDir` uses `checkbox` + `Separator` from `@inquirer/prompts` instead of `select`
-- [ ] "All" appears as the first choice with a `Separator` below it; checking it selects every feature
-- [ ] Each feature choice label shows `<name> (<ready>/<total> ready)` with counts from `scanTickets`
-- [ ] Return type is `Array<{ dir, spec, name }>`; `--spec` flag returns a single-element array
-- [ ] Empty selection re-prompts with "Select at least one feature"
-- [ ] When exactly 1 feature directory exists, the prompt is skipped and the sole feature is auto-selected
-- [ ] `findFeatureDirs` results are sorted alphabetically by name
+- [x] `resolveIssuesDir` uses `checkbox` + `Separator` from `@inquirer/prompts` instead of `select`
+- [x] "All" appears as the first choice with a `Separator` below it; checking it selects every feature
+- [x] Each feature choice label shows `<name> (<ready>/<total> ready)` with counts from `scanTickets`
+- [x] Return type is `Array<{ dir, spec, name }>`; `--spec` flag returns a single-element array
+- [x] Empty selection re-prompts with "Select at least one feature"
+- [x] When exactly 1 feature directory exists, the prompt is skipped and the sole feature is auto-selected
+- [x] `findFeatureDirs` results are sorted alphabetically by name
