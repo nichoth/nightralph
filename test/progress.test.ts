@@ -9,6 +9,8 @@ import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
 import {
     generateProgress,
+    generateMultiFeatureProgress,
+    createProgressTracker,
     renderProgress,
     checkTicket,
     writeProgress,
@@ -701,6 +703,134 @@ test(
             merged,
             fresh,
             'should return the fresh data unchanged'
+        )
+    }
+)
+
+// -- generateMultiFeatureProgress --
+
+test(
+    'generateMultiFeatureProgress creates separate ' +
+    'ProgressData per feature',
+    t => {
+        const tickets:Ticket[] = [
+            makeTestTicket({
+                num:1,
+                slug:'setup',
+                filename:'01-setup.md',
+                feature:'auth',
+            }),
+            makeTestTicket({
+                num:2,
+                slug:'login',
+                filename:'02-login.md',
+                feature:'auth',
+            }),
+            makeTestTicket({
+                num:1,
+                slug:'charge',
+                filename:'01-charge.md',
+                feature:'payments',
+            }),
+        ]
+
+        const result = generateMultiFeatureProgress(
+            tickets
+        )
+
+        t.equal(
+            result.size, 2,
+            'should create two entries'
+        )
+        t.ok(
+            result.has('auth'),
+            'should have auth entry'
+        )
+        t.ok(
+            result.has('payments'),
+            'should have payments entry'
+        )
+        t.equal(
+            result.get('auth')!.feature,
+            'auth',
+            'auth progress has correct feature'
+        )
+        t.equal(
+            result.get('auth')!.tickets.length,
+            2,
+            'auth has two tickets'
+        )
+        t.equal(
+            result.get('payments')!.tickets.length,
+            1,
+            'payments has one ticket'
+        )
+    }
+)
+
+// -- createProgressTracker --
+
+test(
+    'createProgressTracker returns per-feature data and paths',
+    t => {
+        const authData = generateProgress('auth', [
+            makeTestTicket({
+                num:1,
+                filename:'01-setup.md',
+                feature:'auth',
+            }),
+        ])
+        const payData = generateProgress('payments', [
+            makeTestTicket({
+                num:1,
+                filename:'01-charge.md',
+                feature:'payments',
+            }),
+        ])
+        const fallbackData = generateProgress('fallback', [])
+
+        const tracker = createProgressTracker({
+            progressPaths:new Map([
+                ['auth', '.scratch/auth/progress.md'],
+                ['payments', '.scratch/payments/progress.md'],
+            ]),
+            dataMap:new Map([
+                ['auth', authData],
+                ['payments', payData],
+            ]),
+            fallbackPath:'.scratch/default/progress.md',
+            fallbackData,
+        })
+
+        t.equal(
+            tracker.dataFor('auth'),
+            authData,
+            'returns auth data'
+        )
+        t.equal(
+            tracker.pathFor('auth'),
+            '.scratch/auth/progress.md',
+            'returns auth path'
+        )
+        t.equal(
+            tracker.dataFor('payments'),
+            payData,
+            'returns payments data'
+        )
+        t.equal(
+            tracker.pathFor('payments'),
+            '.scratch/payments/progress.md',
+            'returns payments path'
+        )
+        t.equal(
+            tracker.dataFor('unknown'),
+            fallbackData,
+            'falls back for unknown feature'
+        )
+        t.equal(
+            tracker.pathFor('unknown'),
+            '.scratch/default/progress.md',
+            'falls back for unknown path'
         )
     }
 )

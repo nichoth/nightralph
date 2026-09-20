@@ -109,7 +109,8 @@ Small orchestrator that runs a single-agent session per issue.
   `dryRun(tickets, specBody)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
   `runWavesIsolated(opts)`, `HUMAN_STATUS`,
-  `renderFinishSummary(tickets, totalCompleted, failedNums)`
+  `renderFinishSummary(tickets, totalCompleted, failedNums)`,
+  `lookupSpec(specBodies, fallback, feature)`
 - **Supported providers**: `claude` (stdin prompt,
   stream-json output), `codex` (stdin prompt),
   `pi` (file-based prompt via `@tmpfile`, JSON
@@ -248,15 +249,24 @@ Small orchestrator that runs a single-agent session per issue.
   the agent to resolve conflict markers, not
   re-implement, and to keep both sides' additions
   when AGENTS.md or other docs conflict
+- **lookupSpec(specBodies, fallback, feature)**: returns
+  the spec body for a given feature from a
+  `Map<string, string>`, or `fallback` when the map is
+  undefined, the feature is empty, or the feature is not
+  in the map
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
   updates; requires `testCmd` (string); accepts
   optional `display`, `effort`, `retries`,
-  `retryDelay`, and `concurrency` in opts; a wave
-  with more ready tickets than `concurrency` runs
-  them through `runPool`, so the wave still finishes
-  fully before any branch is merged
+  `retryDelay`, `concurrency`,
+  `specBodies` (`Map<string, string>`), and
+  `progressPaths` (`Map<string, string>`) in opts;
+  when `specBodies` and `progressPaths` are provided,
+  creates a `ProgressTracker` for per-feature progress
+  files; a wave with more ready tickets than
+  `concurrency` runs them through `runPool`, so the
+  wave still finishes fully before any branch is merged
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; a failed attempt
   (non-zero exit, exit 0 with no new commits, or a red
@@ -302,13 +312,17 @@ Small orchestrator that runs a single-agent session per issue.
   pure; returns the text both `runWaves` variants log
   before `cleanup()`. The first line is the count summary
   (`Finished: N completed[, N remaining][, N failed][, N
-  need a human]`). When any ticket is `ready-for-human`
-  it adds a paragraph naming those tickets, saying an
-  agent cannot finish them, listing any
-  `ready-for-agent` tickets blocked on them, and telling
-  the user to do the work and set the status to done.
-  This is why a run whose only open tickets are human
-  ones exits 0 with an explanation instead of silently
+  need a human]`). When tickets span more than one
+  distinct `feature`, a per-feature breakdown follows
+  the total line (one `  <feat>: N completed[, ...]`
+  line per feature, sorted alphabetically). When any
+  ticket is `ready-for-human` it adds a paragraph
+  naming those tickets, saying an agent cannot finish
+  them, listing any `ready-for-agent` tickets blocked
+  on them, and telling the user to do the work and set
+  the status to done. This is why a run whose only
+  open tickets are human ones exits 0 with an
+  explanation instead of silently
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; requires
   `testCmd`; accepts `effort`, `retries`, `retryDelay`,
@@ -433,7 +447,10 @@ Small orchestrator that runs a single-agent session per issue.
 
 ### progress module (`src/progress.ts`)
 - **Exposes**: `TicketProgress`, `ProgressData`,
+  `ProgressTracker`,
   `generateProgress(feature, tickets)`,
+  `generateMultiFeatureProgress(tickets)`,
+  `createProgressTracker(opts)`,
   `renderProgress(data)`, `checkTicket(data, num, result)`,
   `writeProgress(path, data)`,
   `commitProgress(repoRoot, path, message)`,
@@ -452,6 +469,17 @@ Small orchestrator that runs a single-agent session per issue.
   tickets that were `done:true` in `existing` are
   replaced with the existing (completed) record; returns
   `fresh` unchanged when `existing` is `null`
+- **generateMultiFeatureProgress(tickets)**: groups
+  tickets by `feature` field and returns
+  `Map<string, ProgressData>` with one entry per
+  distinct feature
+- **ProgressTracker**: type with `dataFor(feature)`
+  and `pathFor(feature)` methods
+- **createProgressTracker(opts)**: factory that returns
+  a `ProgressTracker`; accepts `progressPaths`,
+  `dataMap`, `fallbackPath`, and `fallbackData`;
+  lookups fall back to the fallback values when a
+  feature is not in the maps
 - **Guarantees**: `renderProgress` produces a markdown
   checklist; `commitProgress` never throws on a no-op
   (identical content)

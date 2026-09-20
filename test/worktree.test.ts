@@ -394,7 +394,8 @@ test(
     'buildBranchName includes feature when set',
     t => {
         const ticket = makeTestTicket({
-            num:1, slug:'clean-prefix',
+            num:1,
+            slug:'clean-prefix',
             feature:'auth',
         })
         const name = buildBranchName('myrepo', ticket)

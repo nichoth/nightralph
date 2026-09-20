@@ -16,10 +16,10 @@ branch naming
 `renderPrompt`), `src/progress.ts` (per-feature paths),
 `test/orchestrator.test.ts`, `test/progress.test.ts`
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `renderFinishSummary` accepts tickets with `feature` fields and produces per-feature breakdown lines when >1 distinct feature is present
-- [ ] `renderFinishSummary` produces the same single-line output as today when all tickets share one feature
-- [ ] `renderPrompt` accepts the spec body as a parameter (already does) and the orchestrator is structured to look up per-ticket spec content by feature
-- [ ] Progress generation and file writing support per-feature paths (one progress.md per feature directory)
-- [ ] Existing `renderFinishSummary` tests still pass; new test verifies multi-feature breakdown format
+- [x] `renderFinishSummary` accepts tickets with `feature` fields and produces per-feature breakdown lines when >1 distinct feature is present
+- [x] `renderFinishSummary` produces the same single-line output as today when all tickets share one feature
+- [x] `renderPrompt` accepts the spec body as a parameter (already does) and the orchestrator is structured to look up per-ticket spec content by feature
+- [x] Progress generation and file writing support per-feature paths (one progress.md per feature directory)
+- [x] Existing `renderFinishSummary` tests still pass; new test verifies multi-feature breakdown format

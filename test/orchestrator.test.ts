@@ -34,6 +34,7 @@ import {
     DEFAULT_RETRIES,
     ALL_EFFORT_LEVELS,
     renderFinishSummary,
+    lookupSpec,
     HUMAN_STATUS,
     type Ticket,
     type EffortLevel,
@@ -1167,6 +1168,38 @@ test('renderPrompt includes spec and ticket', t => {
     t.ok(
         prompt.includes('AGENT INSTRUCTIONS'),
         'contains instructions'
+    )
+})
+
+test('lookupSpec returns per-feature spec when available', t => {
+    const specBodies = new Map([
+        ['auth', 'auth spec content'],
+        ['payments', 'payments spec content'],
+    ])
+    t.equal(
+        lookupSpec(specBodies, 'fallback', 'auth'),
+        'auth spec content',
+        'returns auth spec'
+    )
+    t.equal(
+        lookupSpec(specBodies, 'fallback', 'payments'),
+        'payments spec content',
+        'returns payments spec'
+    )
+    t.equal(
+        lookupSpec(specBodies, 'fallback', 'unknown'),
+        'fallback',
+        'falls back for unknown feature'
+    )
+    t.equal(
+        lookupSpec(undefined, 'fallback', 'auth'),
+        'fallback',
+        'falls back when no map provided'
+    )
+    t.equal(
+        lookupSpec(specBodies, 'fallback', ''),
+        'fallback',
+        'falls back for empty feature'
     )
 })
 
@@ -3578,6 +3611,84 @@ test(
             'unblocked ticket is not listed as blocked')
         t.ok(out.includes('run nightralph again'),
             'tells the user to rerun')
+    }
+)
+
+test(
+    'renderFinishSummary produces per-feature breakdown ' +
+    'when >1 feature',
+    t => {
+        const tickets = [
+            makeTicket({
+                num:1,
+                filename:'01-a.md',
+                status:'done',
+                feature:'auth',
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-b.md',
+                status:'done',
+                feature:'auth',
+            }),
+            makeTicket({
+                num:1,
+                filename:'01-c.md',
+                status:'done',
+                feature:'payments',
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-d.md',
+                status:'ready-for-agent',
+                feature:'payments',
+            }),
+        ]
+        const out = renderFinishSummary(
+            tickets, 3, new Set()
+        )
+        t.ok(
+            out.includes('auth'),
+            'mentions auth feature'
+        )
+        t.ok(
+            out.includes('payments'),
+            'mentions payments feature'
+        )
+        t.ok(
+            out.includes('3 completed'),
+            'total line counts all completed'
+        )
+    }
+)
+
+test(
+    'renderFinishSummary single-line when all tickets ' +
+    'share one feature',
+    t => {
+        const tickets = [
+            makeTicket({
+                num:1,
+                filename:'01-a.md',
+                status:'done',
+                feature:'auth',
+            }),
+            makeTicket({
+                num:2,
+                filename:'02-b.md',
+                status:'done',
+                feature:'auth',
+            }),
+        ]
+        const out = renderFinishSummary(
+            tickets, 2, new Set()
+        )
+        const lines = out.split('\n')
+        t.equal(lines.length, 1, 'single line')
+        t.ok(
+            !out.includes('auth'),
+            'does not name the feature'
+        )
     }
 )
 

@@ -251,7 +251,7 @@ async function runExecute (argv:{
 
         if (tickets.length === 0) {
             console.log(
-                `No ticket files found for ` +
+                'No ticket files found for ' +
                 `${name}. Skipping.`
             )
             continue

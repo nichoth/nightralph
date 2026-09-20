@@ -26,12 +26,15 @@ import {
 } from './worktree.js'
 import {
     generateProgress,
+    generateMultiFeatureProgress,
+    createProgressTracker,
     readProgress,
     mergeProgress,
     writeProgress,
     commitProgress,
     checkTicket,
     type ProgressData,
+    type ProgressTracker,
 } from './progress.js'
 import {
     mergeBranch,
@@ -387,6 +390,15 @@ export function stripSpecSection (
     }
 
     return out.join('\n')
+}
+
+export function lookupSpec (
+    specBodies:Map<string, string>|undefined,
+    fallback:string,
+    feature:string
+):string {
+    if (!feature || !specBodies) return fallback
+    return specBodies.get(feature) ?? fallback
 }
 
 export function renderPrompt (
@@ -1493,6 +1505,7 @@ type TicketAttemptOpts = {
     repoName:string
     baseBranch:string
     specBody:string
+    specBodies?:Map<string, string>
     agentCmd:string
     model:string|null
     timeout:number
@@ -1524,9 +1537,12 @@ async function runTicketAttempt (
     }
 
     d.setTicketStatus(ticket.num, 'in-progress')
+    const ticketSpec = lookupSpec(
+        opts.specBodies, opts.specBody, ticket.feature
+    )
     const agentResult = await spawnAgent({
         prompt:renderPrompt(
-            opts.specBody, ticket,
+            ticketSpec, ticket,
             { testCmd:opts.testCmd }
         ),
         agentCmd:opts.agentCmd,
@@ -1739,11 +1755,40 @@ export function renderFinishSummary (
         (human.length > 0 ?
             `, ${human.length} need a human` :
             '')
-    if (human.length === 0) return counts
 
-    const noun = human.length === 1 ? 'ticket is' : 'tickets are'
-    const lines = [
-        counts,
+    const lines:string[] = [counts]
+
+    const features = new Set(
+        tickets.map(t => t.feature).filter(Boolean)
+    )
+    if (features.size > 1) {
+        lines.push('')
+        for (const feat of [...features].sort()) {
+            const ft = tickets.filter(
+                t => t.feature === feat
+            )
+            const done = ft.filter(
+                t => t.status === 'done'
+            ).length
+            const failed = ft.filter(
+                t => failedNums.has(t.num)
+            ).length
+            const rem = ft.filter(
+                t => t.status === 'ready-for-agent'
+            ).length
+            let detail = `  ${feat}: ${done} completed`
+            if (rem > 0) detail += `, ${rem} remaining`
+            if (failed > 0) detail += `, ${failed} failed`
+            lines.push(detail)
+        }
+    }
+
+    if (human.length === 0) return lines.join('\n')
+
+    const noun = human.length === 1 ?
+        'ticket is' :
+        'tickets are'
+    lines.push(
         '',
         (remaining.length === 0 && failedNums.size === 0 ?
             `All remaining ${noun} marked ${HUMAN_STATUS}. ` :
@@ -1751,7 +1796,7 @@ export function renderFinishSummary (
         'nightralph only runs ready-for-agent tickets, ' +
         'so an agent cannot finish these:',
         indentFilenames(human),
-    ]
+    )
     if (blockedByHuman.length > 0) {
         const n = blockedByHuman.length
         lines.push(
@@ -1958,6 +2003,7 @@ export async function runWaves (
 export async function runWavesIsolated (opts:{
     tickets:Array<Ticket>
     specBody:string
+    specBodies?:Map<string, string>
     agentCmd:string
     model:string|null
     timeout:number
@@ -1975,6 +2021,8 @@ export async function runWavesIsolated (opts:{
     retryDelay?:number
     // max agents running at once within a wave; default 5
     concurrency?:number
+    // per-feature progress paths for multi-feature runs
+    progressPaths?:Map<string, string>
 }):Promise<{ allDone:boolean }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
@@ -1996,20 +2044,61 @@ export async function runWavesIsolated (opts:{
         )
     }
 
-    const progressPath = join(
+    const features = new Set(
+        opts.tickets.map(t => t.feature).filter(Boolean)
+    )
+    const multiFeature = features.size > 1 &&
+        opts.progressPaths !== undefined
+
+    const fallbackProgressPath = join(
         dirname(opts.logsDir), 'progress.md'
     )
-    const progress:ProgressData = mergeProgress(
-        generateProgress(opts.featureName, opts.tickets),
-        readProgress(progressPath)
-    )
-    await saveProgress(
-        repoRoot,
-        progressPath,
-        progress,
-        `nightralph: start ${opts.featureName}`,
-        d,
-    )
+
+    let tracker:ProgressTracker
+    if (multiFeature) {
+        const multiData = generateMultiFeatureProgress(
+            opts.tickets
+        )
+        const dataMap = new Map<string, ProgressData>()
+        for (const [feat, fresh] of multiData) {
+            const path = opts.progressPaths!.get(feat) ??
+                fallbackProgressPath
+            const merged = mergeProgress(
+                fresh, readProgress(path)
+            )
+            dataMap.set(feat, merged)
+            await saveProgress(
+                repoRoot, path, merged,
+                `nightralph: start ${feat}`, d,
+            )
+        }
+        tracker = createProgressTracker({
+            progressPaths:opts.progressPaths!,
+            dataMap,
+            fallbackPath:fallbackProgressPath,
+            fallbackData:generateProgress(
+                opts.featureName, []
+            ),
+        })
+    } else {
+        const progressPath = fallbackProgressPath
+        const progress:ProgressData = mergeProgress(
+            generateProgress(
+                opts.featureName, opts.tickets
+            ),
+            readProgress(progressPath)
+        )
+        await saveProgress(
+            repoRoot, progressPath, progress,
+            `nightralph: start ${opts.featureName}`, d,
+        )
+        tracker = createProgressTracker({
+            progressPaths:new Map(),
+            dataMap:new Map(),
+            fallbackPath:progressPath,
+            fallbackData:progress,
+        })
+    }
 
     let totalCompleted = 0
     let waveNum = 0
@@ -2052,6 +2141,7 @@ export async function runWavesIsolated (opts:{
                 repoName,
                 baseBranch,
                 specBody:opts.specBody,
+                specBodies:opts.specBodies,
                 agentCmd:opts.agentCmd,
                 model:opts.model,
                 timeout:opts.timeout,
@@ -2093,15 +2183,15 @@ export async function runWavesIsolated (opts:{
                     `  ${ticket.filename}: failed to create ` +
                     `worktree: ${formatErrorMessage(outcome.error)}`
                 )
-                checkTicket(progress, ticket.num, {
+                checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
                     branch:'',
                     exitCode:-1,
                     done:false,
                 })
                 await saveProgress(
                     repoRoot,
-                    progressPath,
-                    progress,
+                    tracker.pathFor(ticket.feature),
+                    tracker.dataFor(ticket.feature),
                     `nightralph: ${ticket.filename} ` +
                     'worktree error',
                     d,
@@ -2116,15 +2206,15 @@ export async function runWavesIsolated (opts:{
                     `  ${ticket.filename}: attempt error: ` +
                     formatErrorMessage(outcome.error)
                 )
-                checkTicket(progress, ticket.num, {
+                checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
                     branch:outcome.branchName ?? '',
                     exitCode:-1,
                     done:false,
                 })
                 await saveProgress(
                     repoRoot,
-                    progressPath,
-                    progress,
+                    tracker.pathFor(ticket.feature),
+                    tracker.dataFor(ticket.feature),
                     `nightralph: ${ticket.filename} error`,
                     d,
                 )
@@ -2139,15 +2229,15 @@ export async function runWavesIsolated (opts:{
                     'but made no changes; leaving ticket ' +
                     'ready-for-agent'
                 )
-                checkTicket(progress, ticket.num, {
+                checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
                     branch:outcome.branchName,
                     exitCode:0,
                     done:false,
                 })
                 await saveProgress(
                     repoRoot,
-                    progressPath,
-                    progress,
+                    tracker.pathFor(ticket.feature),
+                    tracker.dataFor(ticket.feature),
                     `nightralph: ${ticket.filename} ` +
                     'no commits',
                     d,
@@ -2161,18 +2251,15 @@ export async function runWavesIsolated (opts:{
                 if (outcome.reason === 'exit') {
                     checkItems(ticket, outcome.completedItems)
                 }
-                // Acceptance criteria are not met when the
-                // suite is red, so checklist items the agent
-                // claimed are not checked off in that case.
-                checkTicket(progress, ticket.num, {
+                checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
                     branch:outcome.branchName,
                     exitCode:outcome.exitCode,
                     done:false,
                 })
                 await saveProgress(
                     repoRoot,
-                    progressPath,
-                    progress,
+                    tracker.pathFor(ticket.feature),
+                    tracker.dataFor(ticket.feature),
                     `nightralph: ${ticket.filename} ` +
                     (outcome.reason === 'tests' ?
                         'tests failed' :
@@ -2229,14 +2316,14 @@ export async function runWavesIsolated (opts:{
                     d.log(
                         `  ${ticket.filename}: done`
                     )
-                    checkTicket(progress, ticket.num, {
+                    checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
                         branch:branchResult.branch,
                         exitCode:0,
                     })
                     await saveProgress(
                         repoRoot,
-                        progressPath,
-                        progress,
+                        tracker.pathFor(ticket.feature),
+                        tracker.dataFor(ticket.feature),
                         `nightralph: ${ticket.filename} done`,
                         d,
                     )
@@ -2262,7 +2349,11 @@ export async function runWavesIsolated (opts:{
                                 branch:branchResult.branch,
                                 ticket,
                                 worktreePath,
-                                specBody:opts.specBody,
+                                specBody:lookupSpec(
+                                    opts.specBodies,
+                                    opts.specBody,
+                                    ticket.feature,
+                                ),
                                 agentCmd:opts.agentCmd,
                                 model:opts.model,
                                 timeout:opts.timeout,
@@ -2282,14 +2373,14 @@ export async function runWavesIsolated (opts:{
                             `  ${ticket.filename}: done ` +
                             '(resolved via respawn)'
                         )
-                        checkTicket(progress, ticket.num, {
+                        checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
                             branch:branchResult.branch,
                             exitCode:0,
                         })
                         await saveProgress(
                             repoRoot,
-                            progressPath,
-                            progress,
+                            tracker.pathFor(ticket.feature),
+                            tracker.dataFor(ticket.feature),
                             `nightralph: ${ticket.filename} ` +
                             'done (respawn)',
                             d,
@@ -2327,15 +2418,15 @@ export async function runWavesIsolated (opts:{
                                 branchResult.stderr.trim()
                             )
                         }
-                        checkTicket(progress, ticket.num, {
+                        checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
                             branch:branchResult.branch,
                             exitCode:0,
                             done:false,
                         })
                         await saveProgress(
                             repoRoot,
-                            progressPath,
-                            progress,
+                            tracker.pathFor(ticket.feature),
+                            tracker.dataFor(ticket.feature),
                             `nightralph: ${ticket.filename} ` +
                             'merge failed',
                             d,
