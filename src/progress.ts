@@ -42,6 +42,46 @@ export function generateProgress (
     }
 }
 
+export function generateMultiFeatureProgress (
+    tickets:ReadonlyArray<Ticket>
+):Map<string, ProgressData> {
+    const byFeature = new Map<string, Ticket[]>()
+    for (const t of tickets) {
+        const key = t.feature || ''
+        const arr = byFeature.get(key) ?? []
+        arr.push(t)
+        byFeature.set(key, arr)
+    }
+    const result = new Map<string, ProgressData>()
+    for (const [feat, ft] of byFeature) {
+        result.set(feat, generateProgress(feat, ft))
+    }
+    return result
+}
+
+export type ProgressTracker = {
+    dataFor:(feature:string) => ProgressData
+    pathFor:(feature:string) => string
+}
+
+export function createProgressTracker (opts:{
+    progressPaths:Map<string, string>
+    dataMap:Map<string, ProgressData>
+    fallbackPath:string
+    fallbackData:ProgressData
+}):ProgressTracker {
+    return {
+        dataFor (feature:string):ProgressData {
+            return opts.dataMap.get(feature) ??
+                opts.fallbackData
+        },
+        pathFor (feature:string):string {
+            return opts.progressPaths.get(feature) ??
+                opts.fallbackPath
+        },
+    }
+}
+
 export function isSpecComplete (
     progressPath:string
 ):boolean {

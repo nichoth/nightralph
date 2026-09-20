@@ -1,8 +1,15 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { select } from '@inquirer/prompts'
+import { checkbox, Separator } from '@inquirer/prompts'
 import { isSpecComplete } from './progress.js'
+import { scanTickets, findReadyTickets } from './orchestrator.js'
+
+export type FeatureSelection = {
+    dir:string;
+    spec:string;
+    name:string;
+}
 
 export function getScriptDir (metaUrl:string):string {
     return dirname(fileURLToPath(metaUrl))
@@ -38,19 +45,23 @@ export function findFeatureDirs (cwd:string):{
             spec:specFile,
         })
     }
+    results.sort((a, b) => a.name.localeCompare(b.name))
     return results
 }
+
+const ALL_VALUE = '__all__'
 
 export async function resolveIssuesDir (
     specName:string|undefined,
     cwd:string = process.cwd(),
-):Promise<{ dir:string; spec:string }> {
+):Promise<FeatureSelection[]> {
     if (specName) {
         const featureDir = join(cwd, '.scratch', specName)
-        return {
+        return [{
             dir:join(featureDir, 'issues'),
             spec:join(featureDir, 'spec.md'),
-        }
+            name:specName,
+        }]
     }
 
     const features = findFeatureDirs(cwd)
@@ -63,20 +74,45 @@ export async function resolveIssuesDir (
         process.exit(2)
     }
 
-    let chosen:typeof features[0]
     if (features.length === 1) {
-        chosen = features[0]
-        console.log(`Using feature: ${chosen.name}`)
-    } else {
-        const name = await select({
-            message:'Which feature?',
-            choices:features.map(f => ({
-                name:f.name,
-                value:f.name,
-            })),
-        })
-        chosen = features.find(f => f.name === name)!
+        const f = features[0]
+        console.log(`Using feature: ${f.name}`)
+        return [{ dir:f.dir, spec:f.spec, name:f.name }]
     }
 
-    return { dir:chosen.dir, spec:chosen.spec }
+    const featureChoices = features.map(f => {
+        const tickets = scanTickets(f.dir)
+        const ready = findReadyTickets(tickets).length
+        return {
+            name:`${f.name} (${ready}/${tickets.length} ready)`,
+            value:f.name,
+        }
+    })
+
+    while (true) {
+        const selected = await checkbox({
+            message:'Which features?',
+            choices:[
+                { name:'All', value:ALL_VALUE },
+                new Separator(),
+                ...featureChoices,
+            ],
+        })
+
+        if (selected.length === 0) {
+            console.log('Select at least one feature')
+            continue
+        }
+
+        const names = selected.includes(ALL_VALUE) ?
+            features.map(f => f.name) :
+            selected
+
+        return names.map(name => {
+            const f = features.find(
+                ff => ff.name === name
+            )!
+            return { dir:f.dir, spec:f.spec, name:f.name }
+        })
+    }
 }

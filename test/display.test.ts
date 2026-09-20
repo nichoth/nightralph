@@ -1629,3 +1629,181 @@ test('StatusDisplay - cleanup does not touch ' +
         'cleanup leaves SIGTERM listeners untouched'
     )
 })
+
+// -- Tests for feature/num prefix rendering --
+
+test('StatusDisplay renders feature/num when ' +
+    'feature is present', t => {
+    const stream = createMockStream()
+    stream.rows = 40
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01-login.md', feature:'auth' },
+        { num:3, filename:'03-refund.md', feature:'payments' },
+    ]
+    display.startWave(1, 1, tickets)
+
+    const output = stream.getOutput()
+    t.ok(
+        output.includes('auth/01'),
+        'should render auth/01 for ticket with feature'
+    )
+    t.ok(
+        output.includes('payments/03'),
+        'should render payments/03 for ticket with feature'
+    )
+})
+
+test('StatusDisplay falls back to filename when ' +
+    'feature is absent', t => {
+    const stream = createMockStream()
+    stream.rows = 40
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01-task.md' },
+        { num:2, filename:'02-task.md' },
+    ]
+    display.startWave(1, 1, tickets)
+
+    const output = stream.getOutput()
+    t.ok(
+        output.includes('01-task.md'),
+        'should render filename when no feature'
+    )
+    t.ok(
+        output.includes('02-task.md'),
+        'should render filename when no feature'
+    )
+})
+
+test('setTicketStatus uses compound identity when ' +
+    'feature is present', t => {
+    const stream = createMockStream()
+    stream.rows = 40
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01-login.md', feature:'auth' },
+        { num:1, filename:'01-setup.md', feature:'payments' },
+    ]
+    display.startWave(1, 1, tickets)
+
+    stream.clear()
+    display.setTicketStatus(1, 'done', 'auth')
+
+    const output = stream.getOutput()
+    const lines = output.split('\n')
+    const authLine = lines.find(l => l.includes('auth/01'))
+    const paymentsLine = lines.find(
+        l => l.includes('payments/01')
+    )
+    t.ok(authLine, 'auth/01 line should exist')
+    t.ok(paymentsLine, 'payments/01 line should exist')
+    t.ok(
+        authLine!.includes('●'),
+        'auth/01 should show filled dot (done)'
+    )
+    t.ok(
+        paymentsLine!.includes('○'),
+        'payments/01 should still show empty dot (pending)'
+    )
+})
+
+test('setTicketStatus matches by num alone when ' +
+    'feature is absent', t => {
+    const stream = createMockStream()
+    stream.rows = 40
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01-task.md' },
+        { num:2, filename:'02-task.md' },
+    ]
+    display.startWave(1, 1, tickets)
+
+    stream.clear()
+    display.setTicketStatus(1, 'in-progress')
+
+    const output = stream.getOutput()
+    t.ok(
+        output.includes('01-task.md'),
+        'ticket 1 should still render'
+    )
+})
+
+test('PlainDisplay includes feature/num in ' +
+    'startWave output', t => {
+    const capturedOutput:string[] = []
+    const originalLog = console.log
+    console.log = (...args:Array<any>):void => {
+        capturedOutput.push(args.join(' '))
+    }
+
+    const display = new PlainDisplay()
+    const tickets = [
+        {
+            num:1,
+            filename:'01-login.md',
+            feature:'auth',
+        },
+        {
+            num:3,
+            filename:'03-refund.md',
+            feature:'payments',
+        },
+    ]
+    display.startWave(1, 2, tickets)
+    console.log = originalLog
+
+    const allOutput = capturedOutput.join('\n')
+    t.ok(
+        allOutput.includes('auth/01'),
+        'PlainDisplay should show auth/01'
+    )
+    t.ok(
+        allOutput.includes('payments/03'),
+        'PlainDisplay should show payments/03'
+    )
+})
+
+test('Display tests verify feature/num with tickets ' +
+    'from multiple features', t => {
+    const stream = createMockStream()
+    stream.rows = 40
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01-login.md', feature:'auth' },
+        { num:2, filename:'02-signup.md', feature:'auth' },
+        { num:1, filename:'01-setup.md', feature:'payments' },
+        { num:3, filename:'03-refund.md', feature:'payments' },
+    ]
+    display.startWave(1, 1, tickets)
+
+    const output = stream.getOutput()
+    t.ok(output.includes('auth/01'), 'has auth/01')
+    t.ok(output.includes('auth/02'), 'has auth/02')
+    t.ok(output.includes('payments/01'), 'has payments/01')
+    t.ok(output.includes('payments/03'), 'has payments/03')
+
+    stream.clear()
+    display.setTicketStatus(1, 'done', 'payments')
+
+    const updated = stream.getOutput()
+    const lines = updated.split('\n')
+
+    const authOne = lines.find(l => l.includes('auth/01'))
+    const payOne = lines.find(l => l.includes('payments/01'))
+    t.ok(authOne, 'auth/01 still rendered')
+    t.ok(payOne, 'payments/01 still rendered')
+    t.ok(
+        authOne!.includes('○'),
+        'auth/01 is still pending'
+    )
+    t.ok(
+        payOne!.includes('●'),
+        'payments/01 is done'
+    )
+})

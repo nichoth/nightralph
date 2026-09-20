@@ -54,7 +54,10 @@ export function buildBranchName (
     ticket:Ticket
 ):string {
     const num = String(ticket.num).padStart(2, '0')
-    return `${repoName}--${num}-${ticket.slug}`
+    const prefix = ticket.feature ?
+        `${ticket.feature}-` :
+        ''
+    return `${repoName}--${prefix}${num}-${ticket.slug}`
 }
 
 async function createWorktreeNow (
@@ -67,12 +70,14 @@ async function createWorktreeNow (
 ):Promise<{ worktreePath:string; branchName:string }> {
     const { repoRoot, repoName, baseBranch, ticket } = opts
     const branchName = buildBranchName(repoName, ticket)
+    const num = String(ticket.num).padStart(2, '0')
+    const prefix = ticket.feature ?
+        `${ticket.feature}-` :
+        ''
     const worktreePath = join(
         repoRoot,
         '..',
-        `${repoName}.${String(
-            ticket.num
-        ).padStart(2, '0')}-${ticket.slug}`
+        `${repoName}.${prefix}${num}-${ticket.slug}`
     )
 
     if (existsSync(worktreePath)) {

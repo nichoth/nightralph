@@ -8,6 +8,7 @@ export type TicketStatus =
 export type DisplayTicket = {
     readonly num:number
     readonly filename:string
+    readonly feature?:string
     status:TicketStatus
 }
 
@@ -38,14 +39,20 @@ export type Display = {
         tickets:ReadonlyArray<{
             num:number
             filename:string
+            feature?:string
         }>,
         progress?:RunProgress,
         remaining?:ReadonlyArray<{
             num:number
             filename:string
+            feature?:string
         }>,
     ):void
-    setTicketStatus(num:number, status:TicketStatus):void
+    setTicketStatus(
+        num:number,
+        status:TicketStatus,
+        feature?:string,
+    ):void
     log(message:string):void
     cleanup():void
 }
@@ -95,6 +102,16 @@ export const color = {
         return `${ESC}2m${text}${ESC}0m`
     },
 } as const
+
+function ticketLabel (
+    ticket:{ num:number; filename:string; feature?:string },
+):string {
+    if (ticket.feature) {
+        const padded = String(ticket.num).padStart(2, '0')
+        return `${ticket.feature}/${padded}`
+    }
+    return ticket.filename
+}
 
 const FILLED_DOT = '●'
 const EMPTY_DOT = '○'
@@ -176,11 +193,16 @@ export class StatusDisplay implements Display {
     startWave (
         waveNum:number,
         totalWaves:number,
-        tickets:Array<Readonly<{ num:number; filename:string }>>,
+        tickets:Array<Readonly<{
+            num:number
+            filename:string
+            feature?:string
+        }>>,
         progress?:RunProgress,
         remaining?:ReadonlyArray<{
             num:number
             filename:string
+            feature?:string
         }>,
     ):void {
         this.wave = {
@@ -215,10 +237,18 @@ export class StatusDisplay implements Display {
         this.render()
     }
 
-    setTicketStatus (num:number, status:TicketStatus):void {
+    setTicketStatus (
+        num:number,
+        status:TicketStatus,
+        feature?:string,
+    ):void {
         if (!this.wave) return
 
-        const ticket = this.wave.tickets.find(t => t.num === num)
+        const ticket = feature ?
+            this.wave.tickets.find(
+                t => t.num === num && t.feature === feature,
+            ) :
+            this.wave.tickets.find(t => t.num === num)
         if (ticket) {
             ticket.status = status
 
@@ -306,7 +336,9 @@ export class StatusDisplay implements Display {
             // All tickets fit, no pagination
             for (const ticket of tickets) {
                 const dot = renderDot(ticket.status)
-                const name = fitLine(ticket.filename, width - 2)
+                const name = fitLine(
+                    ticketLabel(ticket), width - 2,
+                )
                 output += `${dot} ${name}\n`
             }
             renderedTicketCount = tickets.length
@@ -363,7 +395,9 @@ export class StatusDisplay implements Display {
 
             for (const ticket of visibleTickets) {
                 const dot = renderDot(ticket.status)
-                const name = fitLine(ticket.filename, width - 2)
+                const name = fitLine(
+                    ticketLabel(ticket), width - 2,
+                )
                 output += `${dot} ${name}\n`
             }
 
@@ -409,11 +443,16 @@ export class PlainDisplay implements Display {
     startWave (
         waveNum:number,
         _totalWaves:number,
-        tickets:ReadonlyArray<{ num:number; filename:string }>,
+        tickets:ReadonlyArray<{
+            num:number
+            filename:string
+            feature?:string
+        }>,
         progress?:RunProgress,
         _remaining?:ReadonlyArray<{
             num:number
             filename:string
+            feature?:string
         }>,
     ):void {
         const pct = progress && progress.total > 0 ?
@@ -421,11 +460,15 @@ export class PlainDisplay implements Display {
             ''
         console.log(
             `\nWave ${waveNum}${pct}: ` +
-            tickets.map(t => t.filename).join(', ')
+            tickets.map(t => ticketLabel(t)).join(', ')
         )
     }
 
-    setTicketStatus (_num:number, _status:TicketStatus):void {
+    setTicketStatus (
+        _num:number,
+        _status:TicketStatus,
+        _feature?:string,
+    ):void {
         // no-op: plain mode reports via log()
     }
 

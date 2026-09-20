@@ -9,3 +9,4 @@ PROMPT.md
 mock-change-*.txt
 TODO.md
 .worktrees/
+.agents
