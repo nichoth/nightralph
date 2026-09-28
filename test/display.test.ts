@@ -82,14 +82,49 @@ function createTestTickets ():Array<DisplayTicket> {
     ]
 }
 
-function lastFrame (output:string):string {
+function stripAnsi (output:string):string {
     const esc = String.fromCharCode(27)
     const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
-    const plain = output.replace(ansiRe, '')
-    const waveMatch = plain.match(/Wave \d+\/\d+/)
-    if (!waveMatch) return ''
-    const idx = plain.lastIndexOf(waveMatch[0])
-    return plain.substring(idx)
+    return output.replace(ansiRe, '')
+}
+
+function lastFrame (output:string):string {
+    const plain = stripAnsi(output)
+    const matches = [...plain.matchAll(/Wave \d+\/\d+/g)]
+    if (matches.length === 0) return ''
+    const last = matches[matches.length - 1]
+    return last ? plain.substring(last.index!) : ''
+}
+
+function rawLastFrame (output:string):string {
+    const plain = stripAnsi(output)
+    const matches = [...plain.matchAll(/Wave \d+\/\d+/g)]
+    if (matches.length === 0) return ''
+    const last = matches[matches.length - 1]
+    return last ? output.substring(
+        output.lastIndexOf(last[0]),
+    ) : ''
+}
+
+function headerNumbers (frame:string):{
+    waveNum:number
+    totalWaves:number
+    done:number
+    total:number
+    pct:number
+}|null {
+    const plain = stripAnsi(frame)
+    const match = plain.match(
+        /Wave (\d+)\/(\d+)\D+(\d+)\/(\d+)\D+(\d+)%/,
+    )
+    if (!match) return null
+    return {
+        waveNum:parseInt(match[1], 10),
+        totalWaves:parseInt(match[2], 10),
+        done:parseInt(match[3], 10),
+        total:parseInt(match[4], 10),
+        pct:parseInt(match[5], 10),
+    }
 }
 
 // -- Tests for AC4.1 and AC4.2: Wave transitions --
@@ -815,15 +850,15 @@ test('non-wave tickets show pending empty dot', t => {
     display.startRun(allTickets)
     display.startWave(1, 2, [allTickets[0]])
 
-    const esc = String.fromCharCode(27)
-    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
-    const plain = stream.getOutput().replace(ansiRe, '')
-    const lines = plain.split('\n')
-    const pendingLine = lines.find(l => l.includes('pending.md'))
-    t.ok(pendingLine, 'should have a line for pending ticket')
+    const raw = stream.getOutput()
+    const rawLines = raw.split('\n')
+    const pendingLine = rawLines.find(
+        l => stripAnsi(l).includes('pending.md'),
+    )
+
     t.ok(
-        pendingLine!.includes('○'),
-        'non-wave ticket should use empty dot'
+        pendingLine && pendingLine.includes(renderDot('pending')),
+        'non-wave ticket should show pending dot'
     )
 })
 
@@ -845,14 +880,14 @@ test('setTicketStatus does not affect non-wave tickets', t => {
     stream.clear()
     display.setTicketStatus(1, 'in-progress')
 
-    const esc = String.fromCharCode(27)
-    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
-    const plain = stream.getOutput().replace(ansiRe, '')
-    const lines = plain.split('\n')
-    const pendingLine = lines.find(l => l.includes('pending.md'))
-    t.ok(pendingLine, 'non-wave ticket should still be rendered')
+    const raw = stream.getOutput()
+    const rawLines = raw.split('\n')
+    const pendingLine = rawLines.find(
+        l => stripAnsi(l).includes('pending.md'),
+    )
+
     t.ok(
-        pendingLine!.includes('○'),
+        pendingLine && pendingLine.includes(renderDot('pending')),
         'non-wave ticket should still show empty dot'
     )
 })
@@ -937,17 +972,28 @@ test('AC1.2/AC1.5: done status persists, failed persists', t => {
     stream.clear()
     display.startWave(2, 2, [])
 
-    const frame = lastFrame(stream.getOutput())
-    const esc = String.fromCharCode(27)
-    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
-    const plain = frame.replace(ansiRe, '')
-    const lines = plain.split('\n')
+    const raw = rawLastFrame(stream.getOutput())
+    const rawLines = raw.split('\n')
 
-    const line1 = lines.find(l => l.includes('task1.md'))
-    const line2 = lines.find(l => l.includes('task2.md'))
+    const line1Raw = rawLines.find(
+        l => stripAnsi(l).includes('task1.md'),
+    )
+    const line2Raw = rawLines.find(
+        l => stripAnsi(l).includes('task2.md'),
+    )
 
-    t.ok(line1 && line1.includes('●'), 'task1 should have green dot')
-    t.ok(line2 && line2.includes('●'), 'task2 should have red dot')
+    t.ok(
+        line1Raw &&
+        line1Raw.includes(renderDot('done')) &&
+        !line1Raw.includes(renderDot('failed')),
+        'task1 should have done dot (green, not red)'
+    )
+    t.ok(
+        line2Raw &&
+        line2Raw.includes(renderDot('failed')) &&
+        !line2Raw.includes(renderDot('done')),
+        'task2 should have failed dot (red, not green)'
+    )
 })
 
 test('AC1.3: ticket order is stable across waves', t => {
@@ -1065,20 +1111,28 @@ test('AC2.8: blocked row fits terminal width', t => {
     stream.columns = 30
     const display = new StatusDisplay({ stream })
 
-    const tickets = [
-        { num:1, filename:'01.md' },
-        { num:2, filename:'02.md' },
-    ]
+    // Create enough tickets to make long header
+    const tickets = Array.from({ length:100 }, (_, i) => ({
+        num:i + 1,
+        filename:`t${i + 1}.md`,
+        feature:'f',
+    }))
 
     display.startRun(tickets)
-    display.startWave(1, 1, tickets)
-    display.setBlocked(2, 'f', ['f/01'])
+    display.startWave(99, 99, tickets.slice(0, 10))
+    // Mark 50 as done to make header show "50/100 done"
+    for (let i = 0; i < 50; i++) {
+        display.setTicketStatus(i + 1, 'done')
+    }
+    display.setBlocked(2, 'f', [
+        'f/01', 'f/03', 'f/04', 'f/05',
+    ])
 
-    const esc = String.fromCharCode(27)
-    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
-    const plain = stream.getOutput().replace(ansiRe, '')
+    const plain = stripAnsi(stream.getOutput())
     const maxWidth = stream.columns - 1
-    const tooLong = plain.split('\n').filter(l => l.length > maxWidth)
+    const tooLong = plain.split('\n').filter(
+        l => l.length > maxWidth,
+    )
 
     t.equal(
         tooLong.length, 0,
@@ -1100,17 +1154,17 @@ test('AC2.8: blocked row shows blocked dot', t => {
     display.startWave(1, 1, tickets)
     display.setBlocked(2, undefined, ['01-task.md'])
 
-    const esc = String.fromCharCode(27)
-    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
-    const plain = stream.getOutput().replace(ansiRe, '')
+    const raw = rawLastFrame(stream.getOutput())
+    const plain = stripAnsi(raw)
+    const lines = plain.split('\n')
+    const task2Line = lines.find(l => l.includes('task2.md'))
 
     t.ok(
-        plain.includes('task2.md'),
-        'should render blocked ticket'
-    )
-    t.ok(
-        plain.includes('blocked by'),
-        'output should indicate blocked status'
+        task2Line &&
+        raw.substring(
+            raw.indexOf(task2Line),
+        ).includes(renderDot('blocked')),
+        'blocked row should contain blocked dot'
     )
 })
 
@@ -1127,10 +1181,13 @@ test('blocked suffix contains blocker label', t => {
     display.startWave(1, 1, tickets)
     display.setBlocked(2, 'f', ['f/01'])
 
-    const frame = lastFrame(stream.getOutput())
+    const plain = stripAnsi(lastFrame(stream.getOutput()))
+    const lines = plain.split('\n')
+    const f02Line = lines.find(l => l.includes('f/02'))
+
     t.ok(
-        frame.includes('f/01'),
-        'frame should contain blocker label'
+        f02Line && f02Line.includes('f/01'),
+        'blocked row for f/02 should contain f/01'
     )
 })
 
@@ -1148,14 +1205,17 @@ test('blocked suffix with multiple blockers', t => {
     display.startWave(1, 1, tickets)
     display.setBlocked(2, 'f', ['f/01', 'f/03'])
 
-    const frame = lastFrame(stream.getOutput())
+    const plain = stripAnsi(lastFrame(stream.getOutput()))
+    const lines = plain.split('\n')
+    const f02Line = lines.find(l => l.includes('f/02'))
+
     t.ok(
-        frame.includes('f/01'),
-        'should contain first blocker'
+        f02Line && f02Line.includes('f/01'),
+        'blocked row should contain first blocker'
     )
     t.ok(
-        frame.includes('f/03'),
-        'should contain second blocker'
+        f02Line && f02Line.includes('f/03'),
+        'blocked row should contain second blocker'
     )
 })
 
@@ -1175,14 +1235,13 @@ test('AC3.2/AC3.3: header shows done/total and 0% initially', t => {
     display.startWave(1, 1, tickets)
 
     const frame = lastFrame(stream.getOutput())
-    t.ok(
-        frame.includes('0/5 done'),
-        'should show 0 done out of 5 total'
-    )
-    t.ok(
-        frame.includes('0%'),
-        'should show 0 percent'
-    )
+    const nums = headerNumbers(frame)
+    t.ok(nums, 'should have valid header')
+    if (nums) {
+        t.equal(nums.done, 0, 'should show 0 done')
+        t.equal(nums.total, 5, 'should show 5 total')
+        t.equal(nums.pct, 0, 'should show 0%')
+    }
 })
 
 test('AC3.4: header shows 100% when all done', t => {
@@ -1205,14 +1264,13 @@ test('AC3.4: header shows 100% when all done', t => {
     }
 
     const frame = lastFrame(stream.getOutput())
-    t.ok(
-        frame.includes('5/5 done'),
-        'should show 5 done out of 5 total'
-    )
-    t.ok(
-        frame.includes('100%'),
-        'should show 100 percent'
-    )
+    const nums = headerNumbers(frame)
+    t.ok(nums, 'should have valid header')
+    if (nums) {
+        t.equal(nums.done, 5, 'should show 5 done')
+        t.equal(nums.total, 5, 'should show 5 total')
+        t.equal(nums.pct, 100, 'should show 100%')
+    }
 })
 
 test('AC3.5: failed and blocked do not count as done', t => {
@@ -1237,14 +1295,13 @@ test('AC3.5: failed and blocked do not count as done', t => {
     display.setTicketStatus(5, 'pending')
 
     const frame = lastFrame(stream.getOutput())
-    t.ok(
-        frame.includes('2/5 done'),
-        'only 2 done, not failed or blocked'
-    )
-    t.ok(
-        frame.includes('40%'),
-        'should show 40 percent'
-    )
+    const nums = headerNumbers(frame)
+    t.ok(nums, 'should have valid header')
+    if (nums) {
+        t.equal(nums.done, 2, 'should show 2 done')
+        t.equal(nums.total, 5, 'should show 5 total')
+        t.equal(nums.pct, 40, 'should show 40%')
+    }
 })
 
 // -- Tests for AC5: Pagination --
@@ -2162,39 +2219,67 @@ test('AC2.5: renderDot(blocked) differs from other statuses',
 test('AC4.5: PlainDisplay startRun and setBlocked are no-ops',
     t => {
         const logs:string[] = []
-        const display = new PlainDisplay()
+        const origLog = console.log
+        console.log = (...args:any[]) => {
+            logs.push(args.join(' '))
+        }
 
-        display.startRun([
-            { num:1, filename:'task1.md' },
-        ])
-        display.setBlocked(1, undefined, ['task2.md'])
+        try {
+            const display = new PlainDisplay()
 
-        // Verify no console.log was called (logs is empty)
-        t.equal(logs.length, 0, 'no logs from startRun or setBlocked')
+            display.startRun([
+                { num:1, filename:'task1.md' },
+            ])
+            display.setBlocked(1, undefined, ['task2.md'])
+
+            t.equal(
+                logs.length, 0,
+                'no logs from startRun or setBlocked'
+            )
+        } finally {
+            console.log = origLog
+        }
     }
 )
 
 test('AC4.5: PlainDisplay output format unchanged', t => {
-    const logs:string[] = []
     const origLog = console.log
-    console.log = (...args:any[]) => {
-        logs.push(args.join(' '))
-    }
 
     try {
-        const display = new PlainDisplay()
-        display.startWave(1, 2, [
+        // Run 1: with startRun and setBlocked
+        const logs1:string[] = []
+        console.log = (...args:any[]) => {
+            logs1.push(args.join(' '))
+        }
+
+        const display1 = new PlainDisplay()
+        display1.startRun([
+            { num:1, filename:'task1.md' },
+            { num:2, filename:'task2.md' },
+        ])
+        display1.setBlocked(1, undefined, ['task2.md'])
+        display1.startWave(1, 2, [
             { num:1, filename:'task1.md' },
             { num:2, filename:'task2.md' },
         ], { completed:0, total:2 })
 
-        const output = logs[0]
-        t.ok(output.includes('Wave 1'),
-            'output includes wave number')
-        t.ok(output.includes('task1.md'),
-            'output includes ticket filename')
-        t.ok(output.includes('task2.md'),
-            'output includes both tickets')
+        // Run 2: without startRun and setBlocked
+        const logs2:string[] = []
+        console.log = (...args:any[]) => {
+            logs2.push(args.join(' '))
+        }
+
+        const display2 = new PlainDisplay()
+        display2.startWave(1, 2, [
+            { num:1, filename:'task1.md' },
+            { num:2, filename:'task2.md' },
+        ], { completed:0, total:2 })
+
+        // Verify format is identical
+        t.deepEqual(
+            logs1, logs2,
+            'PlainDisplay output unchanged with/without startRun'
+        )
     } finally {
         console.log = origLog
     }

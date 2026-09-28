@@ -238,15 +238,11 @@ export class StatusDisplay implements Display {
     startWave (
         waveNum:number,
         totalWaves:number,
-        tickets:Array<Readonly<TicketRef>>,
+        tickets:ReadonlyArray<TicketRef>,
         _progress?:RunProgress,
     ):void {
         if (!this.hasRun) {
-            this.tickets = tickets.map(t => ({
-                ...t,
-                status:'pending' as const,
-            }))
-            this.hasRun = true
+            this.startRun(tickets)
         }
 
         this.wave = {
