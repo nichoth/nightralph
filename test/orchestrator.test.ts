@@ -4219,12 +4219,16 @@ test('runWaves with only human tickets logs them and is allDone',
         const tickets = scanTickets(issuesDir)
         const logs:string[] = []
         const display = {
-            startRun () {},
+            startRun () {
+                t.fail('no startRun should be called')
+            },
             startWave () {
                 t.fail('no wave should start')
             },
             setTicketStatus () {},
-            setBlocked () {},
+            setBlocked () {
+                t.fail('no setBlocked should be called')
+            },
             log (m:string) { logs.push(m) },
             cleanup () {},
         }

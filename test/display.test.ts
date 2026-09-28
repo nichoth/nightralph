@@ -1680,10 +1680,14 @@ class RecordingDisplay implements Display {
         })
     }
 
-    setTicketStatus (num:number, status:TicketStatus):void {
+    setTicketStatus (
+        num:number,
+        status:TicketStatus,
+        feature?:string,
+    ):void {
         this.calls.push({
             method:'setTicketStatus',
-            args:[num, status],
+            args:[num, status, feature],
         })
     }
 
@@ -1759,6 +1763,277 @@ function makeTicketBody (status:string):string {
 
 const MOCK_AGENT_PASS = join(
     process.cwd(), 'test', 'mock-agent-pass.js'
+)
+const MOCK_AGENT_FAIL_TICKET_01 = join(
+    process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
+)
+
+test(
+    'AC1.4 AC1.6 AC4.1: startRun with session tickets ' +
+    'sorted by feature then num',
+    async t => {
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-a.md'),
+            makeTicketBody('ready-for-agent')
+        )
+        writeFileSync(
+            join(issuesDir, '02-b.md'),
+            makeTicketBody('ready-for-agent')
+        )
+        writeFileSync(
+            join(issuesDir, '03-c.md'),
+            makeTicketBody('done')
+        )
+        writeFileSync(
+            join(issuesDir, '04-d.md'),
+            makeTicketBody('ready-for-human')
+        )
+
+        const tickets = scanTickets(issuesDir)
+        tickets.reverse()
+        // After reverse: 4, 3, 2, 1
+        // Find ticket 1 and 2 and set their features
+        const ticket1 = tickets.find(t => t.num === 1)!
+        const ticket2 = tickets.find(t => t.num === 2)!
+        ticket1.feature = 'zeta'
+        ticket2.feature = 'alpha'
+
+        const display = new RecordingDisplay()
+        const originalCwd = process.cwd()
+        process.chdir(base)
+        try {
+            await runWaves(
+                tickets,
+                'test spec',
+                MOCK_AGENT_PASS,
+                null,
+                10,
+                logsDir,
+                'true',
+                display,
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+
+        const startRunCalls =
+            display.getCallsByMethod('startRun')
+        t.equal(
+            startRunCalls.length, 1,
+            'exactly one startRun call'
+        )
+
+        const startWaveCalls =
+            display.getCallsByMethod('startWave')
+        t.equal(startWaveCalls.length > 0, true, 'startWave was called')
+
+        const calls = display.getCalls()
+        const startRunIndex = calls
+            .findIndex(c => c.method === 'startRun')
+        const firstStartWaveIndex = calls
+            .findIndex(c => c.method === 'startWave')
+        t.ok(
+            startRunIndex < firstStartWaveIndex,
+            'startRun before first startWave'
+        )
+
+        const runTickets = startRunCalls[0][0]
+        t.equal(
+            runTickets.length, 2,
+            'session has 2 tickets (not 3 or 4)'
+        )
+
+        const alphaFirst = runTickets[0]
+        const zetaSecond = runTickets[1]
+        t.equal(
+            alphaFirst.feature, 'alpha',
+            'first ticket in startRun is alpha'
+        )
+        t.equal(
+            zetaSecond.feature, 'zeta',
+            'second ticket in startRun is zeta'
+        )
+    }
+)
+
+test(
+    'AC4.3: setBlocked called after startRun and for ' +
+    'human blockers',
+    async t => {
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-a.md'),
+            makeTicketBody('ready-for-agent')
+        )
+        writeFileSync(
+            join(issuesDir, '02-b.md'),
+            '# Test\n\n**Status:** ready-for-agent\n\n' +
+            '**Blocked by:** 1'
+        )
+        writeFileSync(
+            join(issuesDir, '03-c.md'),
+            '# Test\n\n**Status:** ready-for-agent\n\n' +
+            '**Blocked by:** 4'
+        )
+        writeFileSync(
+            join(issuesDir, '04-d.md'),
+            makeTicketBody('ready-for-human')
+        )
+
+        const tickets = scanTickets(issuesDir)
+        const display = new RecordingDisplay()
+
+        const originalCwd = process.cwd()
+        process.chdir(base)
+        try {
+            await runWaves(
+                tickets,
+                'test spec',
+                MOCK_AGENT_FAIL_TICKET_01,
+                null,
+                10,
+                logsDir,
+                'true',
+                display,
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+
+        const calls = display.getCalls()
+
+        const startRunIndex = calls
+            .findIndex(c => c.method === 'startRun')
+        const firstStartWaveIndex = calls
+            .findIndex(c => c.method === 'startWave')
+
+        let firstSetBlockedAfterStartRun = -1
+        for (const [i, call] of calls.entries()) {
+            if (
+                call.method === 'setBlocked' &&
+                i > startRunIndex &&
+                i < firstStartWaveIndex
+            ) {
+                firstSetBlockedAfterStartRun = i
+                break
+            }
+        }
+
+        t.ok(
+            firstSetBlockedAfterStartRun >= 0,
+            'setBlocked called after startRun ' +
+            'and before first startWave'
+        )
+
+        const firstBlockedArgs =
+            calls[firstSetBlockedAfterStartRun].args
+        t.equal(
+            firstBlockedArgs[0], 3,
+            'first setBlocked is for ticket 3'
+        )
+        t.equal(
+            firstBlockedArgs[2].length, 1,
+            'ticket 3 blocked by one ticket'
+        )
+        t.ok(
+            firstBlockedArgs[2][0].includes('04'),
+            'ticket 3 blocked by ticket 4'
+        )
+
+        let laterSetBlocked = null
+        for (const call of calls) {
+            if (
+                call.method === 'setBlocked' &&
+                call.args[0] === 2
+            ) {
+                laterSetBlocked = call.args
+                break
+            }
+        }
+
+        t.ok(
+            laterSetBlocked !== null,
+            'setBlocked called for ticket 2'
+        )
+        t.ok(
+            laterSetBlocked[2].some((label) =>
+                label.includes('01')
+            ),
+            'ticket 2 blocked by ticket 1'
+        )
+    }
+)
+
+test(
+    'AC2.1: failed ticket keeps red dot in later waves',
+    async t => {
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-a.md'),
+            makeTicketBody('ready-for-agent')
+        )
+        writeFileSync(
+            join(issuesDir, '02-b.md'),
+            makeTicketBody('ready-for-agent')
+        )
+        writeFileSync(
+            join(issuesDir, '03-c.md'),
+            '# Test\n\n**Status:** ready-for-agent\n\n' +
+            '**Blocked by:** 2'
+        )
+
+        const tickets = scanTickets(issuesDir)
+        const stream = createMockStream()
+        const display = new StatusDisplay({ stream })
+
+        const originalCwd = process.cwd()
+        process.chdir(base)
+        try {
+            await runWaves(
+                tickets,
+                'test spec',
+                MOCK_AGENT_FAIL_TICKET_01,
+                null,
+                10,
+                logsDir,
+                'true',
+                display,
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+
+        const frame = rawLastFrame(stream.getOutput())
+        const frameNoAnsi = stripAnsi(frame)
+
+        const lines = frameNoAnsi.split('\n')
+        let ticket1Row = null
+        let ticket3Row = null
+        for (const line of lines) {
+            if (line.includes('01-a')) {
+                ticket1Row = line
+            }
+            if (line.includes('03-c')) {
+                ticket3Row = line
+            }
+        }
+
+        t.ok(ticket1Row, 'ticket 1 row found')
+        t.ok(ticket3Row, 'ticket 3 row found')
+    }
 )
 
 test(

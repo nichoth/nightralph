@@ -44,8 +44,10 @@ import {
 } from './merge.js'
 import {
     createDisplay,
+    ticketLabel,
     type RunProgress,
     type Display,
+    type TicketRef,
 } from './display.js'
 import { runTestCmd } from './testcmd.js'
 
@@ -1879,6 +1881,41 @@ export function renderFinishSummary (
     return lines.join('\n')
 }
 
+function sessionTickets (
+    tickets:ReadonlyArray<Ticket>,
+):Array<Ticket> {
+    return [...tickets]
+        .filter(t => t.status === 'ready-for-agent')
+        .sort((a, b) => (
+            a.feature.localeCompare(b.feature) || a.num - b.num
+        ))
+}
+
+function toRef (t:Ticket):TicketRef {
+    return { num:t.num, filename:t.filename, feature:t.feature }
+}
+
+function reportBlocked (
+    d:Display,
+    tickets:ReadonlyArray<Ticket>,
+    failedKeys:ReadonlySet<string>,
+):void {
+    const byKey = new Map(
+        tickets.map(t => [ticketKey(t.feature, t.num), t])
+    )
+    for (const [key, dead] of findBlockedTickets(
+        tickets, failedKeys
+    )) {
+        const ticket = byKey.get(key)
+        if (!ticket) continue
+        const labels = dead
+            .map(k => byKey.get(k))
+            .filter((t):t is Ticket => t !== undefined)
+            .map(t => ticketLabel(toRef(t)))
+        d.setBlocked(ticket.num, ticket.feature, labels)
+    }
+}
+
 function runProgress (tickets:ReadonlyArray<Ticket>):RunProgress {
     return {
         completed:tickets.filter(t => t.status === 'done').length,
@@ -1915,8 +1952,11 @@ export async function runWaves (
     let totalCompleted = 0
     let waveNum = 0
     const failedKeys = new Set<string>()
+    const session = sessionTickets(tickets)
 
     while (true) {
+        if (waveNum > 0) reportBlocked(d, tickets, failedKeys)
+
         const ready = findReadyTickets(tickets).filter(
             t => !failedKeys.has(
                 ticketKey(t.feature, t.num)
@@ -1925,6 +1965,10 @@ export async function runWaves (
         if (ready.length === 0) break
 
         waveNum++
+        if (waveNum === 1) {
+            d.startRun(session.map(toRef))
+            reportBlocked(d, tickets, failedKeys)
+        }
         d.startWave(
             waveNum,
             totalWaves,
@@ -1933,7 +1977,7 @@ export async function runWaves (
                 filename:t.filename,
                 feature:t.feature,
             })),
-            runProgress(tickets),
+            runProgress(session),
         )
 
         const results = await runPool(
@@ -2057,6 +2101,8 @@ export async function runWaves (
         }
     }
 
+    if (waveNum > 0) reportBlocked(d, tickets, failedKeys)
+
     const remaining = tickets.filter(
         t => t.status === 'ready-for-agent'
     )
@@ -2171,8 +2217,11 @@ export async function runWavesIsolated (opts:{
     let totalCompleted = 0
     let waveNum = 0
     const failedKeys = new Set<string>()
+    const session = sessionTickets(opts.tickets)
 
     while (true) {
+        if (waveNum > 0) reportBlocked(d, opts.tickets, failedKeys)
+
         const ready = findReadyTickets(opts.tickets).filter(
             t => !failedKeys.has(
                 ticketKey(t.feature, t.num)
@@ -2181,6 +2230,10 @@ export async function runWavesIsolated (opts:{
         if (ready.length === 0) break
 
         waveNum++
+        if (waveNum === 1) {
+            d.startRun(session.map(toRef))
+            reportBlocked(d, opts.tickets, failedKeys)
+        }
         d.startWave(
             waveNum,
             totalWaves,
@@ -2189,7 +2242,7 @@ export async function runWavesIsolated (opts:{
                 filename:t.filename,
                 feature:t.feature,
             })),
-            runProgress(opts.tickets),
+            runProgress(session),
         )
 
         // Each ticket runs its own attempt loop, at most
@@ -2489,6 +2542,9 @@ export async function runWavesIsolated (opts:{
                         failedKeys.add(
                             ticketKey(ticket.feature, ticket.num)
                         )
+                        d.setTicketStatus(
+                            ticket.num, 'failed', ticket.feature
+                        )
                         d.log(
                             `  ${ticket.filename}: merge failed, ` +
                             'staying ready-for-agent'
@@ -2568,6 +2624,8 @@ export async function runWavesIsolated (opts:{
             )
         }
     }
+
+    if (waveNum > 0) reportBlocked(d, opts.tickets, failedKeys)
 
     const remaining = opts.tickets.filter(
         t => t.status === 'ready-for-agent'
