@@ -472,7 +472,7 @@ export class StatusDisplay implements Display {
 }
 
 export class PlainDisplay implements Display {
-    startRun ():void {
+    startRun (_tickets:ReadonlyArray<TicketRef>):void {
         // no-op: plain mode has no fixed list
     }
 
@@ -499,7 +499,11 @@ export class PlainDisplay implements Display {
         // no-op: plain mode reports via log()
     }
 
-    setBlocked ():void {
+    setBlocked (
+        _num:number,
+        _feature:string|undefined,
+        _blockedBy:ReadonlyArray<string>,
+    ):void {
         // no-op: plain mode has no fixed list
     }
 

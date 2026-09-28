@@ -93,7 +93,7 @@ function lastFrame (output:string):string {
     const matches = [...plain.matchAll(/Wave \d+\/\d+/g)]
     if (matches.length === 0) return ''
     const last = matches[matches.length - 1]
-    return last ? plain.substring(last.index!) : ''
+    return plain.substring(last.index ?? 0)
 }
 
 function rawLastFrame (output:string):string {
@@ -1064,14 +1064,12 @@ test('AC1.8: setTicketStatus for unknown ticket ignored', t => {
     display.startRun(tickets)
     display.startWave(1, 1, tickets)
 
-    const esc = String.fromCharCode(27)
-    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
-    let plain = stream.getOutput().replace(ansiRe, '')
+    let plain = stripAnsi(stream.getOutput())
     const initialRowCount = plain.split('\n')
         .filter(l => l.includes('.md')).length
 
     display.setTicketStatus(999, 'in-progress')
-    plain = stream.getOutput().replace(ansiRe, '')
+    plain = stripAnsi(stream.getOutput())
     const afterRowCount = plain.split('\n')
         .filter(l => l.includes('.md')).length
 
@@ -1096,9 +1094,7 @@ test('AC1.9: pagination and auto-scroll with fixed list', t => {
 
     display.setTicketStatus(15, 'in-progress')
 
-    const esc = String.fromCharCode(27)
-    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
-    const plain = stream.getOutput().replace(ansiRe, '')
+    const plain = stripAnsi(stream.getOutput())
 
     t.ok(
         plain.includes('task15.md'),
@@ -1120,7 +1116,7 @@ test('AC2.8: blocked row fits terminal width', t => {
 
     display.startRun(tickets)
     display.startWave(99, 99, tickets.slice(0, 10))
-    // Mark 50 as done to make header show "50/100 done"
+    // Mark 50 as done to make header show "49/100 done" (setBlocked(2) un-dones ticket 2)
     for (let i = 0; i < 50; i++) {
         display.setTicketStatus(i + 1, 'done')
     }
@@ -1155,16 +1151,22 @@ test('AC2.8: blocked row shows blocked dot', t => {
     display.setBlocked(2, undefined, ['01-task.md'])
 
     const raw = rawLastFrame(stream.getOutput())
-    const plain = stripAnsi(raw)
-    const lines = plain.split('\n')
-    const task2Line = lines.find(l => l.includes('task2.md'))
+    const rawLines = raw.split('\n')
+    const rawTask2Row = rawLines.find(
+        l => stripAnsi(l).includes('task2.md'),
+    )
 
     t.ok(
-        task2Line &&
-        raw.substring(
-            raw.indexOf(task2Line),
-        ).includes(renderDot('blocked')),
+        rawTask2Row && rawTask2Row.includes(renderDot('blocked')),
         'blocked row should contain blocked dot'
+    )
+    const rawTask1Row = rawLines.find(
+        l => stripAnsi(l).includes('task1.md'),
+    )
+    t.ok(
+        rawTask1Row &&
+        !rawTask1Row.includes(renderDot('blocked')),
+        'non-blocked row should not contain blocked dot'
     )
 })
 
@@ -2220,7 +2222,7 @@ test('AC4.5: PlainDisplay startRun and setBlocked are no-ops',
     t => {
         const logs:string[] = []
         const origLog = console.log
-        console.log = (...args:any[]) => {
+        console.log = (...args:unknown[]) => {
             logs.push(args.join(' '))
         }
 
@@ -2231,24 +2233,25 @@ test('AC4.5: PlainDisplay startRun and setBlocked are no-ops',
                 { num:1, filename:'task1.md' },
             ])
             display.setBlocked(1, undefined, ['task2.md'])
-
-            t.equal(
-                logs.length, 0,
-                'no logs from startRun or setBlocked'
-            )
         } finally {
             console.log = origLog
         }
+
+        t.equal(
+            logs.length, 0,
+            'no logs from startRun or setBlocked'
+        )
     }
 )
 
 test('AC4.5: PlainDisplay output format unchanged', t => {
     const origLog = console.log
+    const logs1:string[] = []
+    const logs2:string[] = []
 
     try {
         // Run 1: with startRun and setBlocked
-        const logs1:string[] = []
-        console.log = (...args:any[]) => {
+        console.log = (...args:unknown[]) => {
             logs1.push(args.join(' '))
         }
 
@@ -2264,8 +2267,7 @@ test('AC4.5: PlainDisplay output format unchanged', t => {
         ], { completed:0, total:2 })
 
         // Run 2: without startRun and setBlocked
-        const logs2:string[] = []
-        console.log = (...args:any[]) => {
+        console.log = (...args:unknown[]) => {
             logs2.push(args.join(' '))
         }
 
@@ -2274,13 +2276,13 @@ test('AC4.5: PlainDisplay output format unchanged', t => {
             { num:1, filename:'task1.md' },
             { num:2, filename:'task2.md' },
         ], { completed:0, total:2 })
-
-        // Verify format is identical
-        t.deepEqual(
-            logs1, logs2,
-            'PlainDisplay output unchanged with/without startRun'
-        )
     } finally {
         console.log = origLog
     }
+
+    // Verify format is identical
+    t.deepEqual(
+        logs1, logs2,
+        'PlainDisplay output unchanged with/without startRun'
+    )
 })
