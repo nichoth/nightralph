@@ -14,6 +14,9 @@ import {
     renderDot,
     type DisplayTicket,
     type Display,
+    type TicketRef,
+    type RunProgress,
+    type TicketStatus,
 } from '../src/display.js'
 import {
     spawnAgent, runWaves, runWavesIsolated, scanTickets,
@@ -101,9 +104,9 @@ function rawLastFrame (output:string):string {
     const matches = [...plain.matchAll(/Wave \d+\/\d+/g)]
     if (matches.length === 0) return ''
     const last = matches[matches.length - 1]
-    return last ? output.substring(
+    return output.substring(
         output.lastIndexOf(last[0]),
-    ) : ''
+    )
 }
 
 function headerNumbers (frame:string):{
@@ -1116,7 +1119,8 @@ test('AC2.8: blocked row fits terminal width', t => {
 
     display.startRun(tickets)
     display.startWave(99, 99, tickets.slice(0, 10))
-    // Mark 50 as done to make header show "49/100 done" (setBlocked(2) un-dones ticket 2)
+    // Mark 50 as done; setBlocked(2) below un-dones
+    // ticket 2, so the header shows "49/100 done"
     for (let i = 0; i < 50; i++) {
         display.setTicketStatus(i + 1, 'done')
     }
@@ -1654,7 +1658,7 @@ class RecordingDisplay implements Display {
         args:Array<any>
     }> = []
 
-    startRun (tickets:ReadonlyArray<any>):void {
+    startRun (tickets:ReadonlyArray<TicketRef>):void {
         this.calls.push({
             method:'startRun',
             args:[tickets],
@@ -1664,11 +1668,8 @@ class RecordingDisplay implements Display {
     startWave (
         waveNum:number,
         totalWaves:number,
-        tickets:ReadonlyArray<{
-            num:number
-            filename:string
-        }>,
-        progress?:any,
+        tickets:ReadonlyArray<TicketRef>,
+        progress?:RunProgress,
     ):void {
         this.calls.push({
             method:'startWave',
@@ -1679,7 +1680,7 @@ class RecordingDisplay implements Display {
         })
     }
 
-    setTicketStatus (num:number, status:string):void {
+    setTicketStatus (num:number, status:TicketStatus):void {
         this.calls.push({
             method:'setTicketStatus',
             args:[num, status],
