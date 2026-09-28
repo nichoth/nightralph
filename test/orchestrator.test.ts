@@ -3847,10 +3847,12 @@ test('runWaves with only human tickets logs them and is allDone',
         const tickets = scanTickets(issuesDir)
         const logs:string[] = []
         const display = {
+            startRun () {},
             startWave () {
                 t.fail('no wave should start')
             },
             setTicketStatus () {},
+            setBlocked () {},
             log (m:string) { logs.push(m) },
             cleanup () {},
         }

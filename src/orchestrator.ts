@@ -1874,13 +1874,6 @@ export async function runWaves (
         if (ready.length === 0) break
 
         waveNum++
-        const readyKeys = new Set(
-            ready.map(t => ticketKey(t.feature, t.num))
-        )
-        const remaining = tickets.filter(t =>
-            t.status === 'ready-for-agent' &&
-            !readyKeys.has(ticketKey(t.feature, t.num))
-        )
         d.startWave(
             waveNum,
             totalWaves,
@@ -1890,11 +1883,6 @@ export async function runWaves (
                 feature:t.feature,
             })),
             runProgress(tickets),
-            remaining.map(t => ({
-                num:t.num,
-                filename:t.filename,
-                feature:t.feature,
-            })),
         )
 
         const results = await runPool(
@@ -2142,13 +2130,6 @@ export async function runWavesIsolated (opts:{
         if (ready.length === 0) break
 
         waveNum++
-        const readyKeys = new Set(
-            ready.map(t => ticketKey(t.feature, t.num))
-        )
-        const remaining = opts.tickets.filter(t =>
-            t.status === 'ready-for-agent' &&
-            !readyKeys.has(ticketKey(t.feature, t.num))
-        )
         d.startWave(
             waveNum,
             totalWaves,
@@ -2158,11 +2139,6 @@ export async function runWavesIsolated (opts:{
                 feature:t.feature,
             })),
             runProgress(opts.tickets),
-            remaining.map(t => ({
-                num:t.num,
-                filename:t.filename,
-                feature:t.feature,
-            })),
         )
 
         // Each ticket runs its own attempt loop, at most

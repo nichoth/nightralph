@@ -3690,8 +3690,10 @@ test('runWavesIsolated - multi-feature tickets write ' +
 
         const logs:string[] = []
         const display = {
+            startRun () {},
             startWave () {},
             setTicketStatus () {},
+            setBlocked () {},
             log (m:string) { logs.push(m) },
             cleanup () {},
         }

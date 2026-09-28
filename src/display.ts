@@ -4,18 +4,25 @@ export type TicketStatus =
     | 'awaiting-merge'
     | 'done'
     | 'failed'
+    | 'blocked'
 
 export type DisplayTicket = {
     readonly num:number
     readonly filename:string
     readonly feature?:string
     status:TicketStatus
+    blockedBy?:ReadonlyArray<string>
+}
+
+export type TicketRef = {
+    readonly num:number
+    readonly filename:string
+    readonly feature?:string
 }
 
 export type WaveState = {
     readonly waveNum:number
     readonly totalWaves:number
-    readonly tickets:Array<DisplayTicket>
 }
 
 export type DisplayConfig = {
@@ -33,25 +40,30 @@ export type RunProgress = {
 }
 
 export type Display = {
+    /**
+     * Called once at the start of the run, fixes the ticket list
+     * for the entire session.
+     */
+    startRun(tickets:ReadonlyArray<TicketRef>):void
     startWave(
         waveNum:number,
         totalWaves:number,
-        tickets:ReadonlyArray<{
-            num:number
-            filename:string
-            feature?:string
-        }>,
+        tickets:ReadonlyArray<TicketRef>,
         progress?:RunProgress,
-        remaining?:ReadonlyArray<{
-            num:number
-            filename:string
-            feature?:string
-        }>,
     ):void
     setTicketStatus(
         num:number,
         status:TicketStatus,
         feature?:string,
+    ):void
+    /**
+     * Mark a ticket as blocked; `blockedBy` holds display labels
+     * of the upstream tickets that failed or need a human.
+     */
+    setBlocked(
+        num:number,
+        feature:string|undefined,
+        blockedBy:ReadonlyArray<string>,
     ):void
     log(message:string):void
     cleanup():void
@@ -103,7 +115,7 @@ export const color = {
     },
 } as const
 
-function ticketLabel (
+export function ticketLabel (
     ticket:{ num:number; filename:string; feature?:string },
 ):string {
     if (ticket.feature) {
@@ -122,6 +134,14 @@ const MAX_MESSAGE_BUFFER = 200
 
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g
+
+function rowText (ticket:DisplayTicket):string {
+    const label = ticketLabel(ticket)
+    if (ticket.status !== 'blocked' || !ticket.blockedBy?.length) {
+        return label
+    }
+    return `${label} (blocked by ${ticket.blockedBy.join(', ')})`
+}
 
 /**
  * Clamp a line to `width` visible columns so it can never wrap.
@@ -164,13 +184,17 @@ export function renderDot (status:TicketStatus):string {
             return color.green(FILLED_DOT)
         case 'failed':
             return color.red(FILLED_DOT)
+        case 'blocked':
+            // Ticket cannot run this session because an upstream
+            // ticket failed or needs a human.
+            return color.dim(FILLED_DOT)
     }
 }
 
 export class StatusDisplay implements Display {
     private wave:WaveState|null = null
-    private progress:RunProgress|null = null
-    private remaining:Array<DisplayTicket> = []
+    private tickets:Array<DisplayTicket> = []
+    private hasRun:boolean = false
     private messages:Array<string> = []
     private renderedLines:number = 0
     private config:DisplayConfig
@@ -190,34 +214,45 @@ export class StatusDisplay implements Display {
         return Math.max(1, available)
     }
 
-    startWave (
-        waveNum:number,
-        totalWaves:number,
-        tickets:Array<Readonly<{
-            num:number
-            filename:string
-            feature?:string
-        }>>,
-        progress?:RunProgress,
-        remaining?:ReadonlyArray<{
-            num:number
-            filename:string
-            feature?:string
-        }>,
-    ):void {
-        this.wave = {
-            waveNum,
-            totalWaves,
-            tickets:tickets.map(t => ({
-                ...t,
-                status:'pending' as const,
-            })),
-        }
-        this.remaining = (remaining ?? []).map(t => ({
+    private findTicket (
+        num:number,
+        feature?:string,
+    ):DisplayTicket|null {
+        const found = feature ?
+            this.tickets.find(
+                t => t.num === num && t.feature === feature,
+            ) :
+            this.tickets.find(t => t.num === num)
+        return found ?? null
+    }
+
+    startRun (tickets:ReadonlyArray<TicketRef>):void {
+        this.tickets = tickets.map(t => ({
             ...t,
             status:'pending' as const,
         }))
-        this.progress = progress ?? null
+        this.hasRun = true
+        this.viewportStart = 0
+    }
+
+    startWave (
+        waveNum:number,
+        totalWaves:number,
+        tickets:Array<Readonly<TicketRef>>,
+        _progress?:RunProgress,
+    ):void {
+        if (!this.hasRun) {
+            this.tickets = tickets.map(t => ({
+                ...t,
+                status:'pending' as const,
+            }))
+            this.hasRun = true
+        }
+
+        this.wave = {
+            waveNum,
+            totalWaves,
+        }
         this.messages = []
         this.viewportStart = 0
         this.config.stream.write(ansi.cursorHide())
@@ -242,36 +277,43 @@ export class StatusDisplay implements Display {
         status:TicketStatus,
         feature?:string,
     ):void {
-        if (!this.wave) return
+        const ticket = this.findTicket(num, feature)
+        if (!ticket) return
 
-        const ticket = feature ?
-            this.wave.tickets.find(
-                t => t.num === num && t.feature === feature,
-            ) :
-            this.wave.tickets.find(t => t.num === num)
-        if (ticket) {
-            ticket.status = status
+        ticket.status = status
 
-            if (status === 'in-progress') {
-                const ticketIndex = this.wave.tickets.indexOf(ticket)
-                const availableRows = this.getAvailableRows()
-                const totalTickets = this.wave.tickets.length
+        if (status === 'in-progress') {
+            const ticketIndex = this.tickets.indexOf(ticket)
+            const availableRows = this.getAvailableRows()
+            const totalTickets = this.tickets.length
 
-                if (ticketIndex < this.viewportStart) {
-                    this.viewportStart = ticketIndex
-                } else if (ticketIndex >= this.viewportStart + availableRows) {
-                    // offset by 3 to keep context visible below
-                    // the active ticket
-                    this.viewportStart = ticketIndex - availableRows + 3
-                }
-                this.viewportStart = Math.max(
-                    0,
-                    Math.min(this.viewportStart, totalTickets - 1),
-                )
+            if (ticketIndex < this.viewportStart) {
+                this.viewportStart = ticketIndex
+            } else if (ticketIndex >= this.viewportStart + availableRows) {
+                // offset by 3 to keep context visible below
+                // the active ticket
+                this.viewportStart = ticketIndex - availableRows + 3
             }
-
-            this.render()
+            this.viewportStart = Math.max(
+                0,
+                Math.min(this.viewportStart, totalTickets - 1),
+            )
         }
+
+        this.render()
+    }
+
+    setBlocked (
+        num:number,
+        feature:string|undefined,
+        blockedBy:ReadonlyArray<string>,
+    ):void {
+        const ticket = this.findTicket(num, feature)
+        if (!ticket) return
+
+        ticket.status = 'blocked'
+        ticket.blockedBy = [...blockedBy]
+        this.render()
     }
 
     log (message:string):void {
@@ -309,46 +351,41 @@ export class StatusDisplay implements Display {
             output += ansi.eraseLines(this.renderedLines + 1)
         }
 
-        const doneInWave = this.wave.tickets.filter(
+        const done = this.tickets.filter(
             t => t.status === 'done',
         ).length
-        const completed = doneInWave + (this.progress?.completed ?? 0)
-        const total = this.progress?.total ?? this.wave.tickets.length
-        const pct = total === 0 ? 0 : Math.round((completed / total) * 100)
+        const total = this.tickets.length
+        const pct = total === 0 ? 0 : Math.round((done / total) * 100)
         const width = Math.max(
             1,
             (this.config.stream.columns ?? DEFAULT_COLUMNS) - 1,
         )
 
-        output += `Wave ${this.wave.waveNum}/` +
+        const header = `Wave ${this.wave.waveNum}/` +
             `${this.wave.totalWaves} - ` +
-            `${pct}% complete\n`
+            `${done}/${total} done - ${pct}%`
+        output += fitLine(header, width) + '\n'
 
         // Pagination logic
         const availableRows = this.getAvailableRows()
-        const tickets:ReadonlyArray<DisplayTicket> = [
-            ...this.wave.tickets,
-            ...this.remaining,
-        ]
         let renderedTicketCount = 0
 
-        if (tickets.length <= availableRows) {
+        if (this.tickets.length <= availableRows) {
             // All tickets fit, no pagination
-            for (const ticket of tickets) {
+            for (const ticket of this.tickets) {
                 const dot = renderDot(ticket.status)
-                const name = fitLine(
-                    ticketLabel(ticket), width - 2,
-                )
+                const text = rowText(ticket)
+                const name = fitLine(text, width - 2)
                 output += `${dot} ${name}\n`
             }
-            renderedTicketCount = tickets.length
+            renderedTicketCount = this.tickets.length
         } else {
             // Need pagination -- iterative clamp
             this.viewportStart = Math.max(
                 0,
                 Math.min(
                     this.viewportStart,
-                    tickets.length - 1,
+                    this.tickets.length - 1,
                 ),
             )
 
@@ -357,7 +394,7 @@ export class StatusDisplay implements Display {
                 availableRows - (hasMoreAbove ? 1 : 0)
             let hasMoreBelow =
                 this.viewportStart + tentativeCount <
-                tickets.length
+                this.tickets.length
             let ticketsToShow = Math.max(
                 0,
                 tentativeCount - (hasMoreBelow ? 1 : 0),
@@ -365,7 +402,7 @@ export class StatusDisplay implements Display {
 
             const maxStart = Math.max(
                 0,
-                tickets.length - Math.max(1, ticketsToShow),
+                this.tickets.length - Math.max(1, ticketsToShow),
             )
             if (this.viewportStart > maxStart) {
                 this.viewportStart = maxStart
@@ -373,7 +410,7 @@ export class StatusDisplay implements Display {
                 tentativeCount = availableRows - (hasMoreAbove ? 1 : 0)
                 hasMoreBelow = (
                     this.viewportStart +
-                    tentativeCount < tickets.length
+                    tentativeCount < this.tickets.length
                 )
                 ticketsToShow = Math.max(
                     0,
@@ -388,23 +425,22 @@ export class StatusDisplay implements Display {
             }
 
             // Get visible tickets and render them
-            const visibleTickets = tickets.slice(
+            const visibleTickets = this.tickets.slice(
                 this.viewportStart,
                 this.viewportStart + ticketsToShow,
             )
 
             for (const ticket of visibleTickets) {
                 const dot = renderDot(ticket.status)
-                const name = fitLine(
-                    ticketLabel(ticket), width - 2,
-                )
+                const text = rowText(ticket)
+                const name = fitLine(text, width - 2)
                 output += `${dot} ${name}\n`
             }
 
             // Show "more below" indicator if needed
             if (hasMoreBelow) {
                 const moreCount = (
-                    tickets.length -
+                    this.tickets.length -
                     (this.viewportStart + ticketsToShow)
                 )
                 output += `  ... ${moreCount} more below\n`
@@ -440,20 +476,15 @@ export class StatusDisplay implements Display {
 }
 
 export class PlainDisplay implements Display {
+    startRun ():void {
+        // no-op: plain mode has no fixed list
+    }
+
     startWave (
         waveNum:number,
         _totalWaves:number,
-        tickets:ReadonlyArray<{
-            num:number
-            filename:string
-            feature?:string
-        }>,
+        tickets:ReadonlyArray<TicketRef>,
         progress?:RunProgress,
-        _remaining?:ReadonlyArray<{
-            num:number
-            filename:string
-            feature?:string
-        }>,
     ):void {
         const pct = progress && progress.total > 0 ?
             ` (${progress.completed}/${progress.total} done)` :
@@ -470,6 +501,10 @@ export class PlainDisplay implements Display {
         _feature?:string,
     ):void {
         // no-op: plain mode reports via log()
+    }
+
+    setBlocked ():void {
+        // no-op: plain mode has no fixed list
     }
 
     log (message:string):void {
