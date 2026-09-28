@@ -221,6 +221,14 @@ The new flow:
    `findBlockedTickets`, and reports each result through
    `Display.setBlocked`. The startup call catches tickets waiting
    on `ready-for-human` work; the per-wave calls catch failures.
+   The per-wave call sits at the top of the next loop iteration,
+   with one more call after the loop, so a `break` inside a wave
+   (the `-X` stop, or no progress) cannot skip it.
+5. The unrecovered merge-failure branch in `runWavesIsolated`
+   sets the ticket's status to `failed`. Today that row stays
+   `awaiting-merge` and the next `startWave` hides it; with a fixed
+   list it would stay cyan while its dependents name it as the
+   blocker.
 
 `StatusDisplay` computes the header counts from its own fixed list
 (done rows / all rows). The list and the percent can't disagree
@@ -324,9 +332,10 @@ This change stays inside the current display architecture from
 - Row clamping with `fitLine` and the pagination/auto-scroll logic
   in `StatusDisplay.render` are reused as is; they now index into
   the fixed list instead of `wave.tickets + remaining`.
-- Tests use `createMockStream` in `test/display.test.ts` and
-  recording `Display` doubles in `test/orchestrator.test.ts` and
-  `test/integration.test.ts`.
+- Tests use `createMockStream` and the `RecordingDisplay` class in
+  `test/display.test.ts` (which also holds the `runWaves` + display
+  integration tests), and object-literal `Display` doubles in
+  `test/orchestrator.test.ts` and `test/integration.test.ts`.
 
 One divergence: the `remaining` parameter added to `startWave` for
 pending tickets is removed. `startRun` covers that need, and
@@ -376,9 +385,15 @@ and report blocked tickets.
   wave's failures are recorded
 - `runProgress` in `src/orchestrator.ts` -- count only the session
   set
-- Display doubles in `test/orchestrator.test.ts` and
-  `test/integration.test.ts` -- add the new methods
-- New orchestrator tests using a recording display double
+- Unrecovered merge-failure branch in `runWavesIsolated` -- mark the
+  row `failed`
+- Display doubles (`RecordingDisplay` in `test/display.test.ts`,
+  object literals in `test/orchestrator.test.ts` and
+  `test/integration.test.ts`) -- add the new methods (done in
+  Phase 1, when the `Display` type changes)
+- New `runWaves` tests in `test/display.test.ts` and
+  `runWavesIsolated` tests in `test/integration.test.ts`, using
+  recording display doubles
 
 **Dependencies:** Phase 1
 
@@ -421,6 +436,11 @@ whose status is neither `done` nor `ready-for-agent`, not only
 `ready-for-human`. Such a ticket can't finish this run either, so it
 gets the same marker. `renderFinishSummary` still explains
 human-blocked tickets at the end of the run; the two don't overlap.
+
+**`-X` stop leaves some rows cyan:** under `-X`, branches after
+the conflicting one never enter `mergeResult.merged`, so their rows
+stay `awaiting-merge` when the run stops. Out of scope here;
+documented as a known limit.
 
 **Missing blockers:** A `Blocked by:` number with no matching ticket
 file is not treated as dead. The ticket stays pending, as it does
