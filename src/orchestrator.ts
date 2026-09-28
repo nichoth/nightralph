@@ -200,6 +200,57 @@ export function findReadyTickets (
     })
 }
 
+/**
+ * Tickets that cannot run this session because a ticket they
+ * depend on (directly or through a chain, within their own
+ * feature) is dead: in `failedKeys`, or in a status that is
+ * neither done nor ready-for-agent, e.g. ready-for-human.
+ * Returns ticketKey -> dead upstream ticketKeys. Only
+ * ready-for-agent tickets that have not failed are keys. A
+ * blocker number with no matching ticket is not dead.
+ */
+export function findBlockedTickets (
+    tickets:ReadonlyArray<Ticket>,
+    failedKeys:ReadonlySet<string>,
+):Map<string, Array<string>> {
+    const byKey = new Map(
+        tickets.map(t => [ticketKey(t.feature, t.num), t])
+    )
+
+    function collectDead (
+        ticket:Ticket,
+        visited:Set<string>,
+        found:Set<string>,
+    ):void {
+        for (const b of ticket.blockers) {
+            const key = ticketKey(ticket.feature, b)
+            if (visited.has(key)) continue
+            visited.add(key)
+            const blocker = byKey.get(key)
+            if (!blocker || blocker.status === 'done') continue
+            if (
+                failedKeys.has(key) ||
+                blocker.status !== 'ready-for-agent'
+            ) {
+                found.add(key)
+                continue
+            }
+            collectDead(blocker, visited, found)
+        }
+    }
+
+    const blocked = new Map<string, Array<string>>()
+    for (const t of tickets) {
+        const key = ticketKey(t.feature, t.num)
+        if (t.status !== 'ready-for-agent') continue
+        if (failedKeys.has(key)) continue
+        const found = new Set<string>()
+        collectDead(t, new Set([key]), found)
+        if (found.size > 0) blocked.set(key, [...found])
+    }
+    return blocked
+}
+
 // Matches an agent-reported completed item. Agents echo items
 // as markdown checklist lines (`- [x] item`) as often as bare
 // `[x] item` lines, so the bullet prefix is optional.

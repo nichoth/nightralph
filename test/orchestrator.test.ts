@@ -13,6 +13,7 @@ import {
     parseBlockers,
     scanTickets,
     findReadyTickets,
+    findBlockedTickets,
     markDone,
     checkItems,
     COMPLETED_RE,
@@ -533,6 +534,377 @@ test(
         )
     }
 )
+
+// -- findBlockedTickets --
+
+test('findBlockedTickets: direct blocker failed', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(tickets, new Set(['f:1']))
+    t.equal(blocked.size, 1, 'one ticket blocked')
+    t.ok(blocked.has('f:2'), 'f:2 is blocked')
+    t.deepEqual(
+        blocked.get('f:2'),
+        ['f:1'],
+        'f:2 blocked by f:1'
+    )
+    t.ok(!blocked.has('f:1'), 'f:1 not in blocked')
+})
+
+test('findBlockedTickets: chain through ready ticket', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-c.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[2],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(tickets, new Set(['f:1']))
+    t.equal(blocked.size, 2, 'two tickets blocked')
+    t.ok(blocked.has('f:2'), 'f:2 is blocked')
+    t.ok(blocked.has('f:3'), 'f:3 is blocked')
+    const f2Blocked = blocked.get('f:2')!
+    t.deepEqual(
+        f2Blocked.sort(),
+        ['f:1'],
+        'f:2 blocked by f:1'
+    )
+    const f3Blocked = blocked.get('f:3')!
+    t.deepEqual(
+        f3Blocked.sort(),
+        ['f:1'],
+        'f:3 blocked by f:1 (through ready f:2)'
+    )
+})
+
+test('findBlockedTickets: multiple failed blockers', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-c.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1, 2],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(
+        tickets,
+        new Set(['f:1', 'f:2'])
+    )
+    t.equal(blocked.size, 1, 'one ticket blocked')
+    t.ok(blocked.has('f:3'), 'f:3 is blocked')
+    const f3Blocked = blocked.get('f:3')!
+    t.deepEqual(
+        f3Blocked.sort(),
+        ['f:1', 'f:2'],
+        'f:3 blocked by both f:1 and f:2'
+    )
+})
+
+test('findBlockedTickets: different features', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'a',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:1,
+            filename:'01-x.md',
+            feature:'b',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-y.md',
+            feature:'b',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(
+        tickets,
+        new Set(['a:1'])
+    )
+    t.equal(blocked.size, 0, 'no tickets blocked')
+    t.ok(
+        !blocked.has('b:2'),
+        'b:2 not blocked by a:1 from other feature'
+    )
+})
+
+test('findBlockedTickets: human status blocker', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'f',
+            status:HUMAN_STATUS,
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(tickets, new Set())
+    t.equal(blocked.size, 1, 'one ticket blocked')
+    t.ok(blocked.has('f:2'), 'f:2 is blocked')
+    t.deepEqual(
+        blocked.get('f:2'),
+        ['f:1'],
+        'f:2 blocked by human f:1'
+    )
+})
+
+test('findBlockedTickets: chain to human ticket', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'f',
+            status:HUMAN_STATUS,
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-c.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[2],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(tickets, new Set())
+    t.equal(blocked.size, 2, 'two tickets blocked')
+    t.ok(blocked.has('f:2'), 'f:2 is blocked')
+    t.ok(blocked.has('f:3'), 'f:3 is blocked')
+    t.deepEqual(
+        blocked.get('f:2'),
+        ['f:1'],
+        'f:2 blocked by human f:1'
+    )
+    t.deepEqual(
+        blocked.get('f:3'),
+        ['f:1'],
+        'f:3 blocked by human f:1 (chain)'
+    )
+})
+
+test('findBlockedTickets: done blocker not blocking', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'f',
+            status:'done',
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-c.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1, 2],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(tickets, new Set())
+    t.equal(blocked.size, 0, 'no tickets blocked')
+})
+
+test('findBlockedTickets: diamond pattern', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-c.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+        makeTicket({
+            num:4,
+            filename:'04-d.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[2, 3],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(
+        tickets,
+        new Set(['f:1'])
+    )
+    t.equal(blocked.size, 3, 'three tickets blocked')
+    t.ok(blocked.has('f:2'), 'f:2 is blocked')
+    t.ok(blocked.has('f:3'), 'f:3 is blocked')
+    t.ok(blocked.has('f:4'), 'f:4 is blocked')
+    const f2Blocked = blocked.get('f:2')!
+    t.deepEqual(f2Blocked.sort(), ['f:1'], 'f:2 blocked by f:1')
+    const f3Blocked = blocked.get('f:3')!
+    t.deepEqual(f3Blocked.sort(), ['f:1'], 'f:3 blocked by f:1')
+    const f4Blocked = blocked.get('f:4')!
+    t.deepEqual(
+        f4Blocked.sort(),
+        ['f:1'],
+        'f:4 blocked by f:1 only (diamond paths converge)'
+    )
+})
+
+test('findBlockedTickets: missing blocker number', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[9],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(tickets, new Set())
+    t.equal(blocked.size, 0, 'no tickets blocked by missing ticket')
+})
+
+test('findBlockedTickets: cycle', t => {
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[2],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(tickets, new Set())
+    t.equal(blocked.size, 0, 'cycles do not create blocks')
+})
+
+test('findBlockedTickets: dense graph', t => {
+    const tickets:Ticket[] = []
+    for (let i = 1; i <= 200; i++) {
+        const blockers:number[] = []
+        if (i > 1) blockers.push(i - 1)
+        if (i > 2) blockers.push(i - 2)
+        tickets.push(
+            makeTicket({
+                num:i,
+                filename:`${String(i).padStart(3, '0')}-ticket.md`,
+                feature:'f',
+                status:'ready-for-agent',
+                blockers,
+            })
+        )
+    }
+
+    const blocked = findBlockedTickets(
+        tickets,
+        new Set(['f:1'])
+    )
+    t.equal(blocked.size, 199, '199 tickets blocked')
+    for (let i = 2; i <= 200; i++) {
+        t.ok(
+            blocked.has(`f:${i}`),
+            `f:${i} is blocked`
+        )
+        t.deepEqual(
+            blocked.get(`f:${i}`),
+            ['f:1'],
+            `f:${i} maps to f:1`
+        )
+    }
+})
 
 // -- simulateWaves / detectDeadlocks (via dryRun) --
 
