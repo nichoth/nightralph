@@ -712,6 +712,31 @@ test('findBlockedTickets: human status blocker', t => {
     )
 })
 
+test('findBlockedTickets: a failed ticket is never a key', t => {
+    // Ticket 2 has a dead blocker, so it would be reported if it
+    // were a candidate; it has failed itself, so it is not.
+    const tickets:Ticket[] = [
+        makeTicket({
+            num:1,
+            filename:'01-a.md',
+            feature:'f',
+            status:HUMAN_STATUS,
+            blockers:[],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b.md',
+            feature:'f',
+            status:'ready-for-agent',
+            blockers:[1],
+        }),
+    ]
+
+    const blocked = findBlockedTickets(tickets, new Set(['f:2']))
+    t.ok(!blocked.has('f:2'), 'failed f:2 is not a key')
+    t.equal(blocked.size, 0, 'nothing is blocked')
+})
+
 test('findBlockedTickets: chain to human ticket', t => {
     const tickets:Ticket[] = [
         makeTicket({
@@ -4199,6 +4224,68 @@ test(
             out.includes('auth') && out.includes('payments'),
             'per-feature breakdown present'
         )
+    }
+)
+
+test('runWaves with nothing runnable reports no blocked tickets',
+    async t => {
+        // Ticket 3 is ready-for-agent but blocked by the human
+        // ticket, so nothing is ready and no wave starts. It is
+        // still a blocked ticket, so any report of blocked tickets
+        // outside a wave would call setBlocked for it.
+        const base = initTempGitRepo()
+        const issuesDir = join(base, 'issues')
+        const logsDir = join(base, 'logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-done.md'),
+            makeTicketBody({ status:'done' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-human.md'),
+            makeTicketBody({ status:HUMAN_STATUS })
+        )
+        writeFileSync(
+            join(issuesDir, '03-waiting.md'),
+            makeTicketBody({
+                status:'ready-for-agent',
+                blockers:[2],
+            })
+        )
+        const tickets = scanTickets(issuesDir)
+        const logs:string[] = []
+        const display = {
+            startRun () {
+                t.fail('no startRun should be called')
+            },
+            startWave () {
+                t.fail('no wave should start')
+            },
+            setTicketStatus () {},
+            setBlocked () {
+                t.fail('no setBlocked should be called')
+            },
+            log (m:string) { logs.push(m) },
+            cleanup () {},
+        }
+
+        const originalCwd = process.cwd()
+        process.chdir(base)
+        try {
+            const result = await runWaves(
+                tickets, 'test spec',
+                MOCK_PASS, null, 10, logsDir,
+                'npm test', display,
+            )
+            t.equal(result.allDone, false,
+                'ticket 3 is still waiting, so not allDone')
+        } finally {
+            process.chdir(originalCwd)
+            rmSync(base, { recursive:true, force:true })
+        }
+        const all = logs.join('\n')
+        t.ok(all.includes('02-human.md'),
+            'summary names the human ticket')
     }
 )
 

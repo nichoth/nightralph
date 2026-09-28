@@ -21,6 +21,7 @@ import {
 } from '../src/display.js'
 import {
     spawnAgent, runWaves, runWavesIsolated, scanTickets,
+    type Ticket,
 } from '../src/orchestrator.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -1769,6 +1770,17 @@ const MOCK_AGENT_FAIL_TICKET_01 = join(
     process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
 )
 
+// Fixture lookup that fails loudly, naming the missing ticket,
+// instead of crashing later on an undefined value.
+function mustFind (
+    tickets:ReadonlyArray<Ticket>,
+    num:number,
+):Ticket {
+    const found = tickets.find(t => t.num === num)
+    if (!found) throw new Error(`fixture has no ticket ${num}`)
+    return found
+}
+
 test(
     'AC1.4 AC1.6 AC4.1: startRun with session tickets ' +
     'sorted by feature then num',
@@ -1807,10 +1819,9 @@ test(
             // affect readiness.
             const tickets = scanTickets(issuesDir)
             tickets.reverse()
-            const byNum = (n:number) => tickets.find(t => t.num === n)!
-            byNum(1).feature = 'zeta'
-            byNum(2).feature = 'alpha'
-            byNum(5).feature = 'alpha'
+            mustFind(tickets, 1).feature = 'zeta'
+            mustFind(tickets, 2).feature = 'alpha'
+            mustFind(tickets, 5).feature = 'alpha'
 
             const display = new RecordingDisplay()
             const originalCwd = process.cwd()
@@ -1856,6 +1867,16 @@ test(
                 'session is sorted by feature then num, and ' +
                 'excludes the done and ready-for-human tickets'
             )
+
+            // Tickets 1, 2 and 5 are the session; 3 (done) and
+            // 4 (human) are outside it, so they count toward
+            // neither the completed nor the total figure.
+            const firstStartWave = calls[firstStartWaveIndex]
+            t.deepEqual(
+                firstStartWave?.args[3],
+                { completed:0, total:3 },
+                'wave progress counts only the session set'
+            )
         } finally {
             rmSync(base, { recursive:true, force:true })
         }
@@ -1893,7 +1914,7 @@ test(
 
             const tickets = scanTickets(issuesDir)
             const labelOf = (n:number) => ticketLabel(
-                tickets.find(t => t.num === n)!
+                mustFind(tickets, n)
             )
             const display = new RecordingDisplay()
 
@@ -1939,8 +1960,7 @@ test(
             )
             t.deepEqual(
                 calls[firstBlocked]?.args,
-                [3, tickets.find(t => t.num === 3)!.feature,
-                    [labelOf(4)]],
+                [3, mustFind(tickets, 3).feature, [labelOf(4)]],
                 'first setBlocked is for ticket 3, naming ticket 4'
             )
 
@@ -1956,6 +1976,97 @@ test(
             t.deepEqual(
                 calls[laterForTwo]?.args[2],
                 [labelOf(1)],
+                'ticket 2 is blocked by ticket 1'
+            )
+        } finally {
+            rmSync(base, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'AC4.3: a dependent of a failed ticket is reported blocked ' +
+    'before the next wave starts',
+    async t => {
+        const base = initTempGitRepo()
+        try {
+            const issuesDir = join(base, 'issues')
+            const logsDir = join(base, 'logs')
+            mkdirSync(issuesDir)
+
+            // Wave 1 is {1, 3}: ticket 1 fails, ticket 3 passes.
+            // That is progress, so wave 2 runs {4}, and ticket 2
+            // must be reported blocked between the two waves.
+            writeFileSync(
+                join(issuesDir, '01-a.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '02-b.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 1'
+            )
+            writeFileSync(
+                join(issuesDir, '03-c.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '04-d.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 3'
+            )
+
+            const tickets = scanTickets(issuesDir)
+            const one = mustFind(tickets, 1)
+            const two = mustFind(tickets, 2)
+            const display = new RecordingDisplay()
+
+            const originalCwd = process.cwd()
+            process.chdir(base)
+            try {
+                await runWaves(
+                    tickets,
+                    'test spec',
+                    MOCK_AGENT_FAIL_TICKET_01,
+                    null,
+                    10,
+                    logsDir,
+                    'true',
+                    display,
+                    undefined,
+                    undefined,
+                    0,
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+
+            const calls = display.getCalls()
+            const waveIndexes = calls
+                .map((c, i) => (c.method === 'startWave' ? i : -1))
+                .filter(i => i >= 0)
+            t.equal(waveIndexes.length, 2, 'two waves run')
+            t.deepEqual(
+                waveIndexes.map(i => (
+                    (calls[i]?.args[2] as ReadonlyArray<TicketRef>)
+                        .map(r => r.num)
+                )),
+                [[1, 3], [4]],
+                'wave 1 is tickets 1 and 3, wave 2 is ticket 4'
+            )
+
+            const blockedTwo = calls.findIndex(c => (
+                c.method === 'setBlocked' && c.args[0] === 2
+            ))
+            const [firstWave = -1, secondWave = -1] = waveIndexes
+            t.ok(
+                blockedTwo > firstWave && blockedTwo < secondWave,
+                'ticket 2 is first reported blocked between ' +
+                'wave 1 and wave 2'
+            )
+            t.deepEqual(
+                calls[blockedTwo]?.args,
+                [2, two.feature, [ticketLabel(one)]],
                 'ticket 2 is blocked by ticket 1'
             )
         } finally {
@@ -1989,7 +2100,7 @@ test(
 
             const tickets = scanTickets(issuesDir)
             const labelOf = (n:number) => ticketLabel(
-                tickets.find(t => t.num === n)!
+                mustFind(tickets, n)
             )
             const stream = createMockStream()
             const display = new StatusDisplay({ stream })
