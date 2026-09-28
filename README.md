@@ -306,6 +306,11 @@ keep the machine awake, but the display can still go dark.
 caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort low
 ```
 
+#### Claude Opus 5.5
+
+```sh
+caffeinate -i npx nightralph claude -m claude-opus-5-5 --effort low
+```
 #### Claude Sonnet 5
 
 ```sh

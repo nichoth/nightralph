@@ -1468,6 +1468,38 @@ test('spawnAgent collects completed items from output',
     }
 )
 
+test('spawnAgent keeps logging stderr after stdout closes',
+    async t => {
+        const base = tmp()
+        const logPath = join(base, 'test.log')
+
+        const MOCK_CLOSE_STDOUT = join(
+            process.cwd(),
+            'test',
+            'mock-agent-close-stdout-first.js'
+        )
+
+        const result = await spawnAgent({
+            prompt:'test',
+            agentCmd:MOCK_CLOSE_STDOUT,
+            model:null,
+            timeout:10,
+            logPath,
+        })
+
+        t.equal(result.exitCode, 0, 'agent exits successfully')
+        const logContent = readFileSync(logPath, 'utf8')
+        t.ok(
+            logContent.includes('stdout before close'),
+            'log has the stdout output'
+        )
+        t.ok(
+            logContent.includes('stderr after stdout closed'),
+            'stdout EOF does not end the log before stderr is done'
+        )
+    }
+)
+
 // -- runWaves (integration) --
 
 const MOCK_PASS = join(

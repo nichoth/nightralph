@@ -958,7 +958,11 @@ export function spawnAgent (opts:{
 
     if (proc.pid !== undefined) runningAgents.add(proc.pid)
 
-    proc.stdout.pipe(logStream)
+    // stdout and stderr share one log, so neither pipe may end
+    // it: the first to reach EOF would end the log while the
+    // other still has data, which drops that output or crashes
+    // the run with ERR_STREAM_WRITE_AFTER_END. finish() ends it.
+    proc.stdout.pipe(logStream, { end:false })
 
     const piFormatter = isPi ?
         createPiStreamFormatter() :
@@ -1017,7 +1021,7 @@ export function spawnAgent (opts:{
         }
     })
 
-    proc.stderr.pipe(logStream)
+    proc.stderr.pipe(logStream, { end:false })
     const rlErr = createInterface({ input:proc.stderr })
     rlErr.on('line', line => {
         if (isClaude && !TOOL_USE_RE.test(line)) return
