@@ -2,7 +2,7 @@ import { test } from '@substrate-system/tapzero'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-    mkdirSync, writeFileSync, mkdtempSync,
+    mkdirSync, writeFileSync, mkdtempSync, rmSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
@@ -12,6 +12,7 @@ import {
     createDisplay,
     color,
     renderDot,
+    ticketLabel,
     type DisplayTicket,
     type Display,
     type TicketRef,
@@ -1773,91 +1774,91 @@ test(
     'sorted by feature then num',
     async t => {
         const base = initTempGitRepo()
-        const issuesDir = join(base, 'issues')
-        const logsDir = join(base, 'logs')
-        mkdirSync(issuesDir)
-
-        writeFileSync(
-            join(issuesDir, '01-a.md'),
-            makeTicketBody('ready-for-agent')
-        )
-        writeFileSync(
-            join(issuesDir, '02-b.md'),
-            makeTicketBody('ready-for-agent')
-        )
-        writeFileSync(
-            join(issuesDir, '03-c.md'),
-            makeTicketBody('done')
-        )
-        writeFileSync(
-            join(issuesDir, '04-d.md'),
-            makeTicketBody('ready-for-human')
-        )
-
-        const tickets = scanTickets(issuesDir)
-        tickets.reverse()
-        // After reverse: 4, 3, 2, 1
-        // Find ticket 1 and 2 and set their features
-        const ticket1 = tickets.find(t => t.num === 1)!
-        const ticket2 = tickets.find(t => t.num === 2)!
-        ticket1.feature = 'zeta'
-        ticket2.feature = 'alpha'
-
-        const display = new RecordingDisplay()
-        const originalCwd = process.cwd()
-        process.chdir(base)
         try {
-            await runWaves(
-                tickets,
-                'test spec',
-                MOCK_AGENT_PASS,
-                null,
-                10,
-                logsDir,
-                'true',
-                display,
+            const issuesDir = join(base, 'issues')
+            const logsDir = join(base, 'logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-a.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '02-b.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '03-c.md'),
+                makeTicketBody('done')
+            )
+            writeFileSync(
+                join(issuesDir, '04-d.md'),
+                makeTicketBody('ready-for-human')
+            )
+            writeFileSync(
+                join(issuesDir, '05-e.md'),
+                makeTicketBody('ready-for-agent')
+            )
+
+            // Scan order is 1..5 and reversed it is 5..1. The
+            // expected order (2, 5, 1) is neither, so the test
+            // fails if the orchestrator skips the sort or either
+            // sort key. Blockers are empty, so features do not
+            // affect readiness.
+            const tickets = scanTickets(issuesDir)
+            tickets.reverse()
+            const byNum = (n:number) => tickets.find(t => t.num === n)!
+            byNum(1).feature = 'zeta'
+            byNum(2).feature = 'alpha'
+            byNum(5).feature = 'alpha'
+
+            const display = new RecordingDisplay()
+            const originalCwd = process.cwd()
+            process.chdir(base)
+            try {
+                await runWaves(
+                    tickets,
+                    'test spec',
+                    MOCK_AGENT_PASS,
+                    null,
+                    10,
+                    logsDir,
+                    'true',
+                    display,
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+
+            const startRunCalls =
+                display.getCallsByMethod('startRun')
+            t.equal(
+                startRunCalls.length, 1,
+                'exactly one startRun call'
+            )
+
+            const calls = display.getCalls()
+            const startRunIndex = calls
+                .findIndex(c => c.method === 'startRun')
+            const firstStartWaveIndex = calls
+                .findIndex(c => c.method === 'startWave')
+            t.ok(
+                startRunIndex >= 0 &&
+                firstStartWaveIndex > startRunIndex,
+                'startRun before first startWave'
+            )
+
+            const runTickets:ReadonlyArray<TicketRef> =
+                startRunCalls[0]?.[0] ?? []
+            t.deepEqual(
+                runTickets.map(r => [r.feature, r.num]),
+                [['alpha', 2], ['alpha', 5], ['zeta', 1]],
+                'session is sorted by feature then num, and ' +
+                'excludes the done and ready-for-human tickets'
             )
         } finally {
-            process.chdir(originalCwd)
+            rmSync(base, { recursive:true, force:true })
         }
-
-        const startRunCalls =
-            display.getCallsByMethod('startRun')
-        t.equal(
-            startRunCalls.length, 1,
-            'exactly one startRun call'
-        )
-
-        const startWaveCalls =
-            display.getCallsByMethod('startWave')
-        t.equal(startWaveCalls.length > 0, true, 'startWave was called')
-
-        const calls = display.getCalls()
-        const startRunIndex = calls
-            .findIndex(c => c.method === 'startRun')
-        const firstStartWaveIndex = calls
-            .findIndex(c => c.method === 'startWave')
-        t.ok(
-            startRunIndex < firstStartWaveIndex,
-            'startRun before first startWave'
-        )
-
-        const runTickets = startRunCalls[0][0]
-        t.equal(
-            runTickets.length, 2,
-            'session has 2 tickets (not 3 or 4)'
-        )
-
-        const alphaFirst = runTickets[0]
-        const zetaSecond = runTickets[1]
-        t.equal(
-            alphaFirst.feature, 'alpha',
-            'first ticket in startRun is alpha'
-        )
-        t.equal(
-            zetaSecond.feature, 'zeta',
-            'second ticket in startRun is zeta'
-        )
     }
 )
 
@@ -1866,110 +1867,100 @@ test(
     'human blockers',
     async t => {
         const base = initTempGitRepo()
-        const issuesDir = join(base, 'issues')
-        const logsDir = join(base, 'logs')
-        mkdirSync(issuesDir)
-
-        writeFileSync(
-            join(issuesDir, '01-a.md'),
-            makeTicketBody('ready-for-agent')
-        )
-        writeFileSync(
-            join(issuesDir, '02-b.md'),
-            '# Test\n\n**Status:** ready-for-agent\n\n' +
-            '**Blocked by:** 1'
-        )
-        writeFileSync(
-            join(issuesDir, '03-c.md'),
-            '# Test\n\n**Status:** ready-for-agent\n\n' +
-            '**Blocked by:** 4'
-        )
-        writeFileSync(
-            join(issuesDir, '04-d.md'),
-            makeTicketBody('ready-for-human')
-        )
-
-        const tickets = scanTickets(issuesDir)
-        const display = new RecordingDisplay()
-
-        const originalCwd = process.cwd()
-        process.chdir(base)
         try {
-            await runWaves(
-                tickets,
-                'test spec',
-                MOCK_AGENT_FAIL_TICKET_01,
-                null,
-                10,
-                logsDir,
-                'true',
-                display,
+            const issuesDir = join(base, 'issues')
+            const logsDir = join(base, 'logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-a.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '02-b.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 1'
+            )
+            writeFileSync(
+                join(issuesDir, '03-c.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 4'
+            )
+            writeFileSync(
+                join(issuesDir, '04-d.md'),
+                makeTicketBody('ready-for-human')
+            )
+
+            const tickets = scanTickets(issuesDir)
+            const labelOf = (n:number) => ticketLabel(
+                tickets.find(t => t.num === n)!
+            )
+            const display = new RecordingDisplay()
+
+            const originalCwd = process.cwd()
+            process.chdir(base)
+            try {
+                await runWaves(
+                    tickets,
+                    'test spec',
+                    MOCK_AGENT_FAIL_TICKET_01,
+                    null,
+                    10,
+                    logsDir,
+                    'true',
+                    display,
+                    undefined,
+                    undefined,
+                    0,
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+
+            const calls = display.getCalls()
+            const startRunIndex = calls
+                .findIndex(c => c.method === 'startRun')
+            const firstStartWaveIndex = calls
+                .findIndex(c => c.method === 'startWave')
+            t.ok(
+                startRunIndex >= 0 &&
+                firstStartWaveIndex > startRunIndex,
+                'startRun before first startWave'
+            )
+
+            const firstBlocked = calls.findIndex(
+                c => c.method === 'setBlocked'
+            )
+            t.ok(
+                firstBlocked > startRunIndex &&
+                firstBlocked < firstStartWaveIndex,
+                'first setBlocked is between startRun and the ' +
+                'first startWave'
+            )
+            t.deepEqual(
+                calls[firstBlocked]?.args,
+                [3, tickets.find(t => t.num === 3)!.feature,
+                    [labelOf(4)]],
+                'first setBlocked is for ticket 3, naming ticket 4'
+            )
+
+            const laterForTwo = calls.findIndex((c, i) => (
+                i > firstStartWaveIndex &&
+                c.method === 'setBlocked' &&
+                c.args[0] === 2
+            ))
+            t.ok(
+                laterForTwo > firstStartWaveIndex,
+                'setBlocked for ticket 2 comes after the first wave'
+            )
+            t.deepEqual(
+                calls[laterForTwo]?.args[2],
+                [labelOf(1)],
+                'ticket 2 is blocked by ticket 1'
             )
         } finally {
-            process.chdir(originalCwd)
+            rmSync(base, { recursive:true, force:true })
         }
-
-        const calls = display.getCalls()
-
-        const startRunIndex = calls
-            .findIndex(c => c.method === 'startRun')
-        const firstStartWaveIndex = calls
-            .findIndex(c => c.method === 'startWave')
-
-        let firstSetBlockedAfterStartRun = -1
-        for (const [i, call] of calls.entries()) {
-            if (
-                call.method === 'setBlocked' &&
-                i > startRunIndex &&
-                i < firstStartWaveIndex
-            ) {
-                firstSetBlockedAfterStartRun = i
-                break
-            }
-        }
-
-        t.ok(
-            firstSetBlockedAfterStartRun >= 0,
-            'setBlocked called after startRun ' +
-            'and before first startWave'
-        )
-
-        const firstBlockedArgs =
-            calls[firstSetBlockedAfterStartRun].args
-        t.equal(
-            firstBlockedArgs[0], 3,
-            'first setBlocked is for ticket 3'
-        )
-        t.equal(
-            firstBlockedArgs[2].length, 1,
-            'ticket 3 blocked by one ticket'
-        )
-        t.ok(
-            firstBlockedArgs[2][0].includes('04'),
-            'ticket 3 blocked by ticket 4'
-        )
-
-        let laterSetBlocked = null
-        for (const call of calls) {
-            if (
-                call.method === 'setBlocked' &&
-                call.args[0] === 2
-            ) {
-                laterSetBlocked = call.args
-                break
-            }
-        }
-
-        t.ok(
-            laterSetBlocked !== null,
-            'setBlocked called for ticket 2'
-        )
-        t.ok(
-            laterSetBlocked[2].some((label) =>
-                label.includes('01')
-            ),
-            'ticket 2 blocked by ticket 1'
-        )
     }
 )
 
@@ -1977,62 +1968,78 @@ test(
     'AC2.1: failed ticket keeps red dot in later waves',
     async t => {
         const base = initTempGitRepo()
-        const issuesDir = join(base, 'issues')
-        const logsDir = join(base, 'logs')
-        mkdirSync(issuesDir)
-
-        writeFileSync(
-            join(issuesDir, '01-a.md'),
-            makeTicketBody('ready-for-agent')
-        )
-        writeFileSync(
-            join(issuesDir, '02-b.md'),
-            makeTicketBody('ready-for-agent')
-        )
-        writeFileSync(
-            join(issuesDir, '03-c.md'),
-            '# Test\n\n**Status:** ready-for-agent\n\n' +
-            '**Blocked by:** 2'
-        )
-
-        const tickets = scanTickets(issuesDir)
-        const stream = createMockStream()
-        const display = new StatusDisplay({ stream })
-
-        const originalCwd = process.cwd()
-        process.chdir(base)
         try {
-            await runWaves(
-                tickets,
-                'test spec',
-                MOCK_AGENT_FAIL_TICKET_01,
-                null,
-                10,
-                logsDir,
-                'true',
-                display,
+            const issuesDir = join(base, 'issues')
+            const logsDir = join(base, 'logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-a.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '02-b.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '03-c.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 2'
+            )
+
+            const tickets = scanTickets(issuesDir)
+            const labelOf = (n:number) => ticketLabel(
+                tickets.find(t => t.num === n)!
+            )
+            const stream = createMockStream()
+            const display = new StatusDisplay({ stream })
+
+            const originalCwd = process.cwd()
+            process.chdir(base)
+            try {
+                await runWaves(
+                    tickets,
+                    'test spec',
+                    MOCK_AGENT_FAIL_TICKET_01,
+                    null,
+                    10,
+                    logsDir,
+                    'true',
+                    display,
+                    undefined,
+                    undefined,
+                    0,
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+
+            // The grid is drawn above the log area, so the first
+            // row naming a ticket is its grid row.
+            const frame = rawLastFrame(stream.getOutput())
+            t.equal(
+                headerNumbers(frame)?.waveNum, 2,
+                'last frame is from wave 2'
+            )
+            const rows = frame.split('\n')
+            const rowFor = (n:number) => rows.find(
+                l => stripAnsi(l).includes(labelOf(n))
+            )
+            const row1 = rowFor(1)
+            const row3 = rowFor(3)
+            t.ok(
+                row1 !== undefined &&
+                row1.includes(renderDot('failed')),
+                'ticket 1 row keeps the failed dot in wave 2'
+            )
+            t.ok(
+                row3 !== undefined &&
+                row3.includes(renderDot('done')),
+                'ticket 3 row has the done dot'
             )
         } finally {
-            process.chdir(originalCwd)
+            rmSync(base, { recursive:true, force:true })
         }
-
-        const frame = rawLastFrame(stream.getOutput())
-        const frameNoAnsi = stripAnsi(frame)
-
-        const lines = frameNoAnsi.split('\n')
-        let ticket1Row = null
-        let ticket3Row = null
-        for (const line of lines) {
-            if (line.includes('01-a')) {
-                ticket1Row = line
-            }
-            if (line.includes('03-c')) {
-                ticket3Row = line
-            }
-        }
-
-        t.ok(ticket1Row, 'ticket 1 row found')
-        t.ok(ticket3Row, 'ticket 3 row found')
     }
 )
 

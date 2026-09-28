@@ -595,13 +595,13 @@ test('findBlockedTickets: chain through ready ticket', t => {
     t.equal(blocked.size, 2, 'two tickets blocked')
     t.ok(blocked.has('f:2'), 'f:2 is blocked')
     t.ok(blocked.has('f:3'), 'f:3 is blocked')
-    const f2Blocked = blocked.get('f:2')!
+    const f2Blocked = [...(blocked.get('f:2') ?? [])]
     t.deepEqual(
         f2Blocked.sort(),
         ['f:1'],
         'f:2 blocked by f:1'
     )
-    const f3Blocked = blocked.get('f:3')!
+    const f3Blocked = [...(blocked.get('f:3') ?? [])]
     t.deepEqual(
         f3Blocked.sort(),
         ['f:1'],
@@ -640,7 +640,7 @@ test('findBlockedTickets: multiple failed blockers', t => {
     )
     t.equal(blocked.size, 1, 'one ticket blocked')
     t.ok(blocked.has('f:3'), 'f:3 is blocked')
-    const f3Blocked = blocked.get('f:3')!
+    const f3Blocked = [...(blocked.get('f:3') ?? [])]
     t.deepEqual(
         f3Blocked.sort(),
         ['f:1', 'f:2'],
@@ -822,11 +822,11 @@ test('findBlockedTickets: diamond pattern', t => {
     t.ok(blocked.has('f:2'), 'f:2 is blocked')
     t.ok(blocked.has('f:3'), 'f:3 is blocked')
     t.ok(blocked.has('f:4'), 'f:4 is blocked')
-    const f2Blocked = blocked.get('f:2')!
+    const f2Blocked = [...(blocked.get('f:2') ?? [])]
     t.deepEqual(f2Blocked.sort(), ['f:1'], 'f:2 blocked by f:1')
-    const f3Blocked = blocked.get('f:3')!
+    const f3Blocked = [...(blocked.get('f:3') ?? [])]
     t.deepEqual(f3Blocked.sort(), ['f:1'], 'f:3 blocked by f:1')
-    const f4Blocked = blocked.get('f:4')!
+    const f4Blocked = [...(blocked.get('f:4') ?? [])]
     t.deepEqual(
         f4Blocked.sort(),
         ['f:1'],

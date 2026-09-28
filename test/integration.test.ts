@@ -13,6 +13,7 @@ import {
     getScriptDir,
 } from '../src/resolve.js'
 import { setup, SKILL_DIRS } from '../src/setup.js'
+import { ticketLabel, type Display } from '../src/display.js'
 import {
     runWavesIsolated,
     scanTickets,
@@ -2018,6 +2019,321 @@ test('runWavesIsolated - agent succeeds but merge conflicts, ' +
         }
         rmSync(projectDir, { recursive:true, force:true })
     }
+})
+
+// -- session list and blocked reporting (runWavesIsolated) --
+
+type DisplayCall = { method:string; args:Array<any> }
+
+// Records every Display call, in order, so tests can assert on
+// call order and arguments rather than rendered text.
+function recordingDisplay ():{
+    display:Display
+    calls:Array<DisplayCall>
+} {
+    const calls:Array<DisplayCall> = []
+    const record = (method:string) => (...args:Array<any>) => {
+        calls.push({ method, args })
+    }
+    return {
+        calls,
+        display:{
+            startRun:record('startRun'),
+            startWave:record('startWave'),
+            setTicketStatus:record('setTicketStatus'),
+            setBlocked:record('setBlocked'),
+            log:record('log'),
+            cleanup:record('cleanup'),
+        },
+    }
+}
+
+function removeWorktreesAndRepo (projectDir:string):void {
+    try {
+        execSync(
+            'git worktree list --porcelain',
+            { cwd:projectDir }
+        ).toString()
+            .split('\n')
+            .filter(l => l.startsWith('worktree '))
+            .map(l => l.substring('worktree '.length))
+            .filter(p => p !== projectDir)
+            .forEach(p => rmSync(p, {
+                recursive:true, force:true
+            }))
+    } catch {
+    }
+    rmSync(projectDir, { recursive:true, force:true })
+}
+
+test('runWavesIsolated - AC4.2 AC4.3: startRun once with the ' +
+    'session set, then setBlocked for human and failed ' +
+    'blockers', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-fail.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-after-fail.md'),
+            makeTicketBody({
+                status:'ready-for-agent',
+                blockers:[1],
+            })
+        )
+        writeFileSync(
+            join(issuesDir, '03-after-human.md'),
+            makeTicketBody({
+                status:'ready-for-agent',
+                blockers:[4],
+            })
+        )
+        writeFileSync(
+            join(issuesDir, '04-human.md'),
+            makeTicketBody({ status:'ready-for-human' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        const byNum = (n:number) => tickets.find(x => x.num === n)!
+        commitAll(projectDir, 'add tickets')
+        const { display, calls } = recordingDisplay()
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_FAIL_TICKET_01,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-blocked',
+                conflictStrategy:'respawn',
+                retries:0,
+                testCmd:'true',
+                display,
+            })
+        } finally {
+            process.chdir(originalCwd)
+        }
+
+        const startRuns = calls.filter(c => c.method === 'startRun')
+        t.equal(startRuns.length, 1, 'exactly one startRun call')
+        const startRunIndex = calls.findIndex(
+            c => c.method === 'startRun'
+        )
+        const firstWave = calls.findIndex(
+            c => c.method === 'startWave'
+        )
+        t.ok(
+            startRunIndex >= 0 && firstWave > startRunIndex,
+            'startRun comes before the first startWave'
+        )
+        t.deepEqual(
+            (startRuns[0]?.args[0] ?? []).map(
+                (r:{ num:number }) => r.num
+            ),
+            [1, 2, 3],
+            'session set is tickets 1, 2, 3 in order'
+        )
+
+        const blockedThree = calls.findIndex(c => (
+            c.method === 'setBlocked' && c.args[0] === 3
+        ))
+        t.ok(
+            blockedThree > startRunIndex &&
+            blockedThree < firstWave,
+            'ticket 3 is reported blocked before the first wave'
+        )
+        t.deepEqual(
+            calls[blockedThree]?.args[2],
+            [ticketLabel(byNum(4))],
+            'ticket 3 names ticket 4'
+        )
+
+        const blockedTwo = calls.findIndex((c, i) => (
+            i > firstWave &&
+            c.method === 'setBlocked' &&
+            c.args[0] === 2
+        ))
+        t.ok(
+            blockedTwo > firstWave,
+            'ticket 2 is reported blocked after the first wave'
+        )
+        t.deepEqual(
+            calls[blockedTwo]?.args[2],
+            [ticketLabel(byNum(1))],
+            'ticket 2 names ticket 1'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+    }
+})
+
+test('runWavesIsolated - AC4.4: no runnable tickets never ' +
+    'starts a run or a wave', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-done.md'),
+            makeTicketBody({ status:'done' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-human.md'),
+            makeTicketBody({ status:'ready-for-human' })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+        const { display, calls } = recordingDisplay()
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-none-runnable',
+                conflictStrategy:'respawn',
+                testCmd:'true',
+                display,
+            })
+        } finally {
+            process.chdir(originalCwd)
+        }
+
+        const methods = calls.map(c => c.method)
+        t.ok(!methods.includes('startRun'), 'startRun never called')
+        t.ok(
+            !methods.includes('startWave'),
+            'startWave never called'
+        )
+        t.ok(
+            !methods.includes('setBlocked'),
+            'setBlocked never called'
+        )
+        const logged = calls
+            .filter(c => c.method === 'log')
+            .map(c => String(c.args[0]))
+            .join('\n')
+        t.ok(
+            logged.includes('02-human.md'),
+            'finish summary is logged and names the human ticket'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+    }
+})
+
+// Shared setup for the AC2.6 tests: the merge of ticket 1's
+// branch always fails, and ticket 2 depends on ticket 1.
+async function runWithFailedMerge (
+    conflictStrategy:'respawn'|'stop',
+):Promise<{
+    calls:Array<DisplayCall>
+    tickets:ReturnType<typeof scanTickets>
+}> {
+    const projectDir = initTempGitRepo()
+    const repoName = projectDir.split('/').pop()
+    const failBranch = `${repoName}--01-conflict`
+    const fakeGit = installMergeFailingGit(failBranch)
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        writeFileSync(
+            join(issuesDir, '01-conflict.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-after.md'),
+            makeTicketBody({
+                status:'ready-for-agent',
+                blockers:[1],
+            })
+        )
+
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+        const { display, calls } = recordingDisplay()
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-merge-blocked',
+                conflictStrategy,
+                testCmd:'true',
+                display,
+            })
+        } finally {
+            process.chdir(originalCwd)
+        }
+        return { calls, tickets }
+    } finally {
+        fakeGit.restore()
+        removeWorktreesAndRepo(projectDir)
+    }
+}
+
+test('runWavesIsolated - AC2.6: an unrecovered merge failure ' +
+    'marks the ticket failed and blocks its dependents',
+async t => {
+    const { calls, tickets } = await runWithFailedMerge('respawn')
+    const one = tickets.find(x => x.num === 1)!
+
+    t.ok(
+        calls.some(c => (
+            c.method === 'setTicketStatus' &&
+            c.args[0] === 1 &&
+            c.args[1] === 'failed'
+        )),
+        'ticket 1 row is set to failed'
+    )
+    const blockedTwo = calls.find(c => (
+        c.method === 'setBlocked' && c.args[0] === 2
+    ))
+    t.deepEqual(
+        blockedTwo?.args[2],
+        [ticketLabel(one)],
+        'ticket 2 is reported blocked by ticket 1'
+    )
+})
+
+test('runWavesIsolated - AC2.6: with the stop strategy the ' +
+    'merge failure still blocks dependents', async t => {
+    const { calls, tickets } = await runWithFailedMerge('stop')
+    const one = tickets.find(x => x.num === 1)!
+
+    const blockedTwo = calls.find(c => (
+        c.method === 'setBlocked' && c.args[0] === 2
+    ))
+    t.deepEqual(
+        blockedTwo?.args[2],
+        [ticketLabel(one)],
+        'ticket 2 is reported blocked by ticket 1'
+    )
 })
 
 // -- US-005: respawn on merge conflict --
