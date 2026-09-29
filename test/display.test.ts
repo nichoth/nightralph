@@ -1227,6 +1227,62 @@ test('blocked suffix with multiple blockers', t => {
     )
 })
 
+test('setBlocked before the first startWave is kept (AC2.9)', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01.md', feature:'f' },
+        { num:2, filename:'02.md', feature:'f' },
+        { num:3, filename:'03.md', feature:'f' },
+    ]
+
+    // Same order both orchestrator loops use:
+    // startRun, then setBlocked, then startWave
+    display.startRun(tickets)
+    display.setBlocked(3, 'f', ['f/09'])
+    display.startWave(1, 1, tickets.slice(0, 2))
+
+    const raw = rawLastFrame(stream.getOutput())
+    const f03Row = raw.split('\n').find(
+        l => stripAnsi(l).includes('f/03'),
+    )
+
+    t.ok(
+        f03Row && f03Row.includes(renderDot('blocked')),
+        'f/03 row should hold the blocked dot in the first frame'
+    )
+    t.ok(
+        f03Row && stripAnsi(f03Row).includes('f/09'),
+        'f/03 row should name its blocker f/09 in the first frame'
+    )
+})
+
+test('setTicketStatus before the first startWave is kept', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01.md', feature:'f' },
+        { num:2, filename:'02.md', feature:'f' },
+        { num:3, filename:'03.md', feature:'f' },
+    ]
+
+    display.startRun(tickets)
+    display.setTicketStatus(3, 'failed', 'f')
+    display.startWave(1, 1, tickets.slice(0, 2))
+
+    const raw = rawLastFrame(stream.getOutput())
+    const f03Row = raw.split('\n').find(
+        l => stripAnsi(l).includes('f/03'),
+    )
+
+    t.ok(
+        f03Row && f03Row.includes(renderDot('failed')),
+        'f/03 row should hold the failed dot in the first frame'
+    )
+})
+
 test('AC3.2/AC3.3: header shows done/total and 0% initially', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({ stream })
