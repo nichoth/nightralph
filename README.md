@@ -32,6 +32,7 @@ so they can't drift as long as you install the skills with this package.
   * [Select a ticket](#select-a-ticket)
   * [Worktrees](#worktrees)
   * [Progress](#progress)
+  * [Status display](#status-display)
 - [Keep Your Machine Awake](#keep-your-machine-awake)
   * [Mac OS](#mac-os)
     + [Claude Opus 4.6](#claude-opus-46)
@@ -189,7 +190,8 @@ Flags:
   command fails, the ticket is left `ready-for-agent` for a retry
   and the test output is written to `<dir>/../logs/<ticket>.test.log`.
   Failed tickets (non-zero exit) keep their status and block
-  dependents.
+  dependents. The status display marks those dependents as blocked
+  and names the failed ticket.
 * A failed attempt is retried, up to `--retries` times, before the
   ticket is recorded as failed. Non-zero exit, exit 0 with no new
   commits, and a red test command all count as failures; a timeout
@@ -255,13 +257,18 @@ is `.scratch/<name>/issues/`.
 
 ## How It Works
 
-All currently eligible tickets are grouped into a
-"wave" and run in parallel. Each ticket gets a worktree named after the
-ticket slug.
+Tickets run in waves. A wave is a batch of tickets whose blockers are
+all done. The tickets in a wave run in parallel, up to `--concurrency`
+at once, and each ticket gets a worktree named after the ticket slug.
+nightralph waits for the whole batch to finish, merges the branches of
+the tickets that succeeded, and marks them `done`. Then it looks for
+tickets that are newly unblocked. Those form the next wave. This
+continues until no ticket is ready to run.
 
-When the wave finishes, every agent that exited successfully has its ticket
-marked `done`, which unlocks dependency tickets, which are grouped into the
-next wave. This continues until all tickets are complete.
+The wave total in the status display header (the `3` in `Wave 2/3`) is
+a prediction made at startup. It assumes every ticket succeeds. When a
+ticket fails, its dependents never become ready, so the run can end
+before it reaches the predicted last wave.
 
 
 ### Select a ticket
@@ -288,6 +295,45 @@ the run stops immediately.
 A file `progress.md` is written to the `.scratch/<feature>/` directory
 and committed after each ticket completes, so you can monitor the run from
 another terminal by reading the file.
+
+### Status display
+
+In a terminal, nightralph shows a header line, one row per ticket, and
+a log of recent messages. The ticket list holds every ticket that was
+`ready-for-agent` when the run started, and it stays the same for the
+whole run. Rows do not move, disappear, or reappear between waves.
+
+Each row starts with a dot that shows the ticket's state:
+
+* Dim empty dot: pending. The ticket has not started yet.
+* Yellow dot: running. The agent is working, the test command is
+  running, or the ticket is waiting out a retry delay.
+* Cyan dot: waiting to merge. The agent and the test command
+  succeeded, and the branch waits for the rest of the wave to finish.
+* Green dot: done.
+* Red dot: failed.
+* Dim filled dot: blocked. A ticket upstream failed or is not agent
+  work (for example, it is `ready-for-human`), so this ticket cannot
+  run in this session. The row names the blocking tickets, as in
+  `auth/03 (blocked by auth/01)`.
+
+The header looks like this:
+
+```
+Wave 2/3 - 5/8 done - 63%
+```
+
+The counts cover only this run's tickets, the ones in the list.
+Tickets finished by an earlier run are not counted.
+
+When stdout is not a terminal, for example when it is piped to a file,
+nightralph prints one line per wave that names the wave's tickets,
+followed by plain log lines.
+
+Known limit: with `-X`, the run stops at the first merge conflict. A
+ticket whose branch succeeded but came after the conflicting branch is
+never merged, and its row stays on the cyan "waiting to merge" dot when
+the run stops.
 
 
 ---
