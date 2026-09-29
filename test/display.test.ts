@@ -921,9 +921,10 @@ test('non-wave tickets are included in pagination', t => {
 
     const rows = lastFrame(stream.getOutput()).split('\n')
         .map(l => l.trim())
-    const visible = allTickets.filter(
-        tk => rows.some(row => row.endsWith(' ' + tk.filename)),
-    )
+    // Tickets in the order their rows appear on screen
+    const visible = rows.flatMap(row => allTickets.filter(
+        tk => row.endsWith(' ' + tk.filename),
+    ))
     const lastTicket = allTickets[allTickets.length - 1]
 
     t.ok(visible.length > 0, 'some tickets are visible')
