@@ -341,20 +341,27 @@ test('status line shows Wave N/M - done/total - pct% (AC2.1)', t => {
     const tickets = createTestTickets()
     display.startWave(1, 2, tickets)
 
-    const output = stream.getOutput()
-    // Should match pattern like "Wave 1/2 - 0/3 done - 0%"
-    t.ok(
-        /Wave \d+\/\d+/.test(output),
-        'header should have wave N/M'
-    )
-    t.ok(
-        /\d+\/\d+ done/.test(output),
-        'header should have done/total'
-    )
-    t.ok(
-        /\d+%/.test(output),
-        'header should have percent'
-    )
+    const first = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(first, 'header should carry wave, done/total and percent')
+    if (first) {
+        t.equal(first.waveNum, 1, 'header wave number')
+        t.equal(first.totalWaves, 2, 'header total waves')
+        t.equal(first.done, 0, 'header done count')
+        t.equal(first.total, 3, 'header total count')
+        t.equal(first.pct, 0, 'header percent')
+    }
+
+    display.setTicketStatus(1, 'done')
+
+    const second = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(second, 'header should re-render after a status change')
+    if (second) {
+        t.equal(second.waveNum, 1, 'wave number unchanged')
+        t.equal(second.totalWaves, 2, 'total waves unchanged')
+        t.equal(second.done, 1, 'done count counts the done ticket')
+        t.equal(second.total, 3, 'total count unchanged')
+        t.equal(second.pct, 33, 'percent is done / total')
+    }
 })
 
 test('percentage reflects completed tickets divided by total (AC2.2)', t => {
@@ -444,30 +451,24 @@ test('percentage comes from fixed list, not progress arg', t => {
         { num:3, filename:'task3.md' },
     ], { completed:10, total:100 })
 
-    let output = stream.getOutput()
-    t.ok(
-        output.includes('0/3 done'),
-        'should show 0/3 from fixed list'
-    )
-    t.ok(
-        output.includes('0%'),
-        'should show 0%, not 10% from progress arg'
-    )
+    const first = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(first, 'header present after first wave')
+    if (first) {
+        t.equal(first.done, 0, 'done is 0 from fixed list, not 10')
+        t.equal(first.total, 3, 'total is 3 from fixed list, not 100')
+        t.equal(first.pct, 0, 'percent is 0, not 10 from progress')
+    }
 
-    stream.clear()
     display.setTicketStatus(1, 'done')
-    output = stream.getOutput()
-    t.ok(
-        output.includes('1/3 done'),
-        'one more done should show 1/3'
-    )
-    t.ok(
-        output.includes('33%'),
-        'one more done should show 33%'
-    )
+    const second = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(second, 'header present after a ticket is done')
+    if (second) {
+        t.equal(second.done, 1, 'one done ticket counts as 1')
+        t.equal(second.total, 3, 'total stays 3')
+        t.equal(second.pct, 33, 'percent is 1/3')
+    }
 
     // next wave -- fixed list stays the same
-    stream.clear()
     display.startWave(2, 2, [
         { num:1, filename:'task1.md' },
         { num:2, filename:'task2.md' },
@@ -476,15 +477,14 @@ test('percentage comes from fixed list, not progress arg', t => {
         completed:100,
         total:1000,
     })
-    output = stream.getOutput()
-    t.ok(
-        output.includes('1/3 done'),
-        'should still show 1/3 from fixed list'
-    )
-    t.ok(
-        output.includes('33%'),
-        'should show 33%, not 10% from new progress arg'
-    )
+    const third = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(third, 'header present after second wave')
+    if (third) {
+        t.equal(third.waveNum, 2, 'header moved to wave 2')
+        t.equal(third.done, 1, 'done still 1 from fixed list')
+        t.equal(third.total, 3, 'total still 3 from fixed list')
+        t.equal(third.pct, 33, 'percent is 33, not 10 from progress')
+    }
 })
 
 test('rendered lines never exceed terminal width', t => {
@@ -919,10 +919,32 @@ test('non-wave tickets are included in pagination', t => {
     display.startRun(allTickets)
     display.startWave(1, 3, waveTickets)
 
-    const output = stream.getOutput()
+    const rows = lastFrame(stream.getOutput()).split('\n')
+        .map(l => l.trim())
+    const visible = allTickets.filter(
+        tk => rows.some(row => row.endsWith(' ' + tk.filename)),
+    )
+    const lastTicket = allTickets[allTickets.length - 1]
+
+    t.ok(visible.length > 0, 'some tickets are visible')
     t.ok(
-        output.includes('more below'),
-        'should paginate when wave + non-wave exceed viewport'
+        visible.length < allTickets.length,
+        'wave + non-wave tickets exceed the viewport, so ' +
+        `fewer than ${allTickets.length} are visible, ` +
+        `saw ${visible.length}`
+    )
+    t.deepEqual(
+        visible.map(tk => tk.filename),
+        allTickets.slice(0, visible.length).map(tk => tk.filename),
+        'visible rows are the first tickets of the run, in order'
+    )
+    t.ok(
+        visible.some(tk => !waveTickets.includes(tk)),
+        'a non-wave ticket shares the viewport with wave tickets'
+    )
+    t.ok(
+        !visible.includes(lastTicket),
+        'the last non-wave ticket is beyond the viewport'
     )
 })
 
@@ -1140,6 +1162,18 @@ test('AC2.8: blocked row fits terminal width', t => {
         tooLong.length, 0,
         'all rows including blocked should fit: ' +
         JSON.stringify(tooLong)
+    )
+
+    const blockedRow = rawLastFrame(stream.getOutput())
+        .split('\n')
+        .find(l => stripAnsi(l).includes('f/02'))
+    t.ok(
+        blockedRow && blockedRow.includes(renderDot('blocked')),
+        'the blocked ticket f/02 is drawn with the blocked dot'
+    )
+    t.ok(
+        blockedRow && stripAnsi(blockedRow).length <= maxWidth,
+        'the blocked row itself fits the terminal width'
     )
 })
 
