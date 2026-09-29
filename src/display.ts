@@ -31,8 +31,9 @@ export type DisplayConfig = {
 
 /**
  * Progress across the whole run, not just the current wave.
- * `completed` counts tickets done before the wave started;
- * tickets that finish during the wave are added on top.
+ * `completed` counts this run's tickets done before the wave
+ * started; `total` is the size of this run's ticket list. Only
+ * PlainDisplay prints it; StatusDisplay counts from its own list.
  */
 export type RunProgress = {
     readonly completed:number
@@ -177,7 +178,8 @@ export function renderDot (status:TicketStatus):string {
         case 'in-progress':
             return color.yellow(FILLED_DOT)
         // The agent and its test gate are finished; the branch
-        // waits for the rest of the wave before it is merged.
+        // waits for the rest of the wave before it is merged. It
+        // stays cyan through the merge and any conflict respawn.
         case 'awaiting-merge':
             return color.cyan(FILLED_DOT)
         case 'done':

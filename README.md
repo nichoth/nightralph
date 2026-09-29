@@ -310,6 +310,8 @@ Each row starts with a dot that shows the ticket's state:
   running, or the ticket is waiting out a retry delay.
 * Cyan dot: waiting to merge. The agent and the test command
   succeeded, and the branch waits for the rest of the wave to finish.
+  The dot stays cyan while the branch is merged, including while a
+  re-spawned agent resolves a merge conflict.
 * Green dot: done.
 * Red dot: failed.
 * Dim filled dot: blocked. A ticket upstream failed or is not agent

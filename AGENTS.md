@@ -422,17 +422,20 @@ Small orchestrator that runs a single-agent session per issue.
   branch waits for the rest of the wave;
   `runTicketAttempts` sets it when an attempt is
   `'ready'`, so only `runWavesIsolated` uses it. It
-  does not count toward the percent; only `done` does
+  stays set through the merge, including while a
+  respawned agent resolves a merge conflict
+  (`respawnAndRetryMerge` gets no display). It does
+  not count toward the percent; only `done` does
 - **startRun(tickets)**: called once before the first
   wave; seeds every row as `pending` and fixes the
   rendered list for the rest of the run. Rows never
   move, vanish or reappear; tickets not yet in a wave
   show as pending. `startWave` sets the wave number
   and total and clears the log area, but never resets
-  statuses; its
-  `tickets` argument is ignored by `StatusDisplay`
-  except when `startRun` was never called, in which
-  case the first `startWave` seeds the list from it
+  statuses; its `tickets` argument is ignored by
+  `StatusDisplay` except when `startRun` was never
+  called, in which case the first `startWave` seeds
+  the list from it
 - **WaveState**: `{ waveNum, totalWaves }`; the ticket
   list lives on `StatusDisplay` itself, not in the
   wave state
