@@ -11,7 +11,10 @@ Small orchestrator that runs a single-agent session per issue.
 
 ## Commands
 - `npm run build` -- build to dist/
-- `npm test` -- build and run tests
+- `npm test` -- build and run tests via `scripts/test.sh`,
+  which gives the run a private `TMPDIR` and deletes it (plus
+  any `mock-change-*.txt` in the repo root) when the run ends,
+  pass or fail
 - `npm run lint` -- eslint
 
 ## Project Structure
