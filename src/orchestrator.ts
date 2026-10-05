@@ -454,10 +454,24 @@ export function lookupSpec (
     return specBodies.get(feature) ?? fallback
 }
 
+// The rule for agents in a worktree the orchestrator has
+// already installed dependencies into. Empty without one.
+function installRule (installCmd?:string):string[] {
+    if (!installCmd) return []
+    return [
+        '- Dependencies are already installed with ' +
+            `\`${installCmd}\`. Do NOT reinstall them ` +
+            'with any other command; to reinstall, run ' +
+            'that same command. To add a dependency, use ' +
+            'the package manager that command uses, so ' +
+            'its lockfile stays in sync.',
+    ]
+}
+
 export function renderPrompt (
     specBody:string,
     ticket:Ticket,
-    opts:{ testCmd:string }
+    opts:{ testCmd:string; installCmd?:string }
 ):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -483,6 +497,7 @@ export function renderPrompt (
         '- Do NOT research external APIs or services ' +
             'via web search. Use the spec and ticket ' +
             'body as your sole reference for API shapes.',
+        ...installRule(opts.installCmd),
         '- Use /tdd for every checklist item. For ' +
             'each item, write a failing test at the ' +
             'seams named in the spec\'s Testing ' +
@@ -530,7 +545,8 @@ export function renderPrompt (
 
 export function renderMergePrompt (
     specBody:string,
-    ticket:Ticket
+    ticket:Ticket,
+    opts:{ installCmd?:string } = {}
 ):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -560,6 +576,7 @@ export function renderMergePrompt (
         '4. Commit the resolved files.',
         '',
         'Do NOT re-implement the ticket from scratch.',
+        ...installRule(opts.installCmd),
         'Do NOT read or modify files outside your ' +
             'current directory (the worktree).',
         'Do NOT run git push.',
@@ -1236,6 +1253,7 @@ export function dryRunIsolated (opts:{
     conflictStrategy:MergeConflictStrategy
     progressPath:string
     testCmd:string
+    installCmd?:string
     effort?:EffortLevel
     retries?:number
     retryDelay?:number
@@ -1282,7 +1300,10 @@ export function dryRunIsolated (opts:{
         console.log(
             renderPrompt(
                 opts.specBody, firstReady[0],
-                { testCmd:opts.testCmd }
+                {
+                    testCmd:opts.testCmd,
+                    installCmd:opts.installCmd,
+                }
             )
         )
     }
@@ -1293,6 +1314,9 @@ export function dryRunIsolated (opts:{
             'stop (stop merging on conflict)'
     console.log(
         `\nTest command: ${opts.testCmd}`
+    )
+    console.log(
+        `Install:      ${opts.installCmd || '(none)'}`
     )
     console.log(
         `Effort:       ${opts.effort ?? '(provider default)'}`
@@ -1312,6 +1336,42 @@ export function dryRunIsolated (opts:{
         `\nMerge strategy: ${strategyDesc}`
     )
     console.log(`Progress file: ${opts.progressPath}`)
+}
+
+// Installs dependencies in a ticket's worktree before an
+// agent runs there. Writes the output to a per-ticket log
+// either way, and returns true only when the install exits 0.
+async function runInstall (opts:{
+    installCmd:string
+    ticket:Ticket
+    worktreePath:string
+    timeout:number
+    logsDir:string
+    attempt?:number
+    log:(msg:string) => void
+    registry?:Set<number>
+}):Promise<boolean> {
+    const result = await runTestCmd({
+        cmd:opts.installCmd,
+        cwd:opts.worktreePath,
+        timeout:opts.timeout,
+        registry:opts.registry,
+    })
+    const installLogPath = attemptLogPath(
+        opts.logsDir, opts.ticket, opts.attempt ?? 1,
+        '.install.log'
+    )
+    writeFileSync(installLogPath, result.output)
+
+    if (result.exitCode !== 0) {
+        opts.log(
+            `  ${opts.ticket.filename}: install failed ` +
+            `(exit ${result.exitCode}); ` +
+            `see ${installLogPath}`
+        )
+        return false
+    }
+    return true
 }
 
 // Runs the project's test command in a ticket's worktree.
@@ -1367,6 +1427,7 @@ async function respawnAndRetryMerge (opts:{
     timeout:number
     logsDir:string
     testCmd:string
+    installCmd?:string
     maxTurns?:number
     onLine?:(msg:string) => void
 }):Promise<boolean> {
@@ -1390,8 +1451,23 @@ async function respawnAndRetryMerge (opts:{
         console.log(msg1)
     }
 
+    // The base branch may have changed the dependencies.
+    if (opts.installCmd) {
+        const installed = await runInstall({
+            installCmd:opts.installCmd,
+            ticket:opts.ticket,
+            worktreePath:opts.worktreePath,
+            timeout:opts.timeout,
+            logsDir:opts.logsDir,
+            log,
+            registry:runningAgents,
+        })
+        if (!installed) return false
+    }
+
     const prompt = renderMergePrompt(
-        opts.specBody, opts.ticket
+        opts.specBody, opts.ticket,
+        { installCmd:opts.installCmd }
     )
     const logPath = join(
         opts.logsDir,
@@ -1546,7 +1622,7 @@ type TicketOutcome =
     }
     | {
         kind:'failed'
-        reason:'exit'|'tests'
+        reason:'exit'|'tests'|'install'
         branchName:string
         exitCode:number
         completedItems:string[]
@@ -1570,6 +1646,7 @@ type TicketAttemptOpts = {
     timeout:number
     logsDir:string
     testCmd:string
+    installCmd?:string
     maxTurns?:number
     effort?:EffortLevel
     d:Display
@@ -1598,13 +1675,41 @@ async function runTicketAttempt (
     d.setTicketStatus(
         ticket.num, 'in-progress', ticket.feature
     )
+    if (opts.installCmd) {
+        const installed = await runInstall({
+            installCmd:opts.installCmd,
+            ticket,
+            worktreePath:worktree.worktreePath,
+            timeout:opts.timeout,
+            logsDir:opts.logsDir,
+            attempt:opts.attempt,
+            log:(msg) => d.log(msg),
+            registry:runningAgents,
+        })
+        if (!installed) {
+            await removeWorktreeQuietly(
+                worktree.worktreePath, d
+            )
+            return {
+                kind:'failed',
+                reason:'install',
+                branchName:worktree.branchName,
+                exitCode:1,
+                completedItems:[],
+            }
+        }
+    }
+
     const ticketSpec = lookupSpec(
         opts.specBodies, opts.specBody, ticket.feature
     )
     const agentResult = await spawnAgent({
         prompt:renderPrompt(
             ticketSpec, ticket,
-            { testCmd:opts.testCmd }
+            {
+                testCmd:opts.testCmd,
+                installCmd:opts.installCmd,
+            }
         ),
         agentCmd:opts.agentCmd,
         model:opts.model,
@@ -1758,6 +1863,12 @@ async function runTicketAttempts (
         if (outcome.kind === 'worktree-error') return outcome
     }
     return outcome
+}
+
+function failureNote (reason:'exit'|'tests'|'install'):string {
+    if (reason === 'tests') return 'tests failed'
+    if (reason === 'install') return 'install failed'
+    return 'failed'
 }
 
 // Wraps writeProgress + commitProgress so callers do not each
@@ -2126,6 +2237,9 @@ export async function runWavesIsolated (opts:{
     conflictStrategy:MergeConflictStrategy
     display?:Display
     testCmd:string
+    // run in each fresh worktree before the agent; unset or
+    // empty = no install
+    installCmd?:string
     maxTurns?:number
     // starting effort level; unset = provider's default
     effort?:EffortLevel
@@ -2262,6 +2376,7 @@ export async function runWavesIsolated (opts:{
                 timeout:opts.timeout,
                 logsDir:opts.logsDir,
                 testCmd:opts.testCmd,
+                installCmd:opts.installCmd,
                 maxTurns:opts.maxTurns,
                 effort:opts.effort,
                 retries,
@@ -2386,9 +2501,7 @@ export async function runWavesIsolated (opts:{
                     tracker.pathFor(ticket.feature),
                     tracker.dataFor(ticket.feature),
                     `nightralph: ${ticket.filename} ` +
-                    (outcome.reason === 'tests' ?
-                        'tests failed' :
-                        'failed'),
+                    failureNote(outcome.reason),
                     d,
                 )
                 continue
@@ -2494,6 +2607,7 @@ export async function runWavesIsolated (opts:{
                                 timeout:opts.timeout,
                                 logsDir:opts.logsDir,
                                 testCmd:opts.testCmd,
+                                installCmd:opts.installCmd,
                                 maxTurns:opts.maxTurns,
                                 onLine:(msg) => d.log(msg),
                             }) :

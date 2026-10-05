@@ -163,7 +163,8 @@ Flags:
 | `--dry-run` | no | -- | Show wave order and prompt without running |
 | `-X` | no | -- | Stop on merge conflict instead of re-spawning |
 | `--timeout` | no | `3600` | Kill the agent after N seconds. A killed agent is not a failure: its work is kept (see Notes) |
-| `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable. Shares the agent's `--timeout`. The command runs in a fresh git worktree, which contains only tracked files, so a project that needs an install step should include it, for example `--test-cmd 'npm ci && npm test'` |
+| `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable. Shares the agent's `--timeout`. Dependencies are already installed by `--install-cmd` |
+| `--install-cmd <cmd>` | no | auto | Run in each fresh worktree before the agent starts, and again after a merge-conflict rebase; non-zero exit fails the attempt (it is retried like any other failure). Auto-detects from the lockfile: `pnpm-lock.yaml` -> `pnpm install --prefer-offline --frozen-lockfile`, `package-lock.json` -> `npm ci --prefer-offline --no-audit --no-fund`, a `package.json` with no lockfile -> `npm install --prefer-offline --no-audit --no-fund --no-package-lock`, no `package.json` -> no install. Pass `""` to disable. Shares the agent's `--timeout`. Output goes to `<ticket>.install.log` |
 | `--max-turns <n>` | no | -- | Max agentic turns per ticket. Forwarded verbatim as `--max-turns <n>` to the provider CLI. Only `claude` accepts it; `codex` and `pi` reject it as an unknown option and the agent exits immediately. Applies to every agent spawn, including a re-spawn after a merge conflict. When omitted, `claude` applies no turn limit, so `--timeout` is the only cap. Reaching the limit is an error exit, so the ticket is recorded as failed |
 | `--effort <level>` | no | -- | Starting effort/reasoning level. Each provider has its own ladder: `claude` supports `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--effort`); `codex` supports `low`, `medium`, `high` (forwarded as `-c model_reasoning_effort=<level>`); `pi` supports `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--thinking`). Omitted = provider default. Each retry steps up from here (see `--retries`) |
 | `--retries <n>` | no | `3` | Extra attempts per ticket after a failed run. Each retry starts from a fresh worktree and raises the effort level one rung (see Notes). `0` disables retries |
@@ -285,6 +286,13 @@ isolation so parallel tickets never conflict on disk. After a wave
 completes, successful branches are merged back into the base branch.
 The first branch merges directly, and subsequent branches rebase
 onto the updated base before merging.
+
+A fresh worktree has only tracked files, so there is no
+`node_modules`. Before the agent starts, the orchestrator installs
+dependencies with the command that matches the project's lockfile
+(see `--install-cmd`), and the prompt tells the agent not to run
+another installer. The install never writes a lockfile, so ticket
+branches do not commit one by accident.
 
 If a merge conflict occurs, the behavior depends on the `-X` flag: by
 default the agent is re-spawned to resolve it; with `-X`,

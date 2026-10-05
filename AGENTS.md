@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-09-28
+Last verified: 2026-10-04
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -68,6 +68,10 @@ Small orchestrator that runs a single-agent session per issue.
 - `--test-cmd <cmd>` -- command run in each worktree
   after the agent exits; non-zero exit rejects the
   ticket. Defaults to `npm test`
+- `--install-cmd <cmd>` -- command run in each fresh
+  worktree before the agent (isolated runs only).
+  Defaults to `detectInstallCmd(repoRoot)`; `""`
+  disables it
 - `--max-turns <n>` -- max agentic turns per ticket,
   forwarded as `--max-turns` to claude; other
   providers warn and skip (codex and pi do not
@@ -180,7 +184,8 @@ Small orchestrator that runs a single-agent session per issue.
   `worktreePath:string` and `branchName:string`;
   `'error'` carries optional `worktreePath?:string`
   and `branchName?:string`; `'worktree-error'`
-  carries only `error:unknown`
+  carries only `error:unknown`; `'failed'` carries
+  `reason:'exit'|'tests'|'install'`
 - **DEFAULT_RETRY_DELAY**: exported as `30` (seconds)
 - **DEFAULT_CONCURRENCY**: exported as `5`
 - **runPool(items, limit, fn)**: runs `fn` over `items`
@@ -242,7 +247,10 @@ Small orchestrator that runs a single-agent session per issue.
   fake `[x]` lines (leave the item unchecked and
   say what blocked it), and to record reusable
   learnings in the nearest AGENTS.md before the
-  final commit
+  final commit; optional `opts.installCmd` adds a rule
+  that dependencies are installed with that command,
+  the agent must not reinstall with any other command,
+  and new dependencies use the same package manager
 - **stripSpecSection(specBody, heading)**: drops one
   markdown section from a spec, ignoring headings
   inside code fences; the CLI uses it to omit
@@ -265,7 +273,9 @@ Small orchestrator that runs a single-agent session per issue.
   a respawned agent resolving a merge conflict; tells
   the agent to resolve conflict markers, not
   re-implement, and to keep both sides' additions
-  when AGENTS.md or other docs conflict
+  when AGENTS.md or other docs conflict; optional
+  third arg `{ installCmd? }` adds the same install
+  rule as `renderPrompt`
 - **lookupSpec(specBodies, fallback, feature)**: returns
   the spec body for a given feature from a
   `Map<string, string>`, or `fallback` when the map is
@@ -275,7 +285,13 @@ Small orchestrator that runs a single-agent session per issue.
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
   updates; requires `testCmd` (string); accepts
-  optional `display`, `effort`, `retries`,
+  optional `installCmd` (run in each fresh worktree
+  before the agent and again after a merge-conflict
+  rebase, output in `<logsDir>/<ticket>.install.log`;
+  a non-zero exit fails the attempt with reason
+  `'install'` without running the agent, and it is
+  retried like any failure), `display`, `effort`,
+  `retries`,
   `retryDelay`, `concurrency`,
   `specBodies` (`Map<string, string>`), and
   `progressPaths` (`Map<string, string>`) in opts;
@@ -367,17 +383,28 @@ Small orchestrator that runs a single-agent session per issue.
   explanation instead of silently
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; requires
-  `testCmd`; accepts `effort`, `retries`, `retryDelay`,
-  and `concurrency` in opts and prints them
+  `testCmd`; accepts `installCmd`, `effort`, `retries`,
+  `retryDelay`, and `concurrency` in opts and prints
+  them
 
 ### testcmd module (`src/testcmd.ts`)
 - **Exposes**: `TestResult`,
-  `detectTestCmd(projectDir)`, `runTestCmd(opts)`
+  `detectTestCmd(projectDir)`,
+  `detectInstallCmd(projectDir)`, `runTestCmd(opts)`
 - **TestResult**: `{ exitCode, output }` -- `output`
   is stdout and stderr interleaved
 - **detectTestCmd(projectDir)**: returns `'npm test'`
   when `<projectDir>/package.json` declares a `test`
   script, else `null`
+- **detectInstallCmd(projectDir)**: picks the install
+  command from the lockfile, never one that writes a
+  lockfile: `pnpm-lock.yaml` ->
+  `pnpm install --prefer-offline --frozen-lockfile`;
+  `package-lock.json` ->
+  `npm ci --prefer-offline --no-audit --no-fund`;
+  `package.json` alone ->
+  `npm install --prefer-offline --no-audit --no-fund
+  --no-package-lock`; no `package.json` -> `null`
 - **runTestCmd(opts)**: `{ cmd, cwd, timeout,
   registry? }` -- runs `cmd` via `sh -c` in its own
   process group; when `registry` (`Set<number>`) is

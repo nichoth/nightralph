@@ -986,6 +986,136 @@ test('runWavesIsolated - passing test command runs in the ' +
     }
 })
 
+test('runWavesIsolated - install command runs in the ' +
+    'worktree before the test gate', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                installCmd:'echo ok > install-marker',
+                // Only succeeds where the install ran.
+                testCmd:'test -f install-marker',
+                retries:0,
+            })
+
+            t.equal(result.allDone, true, 'run done')
+            t.equal(tickets[0].status, 'done', 'ticket done')
+            t.ok(
+                existsSync(
+                    join(logsDir, '01-first.install.log')
+                ),
+                'install log written'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - a failed install fails the ' +
+    'ticket without running the agent', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                installCmd:'exit 1',
+                testCmd:'true',
+                retries:0,
+            })
+
+            t.equal(result.allDone, false, 'run not done')
+            t.equal(
+                tickets[0].status, 'ready-for-agent',
+                'ticket not done'
+            )
+            t.ok(
+                !existsSync(join(logsDir, '01-first.log')),
+                'agent never ran'
+            )
+            t.ok(
+                existsSync(
+                    join(logsDir, '01-first.install.log')
+                ),
+                'install log written'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
 test('runWavesIsolated - agent exits 0 but makes no commits, ' +
     'ticket stays ready-for-agent and worktree is cleaned up',
 async t => {

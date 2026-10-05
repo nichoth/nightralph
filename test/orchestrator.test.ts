@@ -1655,6 +1655,30 @@ test('renderPrompt includes the test command',
         )
     })
 
+test('renderPrompt names the install command when given',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const withCmd = renderPrompt(
+            'spec body', ticket,
+            { testCmd:'npm test', installCmd:'pnpm i -x' }
+        )
+        const without = renderPrompt(
+            'spec body', ticket,
+            { testCmd:'npm test' }
+        )
+        t.ok(
+            withCmd.includes('pnpm i -x'),
+            'names the install command'
+        )
+        t.ok(
+            !without.includes('pnpm i -x'),
+            'no install line without an install command'
+        )
+    })
+
 test('renderPrompt contains git push rule', t => {
     const ticket = makeTicket({
         num:1,
@@ -1683,6 +1707,21 @@ test('renderPrompt contains current directory rule',
             'prompt mentions current directory'
         )
     })
+
+test('renderMergePrompt names the install command when ' +
+    'given', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderMergePrompt(
+        'spec body', ticket, { installCmd:'pnpm i -x' }
+    )
+    t.ok(
+        prompt.includes('pnpm i -x'),
+        'names the install command'
+    )
+})
 
 test('renderMergePrompt contains git push rule', t => {
     const ticket = makeTicket({

@@ -24,6 +24,24 @@ export function detectTestCmd (projectDir:string):string|null {
     }
 }
 
+// Returns the command that installs dependencies in a fresh
+// worktree, or null when the project has no package.json.
+// Follows the project's lockfile, so the worktree gets the
+// same dependency tree as the main checkout, and never
+// writes a lockfile a ticket branch would then commit.
+export function detectInstallCmd (projectDir:string):string|null {
+    const has = (name:string) => existsSync(join(projectDir, name))
+    if (!has('package.json')) return null
+    if (has('pnpm-lock.yaml')) {
+        return 'pnpm install --prefer-offline --frozen-lockfile'
+    }
+    if (has('package-lock.json')) {
+        return 'npm ci --prefer-offline --no-audit --no-fund'
+    }
+    return 'npm install --prefer-offline --no-audit ' +
+        '--no-fund --no-package-lock'
+}
+
 export function runTestCmd (opts:{
     cmd:string
     cwd:string
