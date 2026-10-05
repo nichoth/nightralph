@@ -1,14 +1,18 @@
 import { StatusDisplay } from '../dist/display.js'
 
 const d = new StatusDisplay()
+d.startRun([
+    { num:1, filename:'01-auth-middleware.md' },
+    { num:2, filename:'02-api-endpoints.md' },
+    { num:3, filename:'03-dashboard-ui.md' },
+    { num:4, filename:'04-notifications.md' },
+    { num:5, filename:'05-deploy-config.md' },
+])
 d.startWave(1, 2, [
     { num:1, filename:'01-auth-middleware.md' },
     { num:2, filename:'02-api-endpoints.md' },
     { num:3, filename:'03-dashboard-ui.md' },
-], { completed:0, total:5 }, [
-    { num:4, filename:'04-notifications.md' },
-    { num:5, filename:'05-deploy-config.md' },
-])
+], { completed:0, total:5 })
 
 d.setTicketStatus(1, 'in-progress')
 let i = 0
@@ -27,6 +31,7 @@ const iv = setInterval(() => {
     }
     if (i === 20) {
         d.setTicketStatus(3, 'failed')
+        d.setBlocked(5, undefined, ['03-dashboard-ui.md'])
     }
     if (i > 25) {
         clearInterval(iv)

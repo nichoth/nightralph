@@ -2,7 +2,7 @@ import { test } from '@substrate-system/tapzero'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-    mkdirSync, writeFileSync, mkdtempSync,
+    mkdirSync, writeFileSync, mkdtempSync, rmSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
@@ -12,11 +12,16 @@ import {
     createDisplay,
     color,
     renderDot,
+    ticketLabel,
     type DisplayTicket,
     type Display,
+    type TicketRef,
+    type RunProgress,
+    type TicketStatus,
 } from '../src/display.js'
 import {
     spawnAgent, runWaves, runWavesIsolated, scanTickets,
+    type Ticket,
 } from '../src/orchestrator.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -82,6 +87,51 @@ function createTestTickets ():Array<DisplayTicket> {
     ]
 }
 
+function stripAnsi (output:string):string {
+    const esc = String.fromCharCode(27)
+    const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
+    return output.replace(ansiRe, '')
+}
+
+function lastFrame (output:string):string {
+    const plain = stripAnsi(output)
+    const matches = [...plain.matchAll(/Wave \d+\/\d+/g)]
+    if (matches.length === 0) return ''
+    const last = matches[matches.length - 1]
+    return plain.substring(last.index ?? 0)
+}
+
+function rawLastFrame (output:string):string {
+    const plain = stripAnsi(output)
+    const matches = [...plain.matchAll(/Wave \d+\/\d+/g)]
+    if (matches.length === 0) return ''
+    const last = matches[matches.length - 1]
+    return output.substring(
+        output.lastIndexOf(last[0]),
+    )
+}
+
+function headerNumbers (frame:string):{
+    waveNum:number
+    totalWaves:number
+    done:number
+    total:number
+    pct:number
+}|null {
+    const plain = stripAnsi(frame)
+    const match = plain.match(
+        /Wave (\d+)\/(\d+)\D+(\d+)\/(\d+)\D+(\d+)%/,
+    )
+    if (!match) return null
+    return {
+        waveNum:parseInt(match[1], 10),
+        totalWaves:parseInt(match[2], 10),
+        done:parseInt(match[3], 10),
+        total:parseInt(match[4], 10),
+        pct:parseInt(match[5], 10),
+    }
+}
+
 // -- Tests for AC4.1 and AC4.2: Wave transitions --
 
 test('startWave initializes display with tickets in pending status', t => {
@@ -112,37 +162,31 @@ test('startWave initializes display with tickets in pending status', t => {
     )
 })
 
-test('startWave resets ticket list on second call', t => {
+test('startWave does not reset ticket list on second call', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
         stream,
     })
 
-    const wave1Tickets = [
-        { num:1, filename:'wave1-task.md', status:'pending' as const },
-    ]
-    const wave2Tickets = [
-        { num:2, filename:'wave2-task.md', status:'pending' as const },
+    const allTickets = [
+        { num:1, filename:'wave1-task.md' },
+        { num:2, filename:'wave2-task.md' },
     ]
 
-    display.startWave(1, 2, wave1Tickets)
-    const output1 = stream.getOutput()
+    display.startRun(allTickets)
 
-    stream.clear()
-    display.startWave(2, 2, wave2Tickets)
-    const output2 = stream.getOutput()
+    display.startWave(1, 2, [allTickets[0]])
+    display.startWave(2, 2, [allTickets[1]])
+
+    const frame = lastFrame(stream.getOutput())
 
     t.ok(
-        output1.includes('wave1-task.md'),
-        'first wave should display wave1 ticket'
+        frame.includes('wave1-task.md'),
+        'last frame should display wave1 ticket'
     )
     t.ok(
-        output2.includes('wave2-task.md'),
-        'second wave should display wave2 ticket'
-    )
-    t.ok(
-        !output2.includes('wave1-task.md'),
-        'second wave should not contain wave1 ticket'
+        frame.includes('wave2-task.md'),
+        'last frame should display wave2 ticket'
     )
 })
 
@@ -288,7 +332,7 @@ test('failed ticket shows red filled dot (AC1.5)', t => {
 
 // -- Tests for AC2: Status line --
 
-test('status line shows Wave {current}/{total} -- {pct}% complete (AC2.1)', t => {
+test('status line shows Wave N/M - done/total - pct% (AC2.1)', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
         stream,
@@ -297,12 +341,27 @@ test('status line shows Wave {current}/{total} -- {pct}% complete (AC2.1)', t =>
     const tickets = createTestTickets()
     display.startWave(1, 2, tickets)
 
-    const output = stream.getOutput()
-    // Should match pattern like "Wave 1/2 -- 0% complete"
-    t.ok(
-        /Wave \d+\/\d+ -+ \d+%/.test(output),
-        'status line should have format Wave {current}/{total} -- {pct}%'
-    )
+    const first = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(first, 'header should carry wave, done/total and percent')
+    if (first) {
+        t.equal(first.waveNum, 1, 'header wave number')
+        t.equal(first.totalWaves, 2, 'header total waves')
+        t.equal(first.done, 0, 'header done count')
+        t.equal(first.total, 3, 'header total count')
+        t.equal(first.pct, 0, 'header percent')
+    }
+
+    display.setTicketStatus(1, 'done')
+
+    const second = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(second, 'header should re-render after a status change')
+    if (second) {
+        t.equal(second.waveNum, 1, 'wave number unchanged')
+        t.equal(second.totalWaves, 2, 'total waves unchanged')
+        t.equal(second.done, 1, 'done count counts the done ticket')
+        t.equal(second.total, 3, 'total count unchanged')
+        t.equal(second.pct, 33, 'percent is done / total')
+    }
 })
 
 test('percentage reflects completed tickets divided by total (AC2.2)', t => {
@@ -372,41 +431,60 @@ test('percentage only counts done tickets, not failed', t => {
     )
 })
 
-test('percentage reflects overall run progress when given', t => {
+test('percentage comes from fixed list, not progress arg', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({
         stream,
     })
 
-    // wave 2 of 3; 3 of 11 tickets already done before this wave
-    const tickets = createTestTickets()
-    display.startWave(2, 3, tickets, { completed:3, total:11 })
+    // startRun with 3 tickets (the fixed list)
+    display.startRun([
+        { num:1, filename:'task1.md' },
+        { num:2, filename:'task2.md' },
+        { num:3, filename:'task3.md' },
+    ])
 
-    let output = stream.getOutput()
-    t.ok(
-        output.includes('27%'),
-        'should show 3/11 = 27% at wave start, not 0%'
-    )
+    // startWave with progress arg (which is ignored)
+    display.startWave(1, 2, [
+        { num:1, filename:'task1.md' },
+        { num:2, filename:'task2.md' },
+        { num:3, filename:'task3.md' },
+    ], { completed:10, total:100 })
 
-    stream.clear()
+    const first = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(first, 'header present after first wave')
+    if (first) {
+        t.equal(first.done, 0, 'done is 0 from fixed list, not 10')
+        t.equal(first.total, 3, 'total is 3 from fixed list, not 100')
+        t.equal(first.pct, 0, 'percent is 0, not 10 from progress')
+    }
+
     display.setTicketStatus(1, 'done')
-    output = stream.getOutput()
-    t.ok(
-        output.includes('36%'),
-        'one more done should show 4/11 = 36%'
-    )
+    const second = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(second, 'header present after a ticket is done')
+    if (second) {
+        t.equal(second.done, 1, 'one done ticket counts as 1')
+        t.equal(second.total, 3, 'total stays 3')
+        t.equal(second.pct, 33, 'percent is 1/3')
+    }
 
-    // next wave carries the running total forward
-    stream.clear()
-    display.startWave(3, 3, createTestTickets(), {
-        completed:6,
-        total:11,
+    // next wave -- fixed list stays the same
+    display.startWave(2, 2, [
+        { num:1, filename:'task1.md' },
+        { num:2, filename:'task2.md' },
+        { num:3, filename:'task3.md' },
+    ], {
+        completed:100,
+        total:1000,
     })
-    output = stream.getOutput()
-    t.ok(
-        output.includes('55%'),
-        'new wave should show 6/11 = 55%, not reset to 0%'
-    )
+    const third = headerNumbers(lastFrame(stream.getOutput()))
+    t.ok(third, 'header present after second wave')
+    if (third) {
+        t.equal(third.waveNum, 2, 'header moved to wave 2')
+        t.equal(third.done, 1, 'done still 1 from fixed list')
+        t.equal(third.total, 3, 'total still 3 from fixed list')
+        t.equal(third.pct, 33, 'percent is 33, not 10 from progress')
+    }
 })
 
 test('rendered lines never exceed terminal width', t => {
@@ -430,10 +508,11 @@ test('rendered lines never exceed terminal width', t => {
     const esc = String.fromCharCode(27)
     const ansiRe = new RegExp(esc + '\\[[0-9;?]*[A-Za-z]', 'g')
     const plain = stream.getOutput().replace(ansiRe, '')
-    const tooLong = plain.split('\n').filter(l => l.length > 40)
+    const maxWidth = stream.columns - 1
+    const tooLong = plain.split('\n').filter(l => l.length > maxWidth)
     t.equal(
         tooLong.length, 0,
-        'no rendered line should be wider than columns: ' +
+        'no rendered line should be wider than columns-1: ' +
         JSON.stringify(tooLong)
     )
 })
@@ -733,95 +812,92 @@ test('cleanup restores cursor visibility', t => {
     )
 })
 
-// -- Tests for remaining tickets --
+// -- Tests for non-wave tickets via startRun --
 
-test('startWave renders remaining tickets with empty dots', t => {
+test('non-wave tickets render with pending dot', t => {
     const stream = createMockStream()
     stream.rows = 40
     const display = new StatusDisplay({
         stream,
     })
 
-    const waveTickets = [
-        { num:6, filename:'06-active.md' },
+    const allTickets = [
+        { num:1, filename:'01-active.md' },
+        { num:2, filename:'02-pending.md' },
     ]
-    const remaining = [
-        { num:7, filename:'07-queued.md' },
-        { num:8, filename:'08-queued.md' },
-    ]
-    display.startWave(1, 3, waveTickets, undefined, remaining)
 
-    const output = stream.getOutput()
+    display.startRun(allTickets)
+    display.startWave(1, 2, [allTickets[0]])
+
+    const frame = lastFrame(stream.getOutput())
     t.ok(
-        output.includes('06-active.md'),
+        frame.includes('01-active.md'),
         'should display wave ticket'
     )
     t.ok(
-        output.includes('07-queued.md'),
-        'should display first remaining ticket'
-    )
-    t.ok(
-        output.includes('08-queued.md'),
-        'should display second remaining ticket'
+        frame.includes('02-pending.md'),
+        'should display non-wave ticket'
     )
 })
 
-test('remaining tickets show dim empty dot', t => {
+test('non-wave tickets show pending empty dot', t => {
     const stream = createMockStream()
     stream.rows = 40
     const display = new StatusDisplay({
         stream,
     })
 
-    const waveTickets = [
+    const allTickets = [
         { num:1, filename:'active.md' },
+        { num:2, filename:'pending.md' },
     ]
-    const remaining = [
-        { num:2, filename:'queued.md' },
-    ]
-    display.startWave(1, 2, waveTickets, undefined, remaining)
 
-    const output = stream.getOutput()
-    const lines = output.split('\n')
-    const queuedLine = lines.find(l => l.includes('queued.md'))
-    t.ok(queuedLine, 'should have a line for queued ticket')
+    display.startRun(allTickets)
+    display.startWave(1, 2, [allTickets[0]])
+
+    const raw = stream.getOutput()
+    const rawLines = raw.split('\n')
+    const pendingLine = rawLines.find(
+        l => stripAnsi(l).includes('pending.md'),
+    )
+
     t.ok(
-        queuedLine!.includes('○'),
-        'remaining ticket should use empty dot'
+        pendingLine && pendingLine.includes(renderDot('pending')),
+        'non-wave ticket should show pending dot'
     )
 })
 
-test('setTicketStatus does not affect remaining tickets', t => {
+test('setTicketStatus does not affect non-wave tickets', t => {
     const stream = createMockStream()
     stream.rows = 40
     const display = new StatusDisplay({
         stream,
     })
 
-    const waveTickets = [
+    const allTickets = [
         { num:1, filename:'active.md' },
+        { num:2, filename:'pending.md' },
     ]
-    const remaining = [
-        { num:2, filename:'queued.md' },
-    ]
-    display.startWave(1, 2, waveTickets, undefined, remaining)
 
-    // Setting status on a wave ticket triggers re-render;
-    // remaining ticket should still have empty dot
+    display.startRun(allTickets)
+    display.startWave(1, 2, [allTickets[0]])
+
     stream.clear()
     display.setTicketStatus(1, 'in-progress')
 
-    const output = stream.getOutput()
-    const lines = output.split('\n')
-    const queuedLine = lines.find(l => l.includes('queued.md'))
-    t.ok(queuedLine, 'remaining ticket should still be rendered')
+    const raw = stream.getOutput()
+    const rawLines = raw.split('\n')
+    const pendingLine = rawLines.find(
+        l => stripAnsi(l).includes('pending.md'),
+    )
+
     t.ok(
-        queuedLine!.includes('○'),
-        'remaining ticket should still show empty dot'
+        pendingLine && pendingLine.includes(renderDot('pending')),
+        'non-wave ticket should still show empty dot'
     )
 })
 
-test('remaining tickets are included in pagination', t => {
+test('non-wave tickets are included in pagination', t => {
     const stream = createMockStream()
     stream.rows = 12
     const display = new StatusDisplay({
@@ -832,38 +908,499 @@ test('remaining tickets are included in pagination', t => {
         { num:1, filename:'wave-1.md' },
         { num:2, filename:'wave-2.md' },
     ]
-    const remaining = Array.from({ length:10 }, (_, i) => ({
-        num:i + 3,
-        filename:`remaining-${i + 3}.md`,
-    }))
-    display.startWave(1, 3, waveTickets, undefined, remaining)
+    const allTickets = [
+        ...waveTickets,
+        ...Array.from({ length:10 }, (_, i) => ({
+            num:i + 3,
+            filename:`pending-${i + 3}.md`,
+        })),
+    ]
 
-    const output = stream.getOutput()
+    display.startRun(allTickets)
+    display.startWave(1, 3, waveTickets)
+
+    const rows = lastFrame(stream.getOutput()).split('\n')
+        .map(l => l.trim())
+    // Tickets in the order their rows appear on screen
+    const visible = rows.flatMap(row => allTickets.filter(
+        tk => row.endsWith(' ' + tk.filename),
+    ))
+    const lastTicket = allTickets[allTickets.length - 1]
+
+    t.ok(visible.length > 0, 'some tickets are visible')
     t.ok(
-        output.includes('more below'),
-        'should paginate when wave + remaining exceed viewport'
+        visible.length < allTickets.length,
+        'wave + non-wave tickets exceed the viewport, so ' +
+        `fewer than ${allTickets.length} are visible, ` +
+        `saw ${visible.length}`
+    )
+    t.deepEqual(
+        visible.map(tk => tk.filename),
+        allTickets.slice(0, visible.length).map(tk => tk.filename),
+        'visible rows are the first tickets of the run, in order'
+    )
+    t.ok(
+        visible.some(tk => !waveTickets.includes(tk)),
+        'a non-wave ticket shares the viewport with wave tickets'
+    )
+    t.ok(
+        !visible.includes(lastTicket),
+        'the last non-wave ticket is beyond the viewport'
     )
 })
 
-test('startWave without remaining works as before', t => {
-    const stream = createMockStream()
-    stream.rows = 40
-    const display = new StatusDisplay({
-        stream,
-    })
+// -- Tests for stable-ticket-list AC1-AC3 --
 
-    const tickets = createTestTickets()
+test('AC1.1: all session tickets rendered after startRun', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'task1.md' },
+        { num:2, filename:'task2.md' },
+        { num:3, filename:'task3.md' },
+        { num:4, filename:'task4.md' },
+    ]
+    display.startRun(tickets)
+    display.startWave(1, 2, [tickets[0]])
+
+    const frame = lastFrame(stream.getOutput())
+    t.ok(
+        frame.includes('task1.md'),
+        'should show wave ticket'
+    )
+    t.ok(
+        frame.includes('task2.md'),
+        'should show non-wave ticket 2'
+    )
+    t.ok(
+        frame.includes('task3.md'),
+        'should show non-wave ticket 3'
+    )
+    t.ok(
+        frame.includes('task4.md'),
+        'should show non-wave ticket 4'
+    )
+})
+
+test('AC1.2/AC1.5: done status persists, failed persists', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'task1.md' },
+        { num:2, filename:'task2.md' },
+    ]
+
+    display.startRun(tickets)
+    display.startWave(1, 2, tickets)
+    display.setTicketStatus(1, 'done')
+    display.setTicketStatus(2, 'failed')
+
+    stream.clear()
+    display.startWave(2, 2, [])
+
+    const raw = rawLastFrame(stream.getOutput())
+    const rawLines = raw.split('\n')
+
+    const line1Raw = rawLines.find(
+        l => stripAnsi(l).includes('task1.md'),
+    )
+    const line2Raw = rawLines.find(
+        l => stripAnsi(l).includes('task2.md'),
+    )
+
+    t.ok(
+        line1Raw &&
+        line1Raw.includes(renderDot('done')) &&
+        !line1Raw.includes(renderDot('failed')),
+        'task1 should have done dot (green, not red)'
+    )
+    t.ok(
+        line2Raw &&
+        line2Raw.includes(renderDot('failed')) &&
+        !line2Raw.includes(renderDot('done')),
+        'task2 should have failed dot (red, not green)'
+    )
+})
+
+test('AC1.3: ticket order is stable across waves', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'first.md' },
+        { num:2, filename:'second.md' },
+        { num:3, filename:'third.md' },
+    ]
+
+    display.startRun(tickets)
+    display.startWave(1, 2, [tickets[2], tickets[0]])
+    display.setTicketStatus(2, 'in-progress')
+    display.setTicketStatus(3, 'done')
+
+    stream.clear()
+    display.startWave(2, 2, [tickets[1]])
+    display.setTicketStatus(1, 'in-progress')
+
+    const frame = lastFrame(stream.getOutput())
+    const plain = frame.split('\n')
+    const labels = plain
+        .filter(l => l.includes('.md'))
+        .map(l => {
+            const match = l.match(/([a-z-]+\.md)/)
+            return match ? match[1] : null
+        })
+        .filter(Boolean)
+
+    t.equal(labels[0], 'first.md', 'first should be first')
+    t.equal(labels[1], 'second.md', 'second should be second')
+    t.equal(labels[2], 'third.md', 'third should be third')
+})
+
+test('AC1.7: without startRun, wave seeds list once', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    display.startWave(1, 2, [
+        { num:1, filename:'a.md' },
+        { num:2, filename:'b.md' },
+    ])
+
+    display.startWave(2, 2, [
+        { num:3, filename:'c.md' },
+    ])
+
+    const frame = lastFrame(stream.getOutput())
+    t.ok(
+        frame.includes('a.md') && frame.includes('b.md'),
+        'should show seeded tickets from wave 1'
+    )
+    t.ok(
+        !frame.includes('c.md'),
+        'should not add wave 2 tickets'
+    )
+})
+
+test('AC1.8: setTicketStatus for unknown ticket ignored', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'task1.md' },
+    ]
+    display.startRun(tickets)
     display.startWave(1, 1, tickets)
 
-    const output = stream.getOutput()
+    let plain = stripAnsi(stream.getOutput())
+    const initialRowCount = plain.split('\n')
+        .filter(l => l.includes('.md')).length
+
+    display.setTicketStatus(999, 'in-progress')
+    plain = stripAnsi(stream.getOutput())
+    const afterRowCount = plain.split('\n')
+        .filter(l => l.includes('.md')).length
+
+    t.equal(
+        afterRowCount, initialRowCount,
+        'unknown ticket should not add new row'
+    )
+})
+
+test('AC1.9: pagination and auto-scroll with fixed list', t => {
+    const stream = createMockStream()
+    stream.rows = 12
+    const display = new StatusDisplay({ stream })
+
+    const tickets = Array.from({ length:20 }, (_, i) => ({
+        num:i + 1,
+        filename:`task${String(i + 1).padStart(2, '0')}.md`,
+    }))
+
+    display.startRun(tickets)
+    display.startWave(1, 1, [tickets[0], tickets[1]])
+
+    display.setTicketStatus(15, 'in-progress')
+
+    const plain = stripAnsi(stream.getOutput())
+
     t.ok(
-        output.includes('task1.md'),
-        'should still work without remaining parameter'
+        plain.includes('task15.md'),
+        'auto-scroll should show in-progress ticket'
+    )
+})
+
+test('AC2.8: blocked row fits terminal width', t => {
+    const stream = createMockStream()
+    stream.columns = 30
+    const display = new StatusDisplay({ stream })
+
+    // Create enough tickets to make long header
+    const tickets = Array.from({ length:100 }, (_, i) => ({
+        num:i + 1,
+        filename:`t${i + 1}.md`,
+        feature:'f',
+    }))
+
+    display.startRun(tickets)
+    display.startWave(99, 99, tickets.slice(0, 10))
+    // Mark 50 as done; setBlocked(2) below un-dones
+    // ticket 2, so the header shows "49/100 done"
+    for (let i = 0; i < 50; i++) {
+        display.setTicketStatus(i + 1, 'done')
+    }
+    display.setBlocked(2, 'f', [
+        'f/01', 'f/03', 'f/04', 'f/05',
+    ])
+
+    const plain = stripAnsi(stream.getOutput())
+    const maxWidth = stream.columns - 1
+    const tooLong = plain.split('\n').filter(
+        l => l.length > maxWidth,
+    )
+
+    t.equal(
+        tooLong.length, 0,
+        'all rows including blocked should fit: ' +
+        JSON.stringify(tooLong)
+    )
+
+    const blockedRow = rawLastFrame(stream.getOutput())
+        .split('\n')
+        .find(l => stripAnsi(l).includes('f/02'))
+    t.ok(
+        blockedRow && blockedRow.includes(renderDot('blocked')),
+        'the blocked ticket f/02 is drawn with the blocked dot'
     )
     t.ok(
-        output.includes('task2.md'),
-        'should still display all wave tickets'
+        blockedRow && stripAnsi(blockedRow).length <= maxWidth,
+        'the blocked row itself fits the terminal width'
     )
+})
+
+test('AC2.8: blocked row shows blocked dot', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'task1.md' },
+        { num:2, filename:'task2.md' },
+    ]
+
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+    display.setBlocked(2, undefined, ['01-task.md'])
+
+    const raw = rawLastFrame(stream.getOutput())
+    const rawLines = raw.split('\n')
+    const rawTask2Row = rawLines.find(
+        l => stripAnsi(l).includes('task2.md'),
+    )
+
+    t.ok(
+        rawTask2Row && rawTask2Row.includes(renderDot('blocked')),
+        'blocked row should contain blocked dot'
+    )
+    const rawTask1Row = rawLines.find(
+        l => stripAnsi(l).includes('task1.md'),
+    )
+    t.ok(
+        rawTask1Row &&
+        !rawTask1Row.includes(renderDot('blocked')),
+        'non-blocked row should not contain blocked dot'
+    )
+})
+
+test('blocked suffix contains blocker label', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01.md', feature:'f' },
+        { num:2, filename:'02.md', feature:'f' },
+    ]
+
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+    display.setBlocked(2, 'f', ['f/01'])
+
+    const plain = stripAnsi(lastFrame(stream.getOutput()))
+    const lines = plain.split('\n')
+    const f02Line = lines.find(l => l.includes('f/02'))
+
+    t.ok(
+        f02Line && f02Line.includes('f/01'),
+        'blocked row for f/02 should contain f/01'
+    )
+})
+
+test('blocked suffix with multiple blockers', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01.md', feature:'f' },
+        { num:2, filename:'02.md', feature:'f' },
+        { num:3, filename:'03.md', feature:'f' },
+    ]
+
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+    display.setBlocked(2, 'f', ['f/01', 'f/03'])
+
+    const plain = stripAnsi(lastFrame(stream.getOutput()))
+    const lines = plain.split('\n')
+    const f02Line = lines.find(l => l.includes('f/02'))
+
+    t.ok(
+        f02Line && f02Line.includes('f/01'),
+        'blocked row should contain first blocker'
+    )
+    t.ok(
+        f02Line && f02Line.includes('f/03'),
+        'blocked row should contain second blocker'
+    )
+})
+
+test('setBlocked before the first startWave is kept (AC2.9)', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01.md', feature:'f' },
+        { num:2, filename:'02.md', feature:'f' },
+        { num:3, filename:'03.md', feature:'f' },
+    ]
+
+    // Same order both orchestrator loops use:
+    // startRun, then setBlocked, then startWave
+    display.startRun(tickets)
+    display.setBlocked(3, 'f', ['f/09'])
+    display.startWave(1, 1, tickets.slice(0, 2))
+
+    const raw = rawLastFrame(stream.getOutput())
+    const f03Row = raw.split('\n').find(
+        l => stripAnsi(l).includes('f/03'),
+    )
+
+    t.ok(
+        f03Row && f03Row.includes(renderDot('blocked')),
+        'f/03 row should hold the blocked dot in the first frame'
+    )
+    t.ok(
+        f03Row && stripAnsi(f03Row).includes('f/09'),
+        'f/03 row should name its blocker f/09 in the first frame'
+    )
+})
+
+test('setTicketStatus before the first startWave is kept', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'01.md', feature:'f' },
+        { num:2, filename:'02.md', feature:'f' },
+        { num:3, filename:'03.md', feature:'f' },
+    ]
+
+    display.startRun(tickets)
+    display.setTicketStatus(3, 'failed', 'f')
+    display.startWave(1, 1, tickets.slice(0, 2))
+
+    const raw = rawLastFrame(stream.getOutput())
+    const f03Row = raw.split('\n').find(
+        l => stripAnsi(l).includes('f/03'),
+    )
+
+    t.ok(
+        f03Row && f03Row.includes(renderDot('failed')),
+        'f/03 row should hold the failed dot in the first frame'
+    )
+})
+
+test('AC3.2/AC3.3: header shows done/total and 0% initially', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'task1.md' },
+        { num:2, filename:'task2.md' },
+        { num:3, filename:'task3.md' },
+        { num:4, filename:'task4.md' },
+        { num:5, filename:'task5.md' },
+    ]
+
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+
+    const frame = lastFrame(stream.getOutput())
+    const nums = headerNumbers(frame)
+    t.ok(nums, 'should have valid header')
+    if (nums) {
+        t.equal(nums.done, 0, 'should show 0 done')
+        t.equal(nums.total, 5, 'should show 5 total')
+        t.equal(nums.pct, 0, 'should show 0%')
+    }
+})
+
+test('AC3.4: header shows 100% when all done', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'task1.md' },
+        { num:2, filename:'task2.md' },
+        { num:3, filename:'task3.md' },
+        { num:4, filename:'task4.md' },
+        { num:5, filename:'task5.md' },
+    ]
+
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+
+    for (const ticket of tickets) {
+        display.setTicketStatus(ticket.num, 'done')
+    }
+
+    const frame = lastFrame(stream.getOutput())
+    const nums = headerNumbers(frame)
+    t.ok(nums, 'should have valid header')
+    if (nums) {
+        t.equal(nums.done, 5, 'should show 5 done')
+        t.equal(nums.total, 5, 'should show 5 total')
+        t.equal(nums.pct, 100, 'should show 100%')
+    }
+})
+
+test('AC3.5: failed and blocked do not count as done', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+
+    const tickets = [
+        { num:1, filename:'task1.md' },
+        { num:2, filename:'task2.md' },
+        { num:3, filename:'task3.md' },
+        { num:4, filename:'task4.md' },
+        { num:5, filename:'task5.md' },
+    ]
+
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+
+    display.setTicketStatus(1, 'done')
+    display.setTicketStatus(2, 'done')
+    display.setTicketStatus(3, 'failed')
+    display.setBlocked(4, undefined, ['blocker'])
+    display.setTicketStatus(5, 'pending')
+
+    const frame = lastFrame(stream.getOutput())
+    const nums = headerNumbers(frame)
+    t.ok(nums, 'should have valid header')
+    if (nums) {
+        t.equal(nums.done, 2, 'should show 2 done')
+        t.equal(nums.total, 5, 'should show 5 total')
+        t.equal(nums.pct, 40, 'should show 40%')
+    }
 })
 
 // -- Tests for AC5: Pagination --
@@ -1214,32 +1751,47 @@ class RecordingDisplay implements Display {
         args:Array<any>
     }> = []
 
+    startRun (tickets:ReadonlyArray<TicketRef>):void {
+        this.calls.push({
+            method:'startRun',
+            args:[tickets],
+        })
+    }
+
     startWave (
         waveNum:number,
         totalWaves:number,
-        tickets:ReadonlyArray<{
-            num:number
-            filename:string
-        }>,
-        progress?:any,
-        remaining?:ReadonlyArray<{
-            num:number
-            filename:string
-        }>,
+        tickets:ReadonlyArray<TicketRef>,
+        progress?:RunProgress,
     ):void {
         this.calls.push({
             method:'startWave',
             args:[
                 waveNum, totalWaves, tickets,
-                progress, remaining,
+                progress,
             ],
         })
     }
 
-    setTicketStatus (num:number, status:string):void {
+    setTicketStatus (
+        num:number,
+        status:TicketStatus,
+        feature?:string,
+    ):void {
         this.calls.push({
             method:'setTicketStatus',
-            args:[num, status],
+            args:[num, status, feature],
+        })
+    }
+
+    setBlocked (
+        num:number,
+        feature:string|undefined,
+        blockedBy:ReadonlyArray<string>,
+    ):void {
+        this.calls.push({
+            method:'setBlocked',
+            args:[num, feature, blockedBy],
         })
     }
 
@@ -1305,67 +1857,391 @@ function makeTicketBody (status:string):string {
 const MOCK_AGENT_PASS = join(
     process.cwd(), 'test', 'mock-agent-pass.js'
 )
+const MOCK_AGENT_FAIL_TICKET_01 = join(
+    process.cwd(), 'test', 'mock-agent-fail-ticket-01.js'
+)
+
+// Fixture lookup that fails loudly, naming the missing ticket,
+// instead of crashing later on an undefined value.
+function mustFind (
+    tickets:ReadonlyArray<Ticket>,
+    num:number,
+):Ticket {
+    const found = tickets.find(t => t.num === num)
+    if (!found) throw new Error(`fixture has no ticket ${num}`)
+    return found
+}
 
 test(
-    'runWaves passes remaining tickets to startWave',
+    'AC1.4 AC1.6 AC4.1: startRun with session tickets ' +
+    'sorted by feature then num',
     async t => {
         const base = initTempGitRepo()
-        const issuesDir = join(base, 'issues')
-        const logsDir = join(base, 'logs')
-        mkdirSync(issuesDir)
-
-        // ticket 1 is ready, ticket 2 is blocked by 1
-        writeFileSync(
-            join(issuesDir, '01-first.md'),
-            '# First\n\n**Status:** ready-for-agent\n'
-        )
-        writeFileSync(
-            join(issuesDir, '02-second.md'),
-            '# Second\n\n**Status:** ready-for-agent\n' +
-            '**Blocked by:** 1\n'
-        )
-
-        const tickets = scanTickets(issuesDir)
-        const display = new RecordingDisplay()
-
-        const originalCwd = process.cwd()
-        process.chdir(base)
         try {
-            await runWaves(
-                tickets,
-                'test spec',
-                MOCK_AGENT_PASS,
-                null,
-                10,
-                logsDir,
-                'true',
-                display,
+            const issuesDir = join(base, 'issues')
+            const logsDir = join(base, 'logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-a.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '02-b.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '03-c.md'),
+                makeTicketBody('done')
+            )
+            writeFileSync(
+                join(issuesDir, '04-d.md'),
+                makeTicketBody('ready-for-human')
+            )
+            writeFileSync(
+                join(issuesDir, '05-e.md'),
+                makeTicketBody('ready-for-agent')
+            )
+
+            // Scan order is 1..5 and reversed it is 5..1. The
+            // expected order (2, 5, 1) is neither, so the test
+            // fails if the orchestrator skips the sort or either
+            // sort key. Blockers are empty, so features do not
+            // affect readiness.
+            const tickets = scanTickets(issuesDir)
+            tickets.reverse()
+            mustFind(tickets, 1).feature = 'zeta'
+            mustFind(tickets, 2).feature = 'alpha'
+            mustFind(tickets, 5).feature = 'alpha'
+
+            const display = new RecordingDisplay()
+            const originalCwd = process.cwd()
+            process.chdir(base)
+            try {
+                await runWaves(
+                    tickets,
+                    'test spec',
+                    MOCK_AGENT_PASS,
+                    null,
+                    10,
+                    logsDir,
+                    'true',
+                    display,
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+
+            const startRunCalls =
+                display.getCallsByMethod('startRun')
+            t.equal(
+                startRunCalls.length, 1,
+                'exactly one startRun call'
+            )
+
+            const calls = display.getCalls()
+            const startRunIndex = calls
+                .findIndex(c => c.method === 'startRun')
+            const firstStartWaveIndex = calls
+                .findIndex(c => c.method === 'startWave')
+            t.ok(
+                startRunIndex >= 0 &&
+                firstStartWaveIndex > startRunIndex,
+                'startRun before first startWave'
+            )
+
+            const runTickets:ReadonlyArray<TicketRef> =
+                startRunCalls[0]?.[0] ?? []
+            t.deepEqual(
+                runTickets.map(r => [r.feature, r.num]),
+                [['alpha', 2], ['alpha', 5], ['zeta', 1]],
+                'session is sorted by feature then num, and ' +
+                'excludes the done and ready-for-human tickets'
+            )
+
+            // Tickets 1, 2 and 5 are the session; 3 (done) and
+            // 4 (human) are outside it, so they count toward
+            // neither the completed nor the total figure.
+            const firstStartWave = calls[firstStartWaveIndex]
+            t.deepEqual(
+                firstStartWave?.args[3],
+                { completed:0, total:3 },
+                'wave progress counts only the session set'
             )
         } finally {
-            process.chdir(originalCwd)
+            rmSync(base, { recursive:true, force:true })
         }
+    }
+)
 
-        const startWaveCalls =
-            display.getCallsByMethod('startWave')
-        t.ok(
-            startWaveCalls.length >= 1,
-            'startWave should be called'
-        )
+test(
+    'AC4.3: setBlocked called after startRun and for ' +
+    'human blockers',
+    async t => {
+        const base = initTempGitRepo()
+        try {
+            const issuesDir = join(base, 'issues')
+            const logsDir = join(base, 'logs')
+            mkdirSync(issuesDir)
 
-        // First wave: ticket 1 is ready, ticket 2 is
-        // remaining (blocked)
-        const firstCall = startWaveCalls[0]
-        const remaining = firstCall[4] as
-            Array<{ num:number; filename:string }>|undefined
-        t.ok(
-            remaining && remaining.length === 1,
-            'first wave should have 1 remaining ticket'
-        )
-        t.equal(
-            remaining?.[0]?.filename,
-            '02-second.md',
-            'remaining ticket should be the blocked one'
-        )
+            writeFileSync(
+                join(issuesDir, '01-a.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '02-b.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 1'
+            )
+            writeFileSync(
+                join(issuesDir, '03-c.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 4'
+            )
+            writeFileSync(
+                join(issuesDir, '04-d.md'),
+                makeTicketBody('ready-for-human')
+            )
+
+            const tickets = scanTickets(issuesDir)
+            const labelOf = (n:number) => ticketLabel(
+                mustFind(tickets, n)
+            )
+            const display = new RecordingDisplay()
+
+            const originalCwd = process.cwd()
+            process.chdir(base)
+            try {
+                await runWaves(
+                    tickets,
+                    'test spec',
+                    MOCK_AGENT_FAIL_TICKET_01,
+                    null,
+                    10,
+                    logsDir,
+                    'true',
+                    display,
+                    undefined,
+                    undefined,
+                    0,
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+
+            const calls = display.getCalls()
+            const startRunIndex = calls
+                .findIndex(c => c.method === 'startRun')
+            const firstStartWaveIndex = calls
+                .findIndex(c => c.method === 'startWave')
+            t.ok(
+                startRunIndex >= 0 &&
+                firstStartWaveIndex > startRunIndex,
+                'startRun before first startWave'
+            )
+
+            const firstBlocked = calls.findIndex(
+                c => c.method === 'setBlocked'
+            )
+            t.ok(
+                firstBlocked > startRunIndex &&
+                firstBlocked < firstStartWaveIndex,
+                'first setBlocked is between startRun and the ' +
+                'first startWave'
+            )
+            t.deepEqual(
+                calls[firstBlocked]?.args,
+                [3, mustFind(tickets, 3).feature, [labelOf(4)]],
+                'first setBlocked is for ticket 3, naming ticket 4'
+            )
+
+            const laterForTwo = calls.findIndex((c, i) => (
+                i > firstStartWaveIndex &&
+                c.method === 'setBlocked' &&
+                c.args[0] === 2
+            ))
+            t.ok(
+                laterForTwo > firstStartWaveIndex,
+                'setBlocked for ticket 2 comes after the first wave'
+            )
+            t.deepEqual(
+                calls[laterForTwo]?.args[2],
+                [labelOf(1)],
+                'ticket 2 is blocked by ticket 1'
+            )
+        } finally {
+            rmSync(base, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'AC4.3: a dependent of a failed ticket is reported blocked ' +
+    'before the next wave starts',
+    async t => {
+        const base = initTempGitRepo()
+        try {
+            const issuesDir = join(base, 'issues')
+            const logsDir = join(base, 'logs')
+            mkdirSync(issuesDir)
+
+            // Wave 1 is {1, 3}: ticket 1 fails, ticket 3 passes.
+            // That is progress, so wave 2 runs {4}, and ticket 2
+            // must be reported blocked between the two waves.
+            writeFileSync(
+                join(issuesDir, '01-a.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '02-b.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 1'
+            )
+            writeFileSync(
+                join(issuesDir, '03-c.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '04-d.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 3'
+            )
+
+            const tickets = scanTickets(issuesDir)
+            const one = mustFind(tickets, 1)
+            const two = mustFind(tickets, 2)
+            const display = new RecordingDisplay()
+
+            const originalCwd = process.cwd()
+            process.chdir(base)
+            try {
+                await runWaves(
+                    tickets,
+                    'test spec',
+                    MOCK_AGENT_FAIL_TICKET_01,
+                    null,
+                    10,
+                    logsDir,
+                    'true',
+                    display,
+                    undefined,
+                    undefined,
+                    0,
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+
+            const calls = display.getCalls()
+            const waveIndexes = calls
+                .map((c, i) => (c.method === 'startWave' ? i : -1))
+                .filter(i => i >= 0)
+            t.equal(waveIndexes.length, 2, 'two waves run')
+            t.deepEqual(
+                waveIndexes.map(i => (
+                    (calls[i]?.args[2] as ReadonlyArray<TicketRef>)
+                        .map(r => r.num)
+                )),
+                [[1, 3], [4]],
+                'wave 1 is tickets 1 and 3, wave 2 is ticket 4'
+            )
+
+            const blockedTwo = calls.findIndex(c => (
+                c.method === 'setBlocked' && c.args[0] === 2
+            ))
+            const [firstWave = -1, secondWave = -1] = waveIndexes
+            t.ok(
+                blockedTwo > firstWave && blockedTwo < secondWave,
+                'ticket 2 is first reported blocked between ' +
+                'wave 1 and wave 2'
+            )
+            t.deepEqual(
+                calls[blockedTwo]?.args,
+                [2, two.feature, [ticketLabel(one)]],
+                'ticket 2 is blocked by ticket 1'
+            )
+        } finally {
+            rmSync(base, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'AC2.1: failed ticket keeps red dot in later waves',
+    async t => {
+        const base = initTempGitRepo()
+        try {
+            const issuesDir = join(base, 'issues')
+            const logsDir = join(base, 'logs')
+            mkdirSync(issuesDir)
+
+            writeFileSync(
+                join(issuesDir, '01-a.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '02-b.md'),
+                makeTicketBody('ready-for-agent')
+            )
+            writeFileSync(
+                join(issuesDir, '03-c.md'),
+                '# Test\n\n**Status:** ready-for-agent\n\n' +
+                '**Blocked by:** 2'
+            )
+
+            const tickets = scanTickets(issuesDir)
+            const labelOf = (n:number) => ticketLabel(
+                mustFind(tickets, n)
+            )
+            const stream = createMockStream()
+            const display = new StatusDisplay({ stream })
+
+            const originalCwd = process.cwd()
+            process.chdir(base)
+            try {
+                await runWaves(
+                    tickets,
+                    'test spec',
+                    MOCK_AGENT_FAIL_TICKET_01,
+                    null,
+                    10,
+                    logsDir,
+                    'true',
+                    display,
+                    undefined,
+                    undefined,
+                    0,
+                )
+            } finally {
+                process.chdir(originalCwd)
+            }
+
+            // The grid is drawn above the log area, so the first
+            // row naming a ticket is its grid row.
+            const frame = rawLastFrame(stream.getOutput())
+            t.equal(
+                headerNumbers(frame)?.waveNum, 2,
+                'last frame is from wave 2'
+            )
+            const rows = frame.split('\n')
+            const rowFor = (n:number) => rows.find(
+                l => stripAnsi(l).includes(labelOf(n))
+            )
+            const row1 = rowFor(1)
+            const row3 = rowFor(3)
+            t.ok(
+                row1 !== undefined &&
+                row1.includes(renderDot('failed')),
+                'ticket 1 row keeps the failed dot in wave 2'
+            )
+            t.ok(
+                row3 !== undefined &&
+                row3.includes(renderDot('done')),
+                'ticket 3 row has the done dot'
+            )
+        } finally {
+            rmSync(base, { recursive:true, force:true })
+        }
     }
 )
 
@@ -1805,5 +2681,93 @@ test('Display tests verify feature/num with tickets ' +
     t.ok(
         payOne!.includes('●'),
         'payments/01 is done'
+    )
+})
+
+test('AC2.5: renderDot(blocked) differs from other statuses',
+    t => {
+        const blocked = renderDot('blocked')
+        const pending = renderDot('pending')
+        const inProgress = renderDot('in-progress')
+        const awaitingMerge = renderDot('awaiting-merge')
+        const done = renderDot('done')
+        const failed = renderDot('failed')
+
+        t.notEqual(blocked, pending, 'blocked differs from pending')
+        t.notEqual(blocked, inProgress,
+            'blocked differs from in-progress')
+        t.notEqual(blocked, awaitingMerge,
+            'blocked differs from awaiting-merge')
+        t.notEqual(blocked, done, 'blocked differs from done')
+        t.notEqual(blocked, failed, 'blocked differs from failed')
+    }
+)
+
+test('AC4.5: PlainDisplay startRun and setBlocked are no-ops',
+    t => {
+        const logs:string[] = []
+        const origLog = console.log
+        console.log = (...args:unknown[]) => {
+            logs.push(args.join(' '))
+        }
+
+        try {
+            const display = new PlainDisplay()
+
+            display.startRun([
+                { num:1, filename:'task1.md' },
+            ])
+            display.setBlocked(1, undefined, ['task2.md'])
+        } finally {
+            console.log = origLog
+        }
+
+        t.equal(
+            logs.length, 0,
+            'no logs from startRun or setBlocked'
+        )
+    }
+)
+
+test('AC4.5: PlainDisplay output format unchanged', t => {
+    const origLog = console.log
+    const logs1:string[] = []
+    const logs2:string[] = []
+
+    try {
+        // Run 1: with startRun and setBlocked
+        console.log = (...args:unknown[]) => {
+            logs1.push(args.join(' '))
+        }
+
+        const display1 = new PlainDisplay()
+        display1.startRun([
+            { num:1, filename:'task1.md' },
+            { num:2, filename:'task2.md' },
+        ])
+        display1.setBlocked(1, undefined, ['task2.md'])
+        display1.startWave(1, 2, [
+            { num:1, filename:'task1.md' },
+            { num:2, filename:'task2.md' },
+        ], { completed:0, total:2 })
+
+        // Run 2: without startRun and setBlocked
+        console.log = (...args:unknown[]) => {
+            logs2.push(args.join(' '))
+        }
+
+        const display2 = new PlainDisplay()
+        display2.startWave(1, 2, [
+            { num:1, filename:'task1.md' },
+            { num:2, filename:'task2.md' },
+        ], { completed:0, total:2 })
+    } finally {
+        console.log = origLog
+    }
+
+    // Verify format is identical
+    t.deepEqual(
+        logs1, logs2,
+        'PlainDisplay output unchanged with/without startRun'
     )
 })

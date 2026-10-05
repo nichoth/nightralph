@@ -21,7 +21,7 @@ import {
     type EffortLevel,
     type Ticket,
 } from './orchestrator.js'
-import { detectTestCmd } from './testcmd.js'
+import { detectTestCmd, detectInstallCmd } from './testcmd.js'
 import { createDisplay } from './display.js'
 import { findFeatureDirs, resolveIssuesDir, getScriptDir } from './resolve.js'
 import { getRepoRoot, getRepoName } from './worktree.js'
@@ -120,6 +120,14 @@ yargs(hideBin(process.argv))
                     'exit rejects the ticket. Defaults ' +
                     'to "npm test".',
             })
+            .option('install-cmd', {
+                type:'string',
+                describe:'Command run in each fresh ' +
+                    'worktree before the agent starts. ' +
+                    'Defaults to the install command ' +
+                    'for the project\'s lockfile (npm ci ' +
+                    'or pnpm install); "" disables it.',
+            })
             .option('X', {
                 type:'boolean',
                 describe:'Stop on merge conflict instead of ' +
@@ -168,6 +176,8 @@ yargs(hideBin(process.argv))
                 timeout:argv.timeout as
                     number|undefined,
                 testCmd:argv.testCmd as string|undefined,
+                installCmd:argv.installCmd as
+                    string|undefined,
                 stopOnConflict:argv.X as
                     boolean|undefined,
                 maxTurns:(argv.maxTurns ??
@@ -216,6 +226,7 @@ async function runExecute (argv:{
     dryRun?:boolean
     timeout?:number
     testCmd?:string
+    installCmd?:string
     stopOnConflict?:boolean
     maxTurns?:number
     effort?:EffortLevel
@@ -306,6 +317,12 @@ async function runExecute (argv:{
             getRepoRoot() :
             process.cwd()
     ) || 'npm test'
+    // Only worktrees start without dependencies, so only an
+    // isolated run installs. An explicit "" disables it.
+    const installCmd = argv.installCmd ??
+        (isGitRepo() ?
+            detectInstallCmd(getRepoRoot()) ?? undefined :
+            undefined)
     const conflictStrategy = argv.stopOnConflict ?
         'stop' :
         'respawn'
@@ -323,6 +340,7 @@ async function runExecute (argv:{
                 progressPath:progressPaths.values()
                     .next().value!,
                 testCmd,
+                installCmd,
                 effort:argv.effort,
                 retries:argv.retries,
                 retryDelay:argv.retryDelay,
@@ -359,6 +377,7 @@ async function runExecute (argv:{
             conflictStrategy,
             display,
             testCmd,
+            installCmd,
             maxTurns:argv.maxTurns,
             effort:argv.effort,
             retries:argv.retries,

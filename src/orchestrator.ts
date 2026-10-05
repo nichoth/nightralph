@@ -44,8 +44,10 @@ import {
 } from './merge.js'
 import {
     createDisplay,
+    ticketLabel,
     type RunProgress,
     type Display,
+    type TicketRef,
 } from './display.js'
 import { runTestCmd } from './testcmd.js'
 
@@ -198,6 +200,57 @@ export function findReadyTickets (
             doneKeys.has(ticketKey(t.feature, b))
         )
     })
+}
+
+/**
+ * Tickets that cannot run this session because a ticket they
+ * depend on (directly or through a chain, within their own
+ * feature) is dead: in `failedKeys`, or in a status that is
+ * neither done nor ready-for-agent, e.g. ready-for-human.
+ * Returns ticketKey -> dead upstream ticketKeys. Only
+ * ready-for-agent tickets that have not failed are keys. A
+ * blocker number with no matching ticket is not dead.
+ */
+export function findBlockedTickets (
+    tickets:ReadonlyArray<Ticket>,
+    failedKeys:ReadonlySet<string>,
+):Map<string, Array<string>> {
+    const byKey = new Map(
+        tickets.map(t => [ticketKey(t.feature, t.num), t])
+    )
+
+    function collectDead (
+        ticket:Ticket,
+        visited:Set<string>,
+        found:Set<string>,
+    ):void {
+        for (const b of ticket.blockers) {
+            const key = ticketKey(ticket.feature, b)
+            if (visited.has(key)) continue
+            visited.add(key)
+            const blocker = byKey.get(key)
+            if (!blocker || blocker.status === 'done') continue
+            if (
+                failedKeys.has(key) ||
+                blocker.status !== 'ready-for-agent'
+            ) {
+                found.add(key)
+                continue
+            }
+            collectDead(blocker, visited, found)
+        }
+    }
+
+    const blocked = new Map<string, Array<string>>()
+    for (const t of tickets) {
+        const key = ticketKey(t.feature, t.num)
+        if (t.status !== 'ready-for-agent') continue
+        if (failedKeys.has(key)) continue
+        const found = new Set<string>()
+        collectDead(t, new Set([key]), found)
+        if (found.size > 0) blocked.set(key, [...found])
+    }
+    return blocked
 }
 
 // Matches an agent-reported completed item. Agents echo items
@@ -401,10 +454,24 @@ export function lookupSpec (
     return specBodies.get(feature) ?? fallback
 }
 
+// The rule for agents in a worktree the orchestrator has
+// already installed dependencies into. Empty without one.
+function installRule (installCmd?:string):string[] {
+    if (!installCmd) return []
+    return [
+        '- Dependencies are already installed with ' +
+            `\`${installCmd}\`. Do NOT reinstall them ` +
+            'with any other command; to reinstall, run ' +
+            'that same command. To add a dependency, use ' +
+            'the package manager that command uses, so ' +
+            'its lockfile stays in sync.',
+    ]
+}
+
 export function renderPrompt (
     specBody:string,
     ticket:Ticket,
-    opts:{ testCmd:string }
+    opts:{ testCmd:string; installCmd?:string }
 ):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -430,6 +497,7 @@ export function renderPrompt (
         '- Do NOT research external APIs or services ' +
             'via web search. Use the spec and ticket ' +
             'body as your sole reference for API shapes.',
+        ...installRule(opts.installCmd),
         '- Use /tdd for every checklist item. For ' +
             'each item, write a failing test at the ' +
             'seams named in the spec\'s Testing ' +
@@ -477,7 +545,8 @@ export function renderPrompt (
 
 export function renderMergePrompt (
     specBody:string,
-    ticket:Ticket
+    ticket:Ticket,
+    opts:{ installCmd?:string } = {}
 ):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -507,6 +576,7 @@ export function renderMergePrompt (
         '4. Commit the resolved files.',
         '',
         'Do NOT re-implement the ticket from scratch.',
+        ...installRule(opts.installCmd),
         'Do NOT read or modify files outside your ' +
             'current directory (the worktree).',
         'Do NOT run git push.',
@@ -1183,6 +1253,7 @@ export function dryRunIsolated (opts:{
     conflictStrategy:MergeConflictStrategy
     progressPath:string
     testCmd:string
+    installCmd?:string
     effort?:EffortLevel
     retries?:number
     retryDelay?:number
@@ -1229,7 +1300,10 @@ export function dryRunIsolated (opts:{
         console.log(
             renderPrompt(
                 opts.specBody, firstReady[0],
-                { testCmd:opts.testCmd }
+                {
+                    testCmd:opts.testCmd,
+                    installCmd:opts.installCmd,
+                }
             )
         )
     }
@@ -1240,6 +1314,9 @@ export function dryRunIsolated (opts:{
             'stop (stop merging on conflict)'
     console.log(
         `\nTest command: ${opts.testCmd}`
+    )
+    console.log(
+        `Install:      ${opts.installCmd || '(none)'}`
     )
     console.log(
         `Effort:       ${opts.effort ?? '(provider default)'}`
@@ -1259,6 +1336,42 @@ export function dryRunIsolated (opts:{
         `\nMerge strategy: ${strategyDesc}`
     )
     console.log(`Progress file: ${opts.progressPath}`)
+}
+
+// Installs dependencies in a ticket's worktree before an
+// agent runs there. Writes the output to a per-ticket log
+// either way, and returns true only when the install exits 0.
+async function runInstall (opts:{
+    installCmd:string
+    ticket:Ticket
+    worktreePath:string
+    timeout:number
+    logsDir:string
+    attempt?:number
+    log:(msg:string) => void
+    registry?:Set<number>
+}):Promise<boolean> {
+    const result = await runTestCmd({
+        cmd:opts.installCmd,
+        cwd:opts.worktreePath,
+        timeout:opts.timeout,
+        registry:opts.registry,
+    })
+    const installLogPath = attemptLogPath(
+        opts.logsDir, opts.ticket, opts.attempt ?? 1,
+        '.install.log'
+    )
+    writeFileSync(installLogPath, result.output)
+
+    if (result.exitCode !== 0) {
+        opts.log(
+            `  ${opts.ticket.filename}: install failed ` +
+            `(exit ${result.exitCode}); ` +
+            `see ${installLogPath}`
+        )
+        return false
+    }
+    return true
 }
 
 // Runs the project's test command in a ticket's worktree.
@@ -1314,6 +1427,7 @@ async function respawnAndRetryMerge (opts:{
     timeout:number
     logsDir:string
     testCmd:string
+    installCmd?:string
     maxTurns?:number
     onLine?:(msg:string) => void
 }):Promise<boolean> {
@@ -1337,8 +1451,23 @@ async function respawnAndRetryMerge (opts:{
         console.log(msg1)
     }
 
+    // The base branch may have changed the dependencies.
+    if (opts.installCmd) {
+        const installed = await runInstall({
+            installCmd:opts.installCmd,
+            ticket:opts.ticket,
+            worktreePath:opts.worktreePath,
+            timeout:opts.timeout,
+            logsDir:opts.logsDir,
+            log,
+            registry:runningAgents,
+        })
+        if (!installed) return false
+    }
+
     const prompt = renderMergePrompt(
-        opts.specBody, opts.ticket
+        opts.specBody, opts.ticket,
+        { installCmd:opts.installCmd }
     )
     const logPath = join(
         opts.logsDir,
@@ -1493,7 +1622,7 @@ type TicketOutcome =
     }
     | {
         kind:'failed'
-        reason:'exit'|'tests'
+        reason:'exit'|'tests'|'install'
         branchName:string
         exitCode:number
         completedItems:string[]
@@ -1517,6 +1646,7 @@ type TicketAttemptOpts = {
     timeout:number
     logsDir:string
     testCmd:string
+    installCmd?:string
     maxTurns?:number
     effort?:EffortLevel
     d:Display
@@ -1545,13 +1675,41 @@ async function runTicketAttempt (
     d.setTicketStatus(
         ticket.num, 'in-progress', ticket.feature
     )
+    if (opts.installCmd) {
+        const installed = await runInstall({
+            installCmd:opts.installCmd,
+            ticket,
+            worktreePath:worktree.worktreePath,
+            timeout:opts.timeout,
+            logsDir:opts.logsDir,
+            attempt:opts.attempt,
+            log:(msg) => d.log(msg),
+            registry:runningAgents,
+        })
+        if (!installed) {
+            await removeWorktreeQuietly(
+                worktree.worktreePath, d
+            )
+            return {
+                kind:'failed',
+                reason:'install',
+                branchName:worktree.branchName,
+                exitCode:1,
+                completedItems:[],
+            }
+        }
+    }
+
     const ticketSpec = lookupSpec(
         opts.specBodies, opts.specBody, ticket.feature
     )
     const agentResult = await spawnAgent({
         prompt:renderPrompt(
             ticketSpec, ticket,
-            { testCmd:opts.testCmd }
+            {
+                testCmd:opts.testCmd,
+                installCmd:opts.installCmd,
+            }
         ),
         agentCmd:opts.agentCmd,
         model:opts.model,
@@ -1707,6 +1865,12 @@ async function runTicketAttempts (
     return outcome
 }
 
+function failureNote (reason:'exit'|'tests'|'install'):string {
+    if (reason === 'tests') return 'tests failed'
+    if (reason === 'install') return 'install failed'
+    return 'failed'
+}
+
 // Wraps writeProgress + commitProgress so callers do not each
 // need to guard against a commit failure (e.g. a git lock held
 // by a concurrent process) crashing the run.
@@ -1828,6 +1992,41 @@ export function renderFinishSummary (
     return lines.join('\n')
 }
 
+function sessionTickets (
+    tickets:ReadonlyArray<Ticket>,
+):Array<Ticket> {
+    return [...tickets]
+        .filter(t => t.status === 'ready-for-agent')
+        .sort((a, b) => (
+            a.feature.localeCompare(b.feature) || a.num - b.num
+        ))
+}
+
+function toRef (t:Ticket):TicketRef {
+    return { num:t.num, filename:t.filename, feature:t.feature }
+}
+
+function reportBlocked (
+    d:Display,
+    tickets:ReadonlyArray<Ticket>,
+    failedKeys:ReadonlySet<string>,
+):void {
+    const byKey = new Map(
+        tickets.map(t => [ticketKey(t.feature, t.num), t])
+    )
+    for (const [key, dead] of findBlockedTickets(
+        tickets, failedKeys
+    )) {
+        const ticket = byKey.get(key)
+        if (!ticket) continue
+        const labels = dead
+            .map(k => byKey.get(k))
+            .filter((t):t is Ticket => t !== undefined)
+            .map(t => ticketLabel(toRef(t)))
+        d.setBlocked(ticket.num, ticket.feature, labels)
+    }
+}
+
 function runProgress (tickets:ReadonlyArray<Ticket>):RunProgress {
     return {
         completed:tickets.filter(t => t.status === 'done').length,
@@ -1864,8 +2063,11 @@ export async function runWaves (
     let totalCompleted = 0
     let waveNum = 0
     const failedKeys = new Set<string>()
+    const session = sessionTickets(tickets)
 
     while (true) {
+        if (waveNum > 0) reportBlocked(d, tickets, failedKeys)
+
         const ready = findReadyTickets(tickets).filter(
             t => !failedKeys.has(
                 ticketKey(t.feature, t.num)
@@ -1874,13 +2076,10 @@ export async function runWaves (
         if (ready.length === 0) break
 
         waveNum++
-        const readyKeys = new Set(
-            ready.map(t => ticketKey(t.feature, t.num))
-        )
-        const remaining = tickets.filter(t =>
-            t.status === 'ready-for-agent' &&
-            !readyKeys.has(ticketKey(t.feature, t.num))
-        )
+        if (waveNum === 1) {
+            d.startRun(session.map(toRef))
+            reportBlocked(d, tickets, failedKeys)
+        }
         d.startWave(
             waveNum,
             totalWaves,
@@ -1889,12 +2088,7 @@ export async function runWaves (
                 filename:t.filename,
                 feature:t.feature,
             })),
-            runProgress(tickets),
-            remaining.map(t => ({
-                num:t.num,
-                filename:t.filename,
-                feature:t.feature,
-            })),
+            runProgress(session),
         )
 
         const results = await runPool(
@@ -2018,6 +2212,8 @@ export async function runWaves (
         }
     }
 
+    if (waveNum > 0) reportBlocked(d, tickets, failedKeys)
+
     const remaining = tickets.filter(
         t => t.status === 'ready-for-agent'
     )
@@ -2041,6 +2237,9 @@ export async function runWavesIsolated (opts:{
     conflictStrategy:MergeConflictStrategy
     display?:Display
     testCmd:string
+    // run in each fresh worktree before the agent; unset or
+    // empty = no install
+    installCmd?:string
     maxTurns?:number
     // starting effort level; unset = provider's default
     effort?:EffortLevel
@@ -2132,8 +2331,11 @@ export async function runWavesIsolated (opts:{
     let totalCompleted = 0
     let waveNum = 0
     const failedKeys = new Set<string>()
+    const session = sessionTickets(opts.tickets)
 
     while (true) {
+        if (waveNum > 0) reportBlocked(d, opts.tickets, failedKeys)
+
         const ready = findReadyTickets(opts.tickets).filter(
             t => !failedKeys.has(
                 ticketKey(t.feature, t.num)
@@ -2142,13 +2344,10 @@ export async function runWavesIsolated (opts:{
         if (ready.length === 0) break
 
         waveNum++
-        const readyKeys = new Set(
-            ready.map(t => ticketKey(t.feature, t.num))
-        )
-        const remaining = opts.tickets.filter(t =>
-            t.status === 'ready-for-agent' &&
-            !readyKeys.has(ticketKey(t.feature, t.num))
-        )
+        if (waveNum === 1) {
+            d.startRun(session.map(toRef))
+            reportBlocked(d, opts.tickets, failedKeys)
+        }
         d.startWave(
             waveNum,
             totalWaves,
@@ -2157,12 +2356,7 @@ export async function runWavesIsolated (opts:{
                 filename:t.filename,
                 feature:t.feature,
             })),
-            runProgress(opts.tickets),
-            remaining.map(t => ({
-                num:t.num,
-                filename:t.filename,
-                feature:t.feature,
-            })),
+            runProgress(session),
         )
 
         // Each ticket runs its own attempt loop, at most
@@ -2182,6 +2376,7 @@ export async function runWavesIsolated (opts:{
                 timeout:opts.timeout,
                 logsDir:opts.logsDir,
                 testCmd:opts.testCmd,
+                installCmd:opts.installCmd,
                 maxTurns:opts.maxTurns,
                 effort:opts.effort,
                 retries,
@@ -2306,9 +2501,7 @@ export async function runWavesIsolated (opts:{
                     tracker.pathFor(ticket.feature),
                     tracker.dataFor(ticket.feature),
                     `nightralph: ${ticket.filename} ` +
-                    (outcome.reason === 'tests' ?
-                        'tests failed' :
-                        'failed'),
+                    failureNote(outcome.reason),
                     d,
                 )
                 continue
@@ -2414,6 +2607,7 @@ export async function runWavesIsolated (opts:{
                                 timeout:opts.timeout,
                                 logsDir:opts.logsDir,
                                 testCmd:opts.testCmd,
+                                installCmd:opts.installCmd,
                                 maxTurns:opts.maxTurns,
                                 onLine:(msg) => d.log(msg),
                             }) :
@@ -2461,6 +2655,9 @@ export async function runWavesIsolated (opts:{
                     } else {
                         failedKeys.add(
                             ticketKey(ticket.feature, ticket.num)
+                        )
+                        d.setTicketStatus(
+                            ticket.num, 'failed', ticket.feature
                         )
                         d.log(
                             `  ${ticket.filename}: merge failed, ` +
@@ -2541,6 +2738,8 @@ export async function runWavesIsolated (opts:{
             )
         }
     }
+
+    if (waveNum > 0) reportBlocked(d, opts.tickets, failedKeys)
 
     const remaining = opts.tickets.filter(
         t => t.status === 'ready-for-agent'

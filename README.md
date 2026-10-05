@@ -32,6 +32,7 @@ so they can't drift as long as you install the skills with this package.
   * [Select a ticket](#select-a-ticket)
   * [Worktrees](#worktrees)
   * [Progress](#progress)
+  * [Status display](#status-display)
 - [Keep Your Machine Awake](#keep-your-machine-awake)
   * [Mac OS](#mac-os)
     + [Claude Opus 4.6](#claude-opus-46)
@@ -162,7 +163,8 @@ Flags:
 | `--dry-run` | no | -- | Show wave order and prompt without running |
 | `-X` | no | -- | Stop on merge conflict instead of re-spawning |
 | `--timeout` | no | `3600` | Kill the agent after N seconds. A killed agent is not a failure: its work is kept (see Notes) |
-| `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable. Shares the agent's `--timeout`. The command runs in a fresh git worktree, which contains only tracked files, so a project that needs an install step should include it, for example `--test-cmd 'npm ci && npm test'` |
+| `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable. Shares the agent's `--timeout`. Dependencies are already installed by `--install-cmd` |
+| `--install-cmd <cmd>` | no | auto | Run in each fresh worktree before the agent starts, and again after a merge-conflict rebase; non-zero exit fails the attempt (it is retried like any other failure). Auto-detects from the lockfile: `pnpm-lock.yaml` -> `pnpm install --prefer-offline --frozen-lockfile`, `package-lock.json` -> `npm ci --prefer-offline --no-audit --no-fund`, a `package.json` with no lockfile -> `npm install --prefer-offline --no-audit --no-fund --no-package-lock`, no `package.json` -> no install. Pass `""` to disable. Shares the agent's `--timeout`. Output goes to `<ticket>.install.log` |
 | `--max-turns <n>` | no | -- | Max agentic turns per ticket. Forwarded verbatim as `--max-turns <n>` to the provider CLI. Only `claude` accepts it; `codex` and `pi` reject it as an unknown option and the agent exits immediately. Applies to every agent spawn, including a re-spawn after a merge conflict. When omitted, `claude` applies no turn limit, so `--timeout` is the only cap. Reaching the limit is an error exit, so the ticket is recorded as failed |
 | `--effort <level>` | no | -- | Starting effort/reasoning level. Each provider has its own ladder: `claude` supports `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--effort`); `codex` supports `low`, `medium`, `high` (forwarded as `-c model_reasoning_effort=<level>`); `pi` supports `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--thinking`). Omitted = provider default. Each retry steps up from here (see `--retries`) |
 | `--retries <n>` | no | `3` | Extra attempts per ticket after a failed run. Each retry starts from a fresh worktree and raises the effort level one rung (see Notes). `0` disables retries |
@@ -189,7 +191,8 @@ Flags:
   command fails, the ticket is left `ready-for-agent` for a retry
   and the test output is written to `<dir>/../logs/<ticket>.test.log`.
   Failed tickets (non-zero exit) keep their status and block
-  dependents.
+  dependents. The status display marks those dependents as blocked
+  and names the failed ticket.
 * A failed attempt is retried, up to `--retries` times, before the
   ticket is recorded as failed. Non-zero exit, exit 0 with no new
   commits, and a red test command all count as failures; a timeout
@@ -255,13 +258,18 @@ is `.scratch/<name>/issues/`.
 
 ## How It Works
 
-All currently eligible tickets are grouped into a
-"wave" and run in parallel. Each ticket gets a worktree named after the
-ticket slug.
+Tickets run in waves. A wave is a batch of tickets whose blockers are
+all done. The tickets in a wave run in parallel, up to `--concurrency`
+at once, and each ticket gets a worktree named after the ticket slug.
+nightralph waits for the whole batch to finish, merges the branches of
+the tickets that succeeded, and marks them `done`. Then it looks for
+tickets that are newly unblocked. Those form the next wave. This
+continues until no ticket is ready to run.
 
-When the wave finishes, every agent that exited successfully has its ticket
-marked `done`, which unlocks dependency tickets, which are grouped into the
-next wave. This continues until all tickets are complete.
+The wave total in the status display header (the `3` in `Wave 2/3`) is
+a prediction made at startup. It assumes every ticket succeeds. When a
+ticket fails, its dependents never become ready, so the run can end
+before it reaches the predicted last wave.
 
 
 ### Select a ticket
@@ -279,6 +287,13 @@ completes, successful branches are merged back into the base branch.
 The first branch merges directly, and subsequent branches rebase
 onto the updated base before merging.
 
+A fresh worktree has only tracked files, so there is no
+`node_modules`. Before the agent starts, the orchestrator installs
+dependencies with the command that matches the project's lockfile
+(see `--install-cmd`), and the prompt tells the agent not to run
+another installer. The install never writes a lockfile, so ticket
+branches do not commit one by accident.
+
 If a merge conflict occurs, the behavior depends on the `-X` flag: by
 default the agent is re-spawned to resolve it; with `-X`,
 the run stops immediately.
@@ -288,6 +303,47 @@ the run stops immediately.
 A file `progress.md` is written to the `.scratch/<feature>/` directory
 and committed after each ticket completes, so you can monitor the run from
 another terminal by reading the file.
+
+### Status display
+
+In a terminal, nightralph shows a header line, one row per ticket, and
+a log of recent messages. The ticket list holds every ticket that was
+`ready-for-agent` when the run started, and it stays the same for the
+whole run. Rows do not move, disappear, or reappear between waves.
+
+Each row starts with a dot that shows the ticket's state:
+
+* Dim empty dot: pending. The ticket has not started yet.
+* Yellow dot: running. The agent is working, the test command is
+  running, or the ticket is waiting out a retry delay.
+* Cyan dot: waiting to merge. The agent and the test command
+  succeeded, and the branch waits for the rest of the wave to finish.
+  The dot stays cyan while the branch is merged, including while a
+  re-spawned agent resolves a merge conflict.
+* Green dot: done.
+* Red dot: failed.
+* Dim filled dot: blocked. A ticket upstream failed or is not agent
+  work (for example, it is `ready-for-human`), so this ticket cannot
+  run in this session. The row names the blocking tickets, as in
+  `auth/03 (blocked by auth/01)`.
+
+The header looks like this:
+
+```
+Wave 2/3 - 5/8 done - 63%
+```
+
+The counts cover only this run's tickets, the ones in the list.
+Tickets finished by an earlier run are not counted.
+
+When stdout is not a terminal, for example when it is piped to a file,
+nightralph prints one line per wave that names the wave's tickets,
+followed by plain log lines.
+
+Known limit: with `-X`, the run stops at the first merge conflict. A
+ticket whose branch succeeded but came after the conflicting branch is
+never merged, and its row stays on the cyan "waiting to merge" dot when
+the run stops.
 
 
 ---

@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-09-17
+Last verified: 2026-10-04
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -11,7 +11,10 @@ Small orchestrator that runs a single-agent session per issue.
 
 ## Commands
 - `npm run build` -- build to dist/
-- `npm test` -- build and run tests
+- `npm test` -- build and run tests via `scripts/test.sh`,
+  which gives the run a private `TMPDIR` and deletes it (plus
+  any `mock-change-*.txt` in the repo root) when the run ends,
+  pass or fail
 - `npm run lint` -- eslint
 
 ## Project Structure
@@ -65,6 +68,10 @@ Small orchestrator that runs a single-agent session per issue.
 - `--test-cmd <cmd>` -- command run in each worktree
   after the agent exits; non-zero exit rejects the
   ticket. Defaults to `npm test`
+- `--install-cmd <cmd>` -- command run in each fresh
+  worktree before the agent (isolated runs only).
+  Defaults to `detectInstallCmd(repoRoot)`; `""`
+  disables it
 - `--max-turns <n>` -- max agentic turns per ticket,
   forwarded as `--max-turns` to claude; other
   providers warn and skip (codex and pi do not
@@ -99,7 +106,9 @@ Small orchestrator that runs a single-agent session per issue.
   `DEFAULT_CONCURRENCY`, `runPool(items, limit, fn)`,
   `escalateEffort(provider, level?)`, `retryDelayFor(base, attempt)`,
   `scanTickets(dir)`,
-  `findReadyTickets(tickets)`, `checkItems(ticket, items)`,
+  `findReadyTickets(tickets)`,
+  `findBlockedTickets(tickets, failedKeys)`,
+  `checkItems(ticket, items)`,
   `markDone(ticket)`,
   `renderPrompt(specBody, ticket, opts?)`,
   `stripSpecSection(specBody, heading)`,
@@ -123,6 +132,17 @@ Small orchestrator that runs a single-agent session per issue.
   checklist items the agent has completed. Collected
   per line (a whole multi-line text block counts as
   multiple reports) and deduplicated
+- **findBlockedTickets(tickets, failedKeys)**: pure;
+  returns `Map<string, string[]>` from the `ticketKey`
+  of each `ready-for-agent` ticket not in `failedKeys`
+  to the keys of the dead tickets upstream of it,
+  following blockers directly or through a chain,
+  within its own feature only. Dead means in
+  `failedKeys`, or a status that is neither `done` nor
+  `ready-for-agent` (e.g. `ready-for-human`); the walk
+  stops at a dead or done ticket. Tickets with no dead
+  upstream are omitted. A blocker number with no
+  matching ticket is not dead; cycles terminate
 - **checkItems(ticket, items)**: checks off specific
   `- [ ]` items in a ticket file by matching text;
   called with completed items from agent output.
@@ -164,7 +184,8 @@ Small orchestrator that runs a single-agent session per issue.
   `worktreePath:string` and `branchName:string`;
   `'error'` carries optional `worktreePath?:string`
   and `branchName?:string`; `'worktree-error'`
-  carries only `error:unknown`
+  carries only `error:unknown`; `'failed'` carries
+  `reason:'exit'|'tests'|'install'`
 - **DEFAULT_RETRY_DELAY**: exported as `30` (seconds)
 - **DEFAULT_CONCURRENCY**: exported as `5`
 - **runPool(items, limit, fn)**: runs `fn` over `items`
@@ -226,7 +247,10 @@ Small orchestrator that runs a single-agent session per issue.
   fake `[x]` lines (leave the item unchecked and
   say what blocked it), and to record reusable
   learnings in the nearest AGENTS.md before the
-  final commit
+  final commit; optional `opts.installCmd` adds a rule
+  that dependencies are installed with that command,
+  the agent must not reinstall with any other command,
+  and new dependencies use the same package manager
 - **stripSpecSection(specBody, heading)**: drops one
   markdown section from a spec, ignoring headings
   inside code fences; the CLI uses it to omit
@@ -249,7 +273,9 @@ Small orchestrator that runs a single-agent session per issue.
   a respawned agent resolving a merge conflict; tells
   the agent to resolve conflict markers, not
   re-implement, and to keep both sides' additions
-  when AGENTS.md or other docs conflict
+  when AGENTS.md or other docs conflict; optional
+  third arg `{ installCmd? }` adds the same install
+  rule as `renderPrompt`
 - **lookupSpec(specBodies, fallback, feature)**: returns
   the spec body for a given feature from a
   `Map<string, string>`, or `fallback` when the map is
@@ -259,7 +285,13 @@ Small orchestrator that runs a single-agent session per issue.
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
   updates; requires `testCmd` (string); accepts
-  optional `display`, `effort`, `retries`,
+  optional `installCmd` (run in each fresh worktree
+  before the agent and again after a merge-conflict
+  rebase, output in `<logsDir>/<ticket>.install.log`;
+  a non-zero exit fails the attempt with reason
+  `'install'` without running the agent, and it is
+  retried like any failure), `display`, `effort`,
+  `retries`,
   `retryDelay`, `concurrency`,
   `specBodies` (`Map<string, string>`), and
   `progressPaths` (`Map<string, string>`) in opts;
@@ -268,6 +300,20 @@ Small orchestrator that runs a single-agent session per issue.
   files; a wave with more ready tickets than
   `concurrency` runs them through `runPool`, so the
   wave still finishes fully before any branch is merged
+- **Session list (both `runWaves` variants)**: the
+  session set is captured before the wave loop: every
+  ticket whose status is `ready-for-agent` at that
+  point (blockers done or not), sorted by feature then
+  number. `startRun` is called with it exactly once,
+  when wave 1 starts, and never for a run with nothing
+  ready. Blocked tickets (`findBlockedTickets`) are
+  reported via `setBlocked` with `ticketLabel` names
+  right after `startRun`, at the top of every later
+  loop iteration, and once more after the loop, so
+  the `-X` stop and the no-progress breaks still
+  report them. The `progress` passed to `startWave`
+  counts only the session set (`completed` = session
+  tickets now `done`, `total` = session size)
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; a failed attempt
   (non-zero exit, exit 0 with no new commits, or a red
@@ -299,6 +345,12 @@ Small orchestrator that runs a single-agent session per issue.
   and `failed` -- is recorded in progress.md via
   `checkTicket` + `saveProgress` with `done:false`;
   merge failures are also recorded with `done:false`;
+  an unrecovered merge failure also sets the ticket's
+  display status to `failed` (it no longer stays
+  `awaiting-merge`). Known limit: under `-X`, branches
+  after the stop point never enter
+  `mergeResult.merged`, so their rows stay
+  `awaiting-merge` in the final frame;
   respawned agents receive `renderMergePrompt`
   instead of `renderPrompt`; a red test suite in the
   worktree records the ticket `done:false`, writes
@@ -331,17 +383,28 @@ Small orchestrator that runs a single-agent session per issue.
   explanation instead of silently
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; requires
-  `testCmd`; accepts `effort`, `retries`, `retryDelay`,
-  and `concurrency` in opts and prints them
+  `testCmd`; accepts `installCmd`, `effort`, `retries`,
+  `retryDelay`, and `concurrency` in opts and prints
+  them
 
 ### testcmd module (`src/testcmd.ts`)
 - **Exposes**: `TestResult`,
-  `detectTestCmd(projectDir)`, `runTestCmd(opts)`
+  `detectTestCmd(projectDir)`,
+  `detectInstallCmd(projectDir)`, `runTestCmd(opts)`
 - **TestResult**: `{ exitCode, output }` -- `output`
   is stdout and stderr interleaved
 - **detectTestCmd(projectDir)**: returns `'npm test'`
   when `<projectDir>/package.json` declares a `test`
   script, else `null`
+- **detectInstallCmd(projectDir)**: picks the install
+  command from the lockfile, never one that writes a
+  lockfile: `pnpm-lock.yaml` ->
+  `pnpm install --prefer-offline --frozen-lockfile`;
+  `package-lock.json` ->
+  `npm ci --prefer-offline --no-audit --no-fund`;
+  `package.json` alone ->
+  `npm install --prefer-offline --no-audit --no-fund
+  --no-package-lock`; no `package.json` -> `null`
 - **runTestCmd(opts)**: `{ cmd, cwd, timeout,
   registry? }` -- runs `cmd` via `sh -c` in its own
   process group; when `registry` (`Set<number>`) is
@@ -355,37 +418,64 @@ Small orchestrator that runs a single-agent session per issue.
 
 ### display module (`src/display.ts`)
 - **Exposes**: `Display` (type), `StatusDisplay` (class),
-  `PlainDisplay` (class), `createDisplay()`,
-  `TicketStatus`, `DisplayTicket`, `WaveState`,
-  `DisplayConfig`, `RunProgress`, `ansi`, `color`,
-  `renderDot`, `fitLine(line, width)`,
-  `wrapLine(line, width)`
-- **Display interface**:
-  `startWave(waveNum, totalWaves, tickets, progress?,
-  remaining?)`,
-  `setTicketStatus(num, status)`, `log(message)`,
-  `cleanup()`
+  `PlainDisplay` (class), `createDisplay(stream?)`,
+  `TicketStatus`, `DisplayTicket`, `TicketRef`,
+  `WaveState`, `DisplayConfig`, `RunProgress`, `ansi`,
+  `color`, `renderDot`, `ticketLabel(ticket)`,
+  `fitLine(line, width)`, `wrapLine(line, width)`
+- **Display interface**: `startRun(tickets)`,
+  `startWave(waveNum, totalWaves, tickets, progress?)`,
+  `setTicketStatus(num, status, feature?)`,
+  `setBlocked(num, feature, blockedBy)`,
+  `log(message)`, `cleanup()`. `tickets` are
+  `TicketRef`s. `setTicketStatus` and `setBlocked`
+  find the row by `num` and `feature` (by `num` alone
+  when `feature` is omitted) and ignore unknown tickets
+- **TicketRef**: `{ num, filename, feature? }` -- the
+  identity a caller passes in; `DisplayTicket` adds
+  `status` and optional `blockedBy`
+- **ticketLabel(ticket)**: the row name,
+  `<feature>/<NN>` (number zero-padded to 2) when
+  `feature` is set, else `filename`
 - **TicketStatus**: `'pending'|'in-progress'|
-  'awaiting-merge'|'done'|'failed'`. `renderDot` draws
-  them as a dim empty dot, then yellow, cyan, green and
-  red filled dots. `in-progress` means the ticket holds a
-  concurrency slot (agent running, test gate running, or
-  waiting out a retry backoff), so at most `concurrency`
-  dots are yellow at once. `awaiting-merge` means the
-  attempt succeeded and the branch waits for the rest of
-  the wave; `runTicketAttempts` sets it when an attempt
-  is `'ready'`, so only `runWavesIsolated` uses it. It
-  does not count toward the percent; only `done` does
-- **remaining**: optional array of tickets not in the
-  current wave but still pending; rendered with empty
-  dots after wave tickets in `StatusDisplay`
+  'awaiting-merge'|'done'|'failed'|'blocked'`.
+  `renderDot` draws them as a dim empty dot, then
+  yellow, cyan, green, red and dim filled dots.
+  `blocked` means an upstream ticket failed or is not
+  agent work, so the ticket cannot run this session;
+  the row names those tickets as
+  `(blocked by a/01, a/02)`. `in-progress` means the
+  ticket holds a concurrency slot (agent running, test
+  gate running, or waiting out a retry backoff), so at
+  most `concurrency` dots are yellow at once.
+  `awaiting-merge` means the attempt succeeded and the
+  branch waits for the rest of the wave;
+  `runTicketAttempts` sets it when an attempt is
+  `'ready'`, so only `runWavesIsolated` uses it. It
+  stays set through the merge, including while a
+  respawned agent resolves a merge conflict
+  (`respawnAndRetryMerge` gets no display). It does
+  not count toward the percent; only `done` does
+- **startRun(tickets)**: called once before the first
+  wave; seeds every row as `pending` and fixes the
+  rendered list for the rest of the run. Rows never
+  move, vanish or reappear; tickets not yet in a wave
+  show as pending. `startWave` sets the wave number
+  and total and clears the log area, but never resets
+  statuses; its `tickets` argument is ignored by
+  `StatusDisplay` except when `startRun` was never
+  called, in which case the first `startWave` seeds
+  the list from it
+- **WaveState**: `{ waveNum, totalWaves }`; the ticket
+  list lives on `StatusDisplay` itself, not in the
+  wave state
 - **RunProgress**: `{ completed, total }` for the whole
-  run; `completed` counts tickets done before the wave
-  started. The percent in the status line is
-  `(completed + done-in-wave) / total`. When `progress`
-  is omitted the percent falls back to per-wave
-  (done-in-wave / tickets-in-wave). The orchestrator
-  always passes it, derived from `ticket.status`
+  run; used only by `PlainDisplay`, which prints
+  `(completed/total done)` in its wave line.
+  `StatusDisplay` ignores it and computes done/total
+  from its fixed list, so the header
+  (`Wave N/M - D/T done - P%`) and the rows cannot
+  disagree
 - **Guarantees**: `StatusDisplay` never emits a row
   wider than `stream.columns - 1` visible characters;
   ticket names are clamped (`fitLine`) and log messages
@@ -402,10 +492,12 @@ Small orchestrator that runs a single-agent session per issue.
   paginated ticket grid, wave progress, and scrolling
   message log; handles terminal resize
 - **PlainDisplay**: plain-text fallback when
-  stdout is not a TTY
-- **createDisplay()**: factory that returns
-  `StatusDisplay` when stdout is a TTY,
-  `PlainDisplay` otherwise
+  stdout is not a TTY; prints one line per wave;
+  `startRun`, `setTicketStatus` and `setBlocked` are
+  no-ops (it has no fixed list)
+- **createDisplay(stream?)**: factory that returns
+  `StatusDisplay` when `stream` (default stdout) is a
+  TTY, `PlainDisplay` otherwise
 - **Guarantees**: `StatusDisplay.log()` called before any
   `startWave()` writes the message straight to the
   stream instead of dropping it (`render` is a no-op

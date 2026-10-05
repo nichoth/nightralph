@@ -4,7 +4,9 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { detectTestCmd, runTestCmd } from '../src/testcmd.js'
+import {
+    detectTestCmd, detectInstallCmd, runTestCmd,
+} from '../src/testcmd.js'
 
 function tmp ():string {
     return mkdtempSync(join(tmpdir(), 'nightralph-testcmd-'))
@@ -50,6 +52,60 @@ test('detectTestCmd - unparseable package.json', t => {
     try {
         writeFileSync(join(dir, 'package.json'), '{ nope')
         t.equal(detectTestCmd(dir), null, 'returns null')
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
+test('detectInstallCmd - no package.json', t => {
+    const dir = tmp()
+    try {
+        t.equal(detectInstallCmd(dir), null, 'returns null')
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
+test('detectInstallCmd - pnpm lockfile', t => {
+    const dir = tmp()
+    try {
+        writeFileSync(join(dir, 'package.json'), '{}')
+        writeFileSync(join(dir, 'pnpm-lock.yaml'), '')
+        t.equal(
+            detectInstallCmd(dir),
+            'pnpm install --prefer-offline --frozen-lockfile',
+            'frozen pnpm install'
+        )
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
+test('detectInstallCmd - npm lockfile', t => {
+    const dir = tmp()
+    try {
+        writeFileSync(join(dir, 'package.json'), '{}')
+        writeFileSync(join(dir, 'package-lock.json'), '{}')
+        t.equal(
+            detectInstallCmd(dir),
+            'npm ci --prefer-offline --no-audit --no-fund',
+            'npm ci'
+        )
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
+test('detectInstallCmd - no lockfile', t => {
+    const dir = tmp()
+    try {
+        writeFileSync(join(dir, 'package.json'), '{}')
+        t.equal(
+            detectInstallCmd(dir),
+            'npm install --prefer-offline --no-audit ' +
+                '--no-fund --no-package-lock',
+            'npm install that writes no lockfile'
+        )
     } finally {
         rmSync(dir, { recursive:true, force:true })
     }
