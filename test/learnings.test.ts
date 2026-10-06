@@ -1,12 +1,14 @@
 import { test } from '@substrate-system/tapzero'
 import { randomUUID } from 'node:crypto'
 import {
-    execSync,
     spawnSync,
 } from 'node:child_process'
 import {
     mkdtempSync,
     rmSync,
+    writeFileSync,
+    existsSync,
+    mkdirSync,
 } from 'node:fs'
 import { join, dirname, basename } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -28,7 +30,7 @@ import {
     readEntries,
     appendEntry,
     collectNotes,
-    ensureExcluded,
+    ensureNotesIgnored,
 } from '../src/learnings.js'
 
 // -- AC1.1: Round-trip test for all outcome variants --
@@ -927,23 +929,67 @@ test('learningsPathFor returns correct path', t => {
 
 // -- Helper for git tests --
 
-function initTempRepo ():string {
-    const dir = mkdtempSync(
+function initTempRepo ():{
+    repoRoot:string
+    templateDir:string
+} {
+    const repoRoot = mkdtempSync(
         join(tmpdir(), 'nightralph-learnings-test-')
     )
-    execSync('git init', { cwd:dir })
-    execSync('git config core.hooksPath /dev/null', { cwd:dir })
-    execSync('git commit --allow-empty -m "init" --no-verify', {
-        cwd:dir,
-        env:{
-            ...process.env,
-            GIT_COMMITTER_NAME:'Test',
-            GIT_COMMITTER_EMAIL:'test@example.com',
-            GIT_AUTHOR_NAME:'Test',
-            GIT_AUTHOR_EMAIL:'test@example.com',
-        },
+    const templateDir = mkdtempSync(
+        join(tmpdir(), 'nightralph-learnings-template-')
+    )
+
+    const result = spawnSync('git', ['init', '--template=' + templateDir], {
+        cwd:repoRoot,
+        encoding:'utf8',
     })
-    return dir
+    if (result.status !== 0) {
+        throw new Error(`git init failed: ${result.stderr}`)
+    }
+
+    const hookResult = spawnSync(
+        'git',
+        ['config', 'core.hooksPath', '/dev/null'],
+        { cwd:repoRoot, encoding:'utf8' }
+    )
+    if (hookResult.status !== 0) {
+        throw new Error(
+            `git config core.hooksPath failed: ${hookResult.stderr}`
+        )
+    }
+
+    const excludeResult = spawnSync(
+        'git',
+        ['config', 'core.excludesFile', '/dev/null'],
+        { cwd:repoRoot, encoding:'utf8' }
+    )
+    if (excludeResult.status !== 0) {
+        throw new Error(
+            `git config core.excludesFile failed: ${excludeResult.stderr}`
+        )
+    }
+
+    const commitResult = spawnSync(
+        'git',
+        ['commit', '--allow-empty', '-m', 'init', '--no-verify'],
+        {
+            cwd:repoRoot,
+            encoding:'utf8',
+            env:{
+                ...process.env,
+                GIT_COMMITTER_NAME:'Test',
+                GIT_COMMITTER_EMAIL:'test@example.com',
+                GIT_AUTHOR_NAME:'Test',
+                GIT_AUTHOR_EMAIL:'test@example.com',
+            },
+        }
+    )
+    if (commitResult.status !== 0) {
+        throw new Error(`git commit failed: ${commitResult.stderr}`)
+    }
+
+    return { repoRoot, templateDir }
 }
 
 // -- AC3.1: collectNotes returns file contents and removes file --
@@ -958,9 +1004,8 @@ test('AC3.1: collectNotes returns notes file contents', t => {
         const content = `random token: ${randomUUID()}`
 
         // Create notes file
-        const cmd = `mkdir -p "${notesDir}" && ` +
-            `echo "${content}" > "${notesPath}"`
-        execSync(cmd, { shell:true } as never)
+        mkdirSync(notesDir, { recursive:true })
+        writeFileSync(notesPath, content)
 
         const result = collectNotes(dir)
 
@@ -971,30 +1016,56 @@ test('AC3.1: collectNotes returns notes file contents', t => {
         )
 
         // Verify file and directory are removed
-        const fileExists = (execSync(
-            `[ -f "${notesPath}" ] && echo "exists" || echo "gone"`,
-            { shell:true, encoding:'utf8' } as never
-        ) as string).trim()
-
-        const dirExists = (execSync(
-            `[ -d "${notesDir}" ] && echo "exists" || echo "gone"`,
-            { shell:true, encoding:'utf8' } as never
-        ) as string).trim()
+        const fileExists = existsSync(notesPath)
+        const dirExists = existsSync(notesDir)
 
         t.equal(
             fileExists,
-            'gone',
+            false,
             'notes file should be removed'
         )
         t.equal(
             dirExists,
-            'gone',
+            false,
             'notes directory should be removed'
         )
     } finally {
         rmSync(dir, { recursive:true, force:true })
     }
 })
+
+test(
+    'AC3.1: collectNotes removes dir when no notes file exists',
+    t => {
+        const dir = mkdtempSync(
+            join(tmpdir(), 'nightralph-learnings-')
+        )
+        try {
+            const notesPath = join(dir, NOTES_PATH)
+            const notesDir = dirname(notesPath)
+
+            // Create empty .nightralph dir
+            mkdirSync(notesDir, { recursive:true })
+
+            const result = collectNotes(dir)
+
+            t.equal(
+                result,
+                null,
+                'should return null when no notes file'
+            )
+
+            const dirExists = existsSync(notesDir)
+            t.equal(
+                dirExists,
+                false,
+                '.nightralph directory should be removed'
+            )
+        } finally {
+            rmSync(dir, { recursive:true, force:true })
+        }
+    }
+)
 
 // -- AC3.2: collectNotes returns null for missing file or blank --
 
@@ -1024,10 +1095,8 @@ test('AC3.2: collectNotes returns null for blank notes', t => {
         const notesDir = dirname(notesPath)
 
         // Create blank notes file with only whitespace
-        execSync(
-            `mkdir -p "${notesDir}" && echo "   " > "${notesPath}"`,
-            { shell:true } as never
-        )
+        mkdirSync(notesDir, { recursive:true })
+        writeFileSync(notesPath, '   ')
 
         const result = collectNotes(dir)
 
@@ -1129,64 +1198,28 @@ test(
     }
 )
 
-// -- AC3.3: ensureExcluded idempotent and git check-ignore works --
+// -- AC3.3: ensureNotesIgnored git check-ignore works --
 
-test('AC3.3: ensureExcluded adds line to exclude file', t => {
-    const repoRoot = initTempRepo()
+test('AC3.3: ensureNotesIgnored creates .gitignore', t => {
+    const repoRoot = mkdtempSync(
+        join(tmpdir(), 'nightralph-learnings-')
+    )
     try {
-        ensureExcluded(repoRoot)
+        ensureNotesIgnored(repoRoot)
 
-        const result = execSync(
-            `grep -c "^\\.nightralph/$" "${repoRoot}/.git/info/exclude"`,
-            { encoding:'utf8', stdio:['pipe', 'pipe', 'ignore'] }
-        ).trim()
+        const gitignorePath = join(repoRoot, '.nightralph', '.gitignore')
+        const exists = existsSync(gitignorePath)
+        t.equal(exists, true, '.gitignore should exist')
 
-        t.equal(
-            result,
-            '1',
-            'should have exactly one .nightralph/ line'
+        const content = spawnSync(
+            'cat',
+            [gitignorePath],
+            { encoding:'utf8' }
         )
-    } finally {
-        rmSync(repoRoot, { recursive:true, force:true })
-    }
-})
-
-test('AC3.3: ensureExcluded is idempotent', t => {
-    const repoRoot = initTempRepo()
-    try {
-        ensureExcluded(repoRoot)
-        ensureExcluded(repoRoot)
-
-        const result = execSync(
-            `grep -c "^\\.nightralph/$" "${repoRoot}/.git/info/exclude"`,
-            { encoding:'utf8', stdio:['pipe', 'pipe', 'ignore'] }
-        ).trim()
-
         t.equal(
-            result,
-            '1',
-            'calling twice should still have exactly one line'
-        )
-    } finally {
-        rmSync(repoRoot, { recursive:true, force:true })
-    }
-})
-
-test('AC3.3: git check-ignore works after ensureExcluded', t => {
-    const repoRoot = initTempRepo()
-    try {
-        ensureExcluded(repoRoot)
-
-        const result = spawnSync(
-            'git',
-            ['check-ignore', '-q', '.nightralph/notes.md'],
-            { cwd:repoRoot }
-        )
-
-        t.equal(
-            result.status,
-            0,
-            'git check-ignore should exit 0 for excluded path'
+            content.stdout,
+            '*\n',
+            '.gitignore should contain "*\\n"'
         )
     } finally {
         rmSync(repoRoot, { recursive:true, force:true })
@@ -1194,42 +1227,154 @@ test('AC3.3: git check-ignore works after ensureExcluded', t => {
 })
 
 test(
-    'AC3.3: git check-ignore works in worktree after ensureExcluded',
+    'AC3.3: ensureNotesIgnored hermetic git repo with ' +
+    'empty template and core.excludesFile',
     t => {
-        const repoRoot = initTempRepo()
-        try {
-            ensureExcluded(repoRoot)
+        const { repoRoot, templateDir } = initTempRepo()
+        let worktreePath:string|undefined
 
-            // Create a worktree
-            const worktreePath = join(
+        try {
+            // Snapshot info/exclude before ensureNotesIgnored
+            const excludePath = join(repoRoot, '.git', 'info', 'exclude')
+            const excludeContentBefore = existsSync(excludePath) ?
+                spawnSync('cat', [excludePath], { encoding:'utf8' })
+                    .stdout :
+                null
+
+            // Call ensureNotesIgnored twice (should be idempotent)
+            ensureNotesIgnored(repoRoot)
+            ensureNotesIgnored(repoRoot)
+
+            // Write notes file
+            const notesPath = join(repoRoot, NOTES_PATH)
+            mkdirSync(dirname(notesPath), { recursive:true })
+            writeFileSync(notesPath, 'test notes')
+
+            // git check-ignore should exit 0
+            const checkIgnore = spawnSync(
+                'git',
+                ['check-ignore', '-q', '.nightralph/notes.md'],
+                { cwd:repoRoot, encoding:'utf8' }
+            )
+            t.equal(
+                checkIgnore.status,
+                0,
+                'git check-ignore should exit 0'
+            )
+
+            // git status --porcelain should show nothing
+            const status = spawnSync(
+                'git',
+                ['status', '--porcelain'],
+                { cwd:repoRoot, encoding:'utf8' }
+            )
+            t.equal(
+                status.stdout,
+                '',
+                'git status should show no changes (gitignore ignored)'
+            )
+
+            // Verify info/exclude is unchanged
+            const excludeContentAfter = existsSync(excludePath) ?
+                spawnSync('cat', [excludePath], { encoding:'utf8' })
+                    .stdout :
+                null
+            t.equal(
+                excludeContentAfter,
+                excludeContentBefore,
+                'info/exclude should be unchanged'
+            )
+
+            // Verify it's not a symlink
+            const lsResult = spawnSync(
+                'test',
+                ['!', '-L', excludePath],
+                { encoding:'utf8' }
+            )
+            t.equal(
+                lsResult.status,
+                0,
+                'info/exclude must not be a symlink ' +
+                '(should be regular file or not exist)'
+            )
+        } finally {
+            if (worktreePath) {
+                rmSync(worktreePath, { recursive:true, force:true })
+            }
+            rmSync(repoRoot, { recursive:true, force:true })
+            rmSync(templateDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test(
+    'AC3.3 worktree: ensureNotesIgnored in linked worktree',
+    t => {
+        const { repoRoot, templateDir } = initTempRepo()
+        let worktreePath:string|undefined
+
+        try {
+            // Create a linked worktree
+            worktreePath = join(
                 dirname(repoRoot),
                 `${basename(repoRoot)}.worktree`
             )
 
-            execSync(
-                `git worktree add "${worktreePath}" -b test-branch`,
-                { cwd:repoRoot }
+            const addWorktree = spawnSync(
+                'git',
+                ['worktree', 'add', worktreePath, '-b', 'test-branch'],
+                { cwd:repoRoot, encoding:'utf8' }
             )
+            if (addWorktree.status !== 0) {
+                throw new Error(
+                    `git worktree add failed: ${addWorktree.stderr}`
+                )
+            }
 
-            // Check ignore in worktree
-            const result = spawnSync(
+            // Call ensureNotesIgnored in the worktree
+            ensureNotesIgnored(worktreePath)
+
+            // Write notes file in worktree
+            const notesPath = join(worktreePath, NOTES_PATH)
+            mkdirSync(dirname(notesPath), { recursive:true })
+            writeFileSync(notesPath, 'worktree notes')
+
+            // git check-ignore should exit 0 in worktree
+            const checkIgnore = spawnSync(
                 'git',
                 ['check-ignore', '-q', '.nightralph/notes.md'],
-                { cwd:worktreePath }
+                { cwd:worktreePath, encoding:'utf8' }
             )
-
             t.equal(
-                result.status,
+                checkIgnore.status,
                 0,
-                'git check-ignore should exit 0 in worktree'
+                'git check-ignore in worktree should exit 0'
             )
 
-            // Clean up worktree
-            execSync(`git worktree remove "${worktreePath}"`, {
-                cwd:repoRoot,
-            })
+            // git status --porcelain should show nothing in worktree
+            const status = spawnSync(
+                'git',
+                ['status', '--porcelain'],
+                { cwd:worktreePath, encoding:'utf8' }
+            )
+            t.equal(
+                status.stdout,
+                '',
+                'git status in worktree should show no changes'
+            )
         } finally {
+            if (worktreePath) {
+                const removeWorktree = spawnSync(
+                    'git',
+                    ['worktree', 'remove', '--force', worktreePath],
+                    { cwd:repoRoot, encoding:'utf8' }
+                )
+                if (removeWorktree.status !== 0) {
+                    rmSync(worktreePath, { recursive:true, force:true })
+                }
+            }
             rmSync(repoRoot, { recursive:true, force:true })
+            rmSync(templateDir, { recursive:true, force:true })
         }
     }
 )

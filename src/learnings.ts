@@ -1,12 +1,12 @@
-import { execFileSync } from 'node:child_process'
 import {
     appendFileSync,
     existsSync,
     mkdirSync,
     readFileSync,
     rmSync,
+    writeFileSync,
 } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 
 // -- Constants and types --
 
@@ -14,8 +14,6 @@ export const MAX_OWN_ENTRIES = 4
 export const MAX_ENTRY_CHARS = 4000
 export const LOG_TAIL_LINES = 40
 export const NOTES_PATH = '.nightralph/notes.md'
-
-const EXCLUDE_LINE = '.nightralph/'
 
 const SENTINEL_PREFIX = '<!-- nightralph:entry'
 export const TRUNCATED_MARKER = '[truncated]'
@@ -466,36 +464,24 @@ export function appendEntry (path:string, text:string):void {
     appendFileSync(path, text)
 }
 
-// Reads the agent's notes and removes the notes directory, so the
-// file can never reach a commit. Blank notes count as none.
+// Reads the agent's notes and removes the whole notes directory
+// (also when there are no notes), so nothing in it can reach a
+// commit. Blank notes count as none.
 export function collectNotes (worktreePath:string):string|null {
     const notesPath = join(worktreePath, NOTES_PATH)
-    if (!existsSync(notesPath)) return null
-    const text = readFileSync(notesPath, 'utf8').trim()
+    const text = existsSync(notesPath) ?
+        readFileSync(notesPath, 'utf8').trim() :
+        ''
     rmSync(dirname(notesPath), { recursive:true, force:true })
     return text || null
 }
 
-// Adds the notes directory to the repo's local, unversioned
-// exclude file, shared by every worktree of the repo.
-export function ensureExcluded (repoRoot:string):void {
-    const commonDir = resolve(
-        repoRoot,
-        execFileSync(
-            'git',
-            ['rev-parse', '--git-common-dir'],
-            { cwd:repoRoot, encoding:'utf8' }
-        ).trim()
-    )
-    const excludePath = join(commonDir, 'info', 'exclude')
-    mkdirSync(dirname(excludePath), { recursive:true })
-    const current = existsSync(excludePath) ?
-        readFileSync(excludePath, 'utf8') :
-        ''
-    const present = current
-        .split('\n')
-        .some(line => line.trim() === EXCLUDE_LINE)
-    if (present) return
-    const sep = current && !current.endsWith('\n') ? '\n' : ''
-    appendFileSync(excludePath, `${sep}${EXCLUDE_LINE}\n`)
+// Makes the notes directory ignore itself, so an agent's
+// `git add -A` cannot stage its notes. Deliberately not
+// info/exclude: that file can be a symlink shared by every repo on
+// the machine (e.g. via init.templateDir).
+export function ensureNotesIgnored (worktreePath:string):void {
+    const dir = join(worktreePath, dirname(NOTES_PATH))
+    mkdirSync(dir, { recursive:true })
+    writeFileSync(join(dir, '.gitignore'), '*\n')
 }
