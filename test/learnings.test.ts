@@ -522,7 +522,7 @@ test('AC1.2+: variable-length code fence preserved', t => {
     )
 })
 
-// -- Mi2: Notes ending with --- separator --
+// -- parseEntries: separator stripping --
 
 test('parseEntries strips only a whole --- separator line', t => {
     const token = randomUUID()
