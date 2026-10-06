@@ -24,8 +24,8 @@ test('AC1.1: entries round-trip through render and parse', t => {
 
     const entries:EntryInput[] = [
         {
-            key:'my-feature:1',
-            label:'my-feature/01',
+            key:'my feature:1',
+            label:'my feature/01',
             attempt:1,
             now:new Date('2026-10-06T14:30:45'),
             outcome:'done',
@@ -147,6 +147,7 @@ test('AC1.1: entries round-trip through render and parse', t => {
 // -- AC1.2: Entries with sentinel prefix in notes --
 
 test('AC1.2: notes containing sentinel prefix parse as one entry', t => {
+    const tokenInNotes = randomUUID()
     const entries:EntryInput[] = [
         {
             key:'test:1',
@@ -158,9 +159,12 @@ test('AC1.2: notes containing sentinel prefix parse as one entry', t => {
                 exitCode:0,
                 completedItems:[],
                 timedOut:false,
-                notes:('Some text\n' +
-                    '<!-- nightralph:entry ticket=x:1 attempt=1 outcome=done -->\n' +
-                    'More text after the fake sentinel'),
+                notes:(
+                    'Some text\n' +
+                    '<!-- nightralph:entry ' +
+                    'ticket=x:1 attempt=1 outcome=done -->\n' +
+                    `More text with token: ${tokenInNotes}`
+                ),
             },
         },
     ]
@@ -169,9 +173,83 @@ test('AC1.2: notes containing sentinel prefix parse as one entry', t => {
     const parsed = parseEntries(rendered)
 
     t.equal(parsed.length, 1, 'should have exactly one entry')
+    t.equal(
+        parsed[0].key,
+        'test:1',
+        'should parse original key correctly'
+    )
     t.ok(
         parsed[0].body.includes('<!-- nightralph-entry'),
-        'sanitized sentinel should be in body (hyphen instead of colon)'
+        'sanitized sentinel should be in body (hyphen instead colon)'
+    )
+    t.ok(
+        parsed[0].body.includes(tokenInNotes),
+        'random token from notes should be preserved'
+    )
+})
+
+test('AC1.2: key with space and = encodes and decodes correctly', t => {
+    const entries:EntryInput[] = [
+        {
+            key:'my feature:1=test',
+            label:'my-feature/01',
+            attempt:1,
+            now:new Date(),
+            outcome:'done',
+            run:{
+                exitCode:0,
+                completedItems:[],
+                timedOut:false,
+                notes:null,
+            },
+        },
+    ]
+
+    const rendered = renderEntry(entries[0])
+    const parsed = parseEntries(rendered)
+
+    t.equal(parsed.length, 1, 'should parse entry with = in key')
+    t.equal(
+        parsed[0].key,
+        'my feature:1=test',
+        'should preserve = in key after roundtrip'
+    )
+})
+
+test('AC1.2: completedItems and notes with sentinel are sanitized', t => {
+    const token = randomUUID()
+    const entries:EntryInput[] = [
+        {
+            key:'test:2',
+            label:'test/02',
+            attempt:1,
+            now:new Date(),
+            outcome:'done',
+            run:{
+                exitCode:0,
+                completedItems:[
+                    'item with sentinel <!-- nightralph:entry',
+                ],
+                timedOut:false,
+                notes:`notes with sentinel <!-- nightralph:entry ${token}`,
+            },
+        },
+    ]
+
+    const rendered = renderEntry(entries[0])
+    // Should find the sentinel in rendered output
+    t.ok(
+        rendered.includes('<!-- nightralph:entry'),
+        'should have real sentinel line'
+    )
+    // Should find sanitized version in completedItems and notes
+    t.ok(
+        rendered.includes('<!-- nightralph-entry'),
+        'sanitized sentinels should use hyphen'
+    )
+    t.ok(
+        rendered.includes(token),
+        'token in notes should be preserved'
     )
 })
 
@@ -183,6 +261,8 @@ test('AC1.2: invalid entries are dropped without throwing', t => {
 empty ticket
 <!-- nightralph:entry ticket=valid:1 attempt=not-a-number outcome=done -->
 non-numeric attempt
+<!-- nightralph:entry ticket=valid:1a attempt=1abc outcome=done -->
+attempt with suffix
 <!-- nightralph:entry ticket=%E0%A attempt=1 outcome=done -->
 malformed escape
 <!-- nightralph:entry ticket=valid:2 attempt=1 outcome=done -->
@@ -195,6 +275,37 @@ unknown outcome
 
     t.equal(parsed.length, 1, 'should parse only the valid entry')
     t.equal(parsed[0].key, 'valid:2', 'should be the valid entry')
+})
+
+// -- AC1.2+: CRLF line endings --
+
+test('AC1.2+: CRLF line endings are handled', t => {
+    const token = randomUUID()
+    const entry:EntryInput = {
+        key:'test:crlf',
+        label:'test/crlf',
+        attempt:1,
+        now:new Date(),
+        outcome:'done',
+        run:{
+            exitCode:0,
+            completedItems:[],
+            timedOut:false,
+            notes:`Note with CRLF and token: ${token}`,
+        },
+    }
+
+    const rendered = renderEntry(entry)
+    // Replace LF with CRLF to simulate autocrlf=true
+    const crlfText = rendered.replace(/\n/g, '\r\n')
+    const parsed = parseEntries(crlfText)
+
+    t.equal(parsed.length, 1, 'should parse CRLF file')
+    t.equal(parsed[0].key, 'test:crlf', 'key should be correct')
+    t.ok(
+        parsed[0].body.includes(token),
+        'token should be preserved with CRLF'
+    )
 })
 
 // -- AC1.3: tailLines --
@@ -365,28 +476,39 @@ test('AC2.2: selectHistory includes most recent done entry from blocker', t => {
 
 // -- AC2.3: Exclusions --
 
-test('AC2.3: excludes unrelated entries', t => {
+test('AC2.3: excludes unrelated entries and transitive blockers', t => {
     const entries:LearningEntry[] = [
-        {
-            key:'unrelated:1',
-            attempt:1,
-            outcome:'done',
-            timedOut:false,
-            body:'unrelated',
-        },
+        // Own entry for feat:4 (the ticket we're looking at)
         {
             key:'feat:4',
             attempt:1,
             outcome:'done',
             timedOut:false,
-            body:'same number different feature',
+            body:'own entry for feat:4',
         },
+        // Same number in different feature (should exclude)
+        {
+            key:'other:4',
+            attempt:1,
+            outcome:'done',
+            timedOut:false,
+            body:'other:4 should not appear',
+        },
+        // Unrelated feature (should exclude)
+        {
+            key:'unrelated:1',
+            attempt:1,
+            outcome:'done',
+            timedOut:false,
+            body:'unrelated should not appear',
+        },
+        // Direct blocker with failures only (should exclude)
         {
             key:'blocker:1',
             attempt:1,
             outcome:'exit',
             timedOut:false,
-            body:'blocker failed',
+            body:'blocker failed first',
         },
         {
             key:'blocker:1',
@@ -395,22 +517,65 @@ test('AC2.3: excludes unrelated entries', t => {
             timedOut:false,
             body:'blocker still failing',
         },
+        // Blocker-of-blocker (should exclude - not in blockerKeys)
+        {
+            key:'blocker-of-blocker:1',
+            attempt:1,
+            outcome:'done',
+            timedOut:false,
+            body:'transitive blocker',
+        },
+        // Valid direct blocker's done entry (should include)
+        {
+            key:'direct-blocker:1',
+            attempt:1,
+            outcome:'exit',
+            timedOut:false,
+            body:'direct blocker first failed',
+        },
+        {
+            key:'direct-blocker:1',
+            attempt:2,
+            outcome:'done',
+            timedOut:false,
+            body:'direct blocker succeeded',
+        },
     ]
 
     const selection = selectHistory(entries, {
-        key:'feat:1',
-        blockerKeys:['blocker:1'],
+        key:'feat:4',
+        blockerKeys:['direct-blocker:1'],
     })
 
     t.equal(
         selection.own.length,
-        0,
-        'should have no own entries'
+        1,
+        'should have exactly one own entry'
+    )
+    t.equal(
+        selection.own[0].key,
+        'feat:4',
+        'own entry should be for feat:4'
+    )
+    t.equal(
+        selection.own[0].attempt,
+        1,
+        'own entry should have attempt 1'
     )
     t.equal(
         selection.blockers.length,
-        0,
-        'should exclude blocker with no done entries'
+        1,
+        'should have exactly one blocker entry'
+    )
+    t.equal(
+        selection.blockers[0].key,
+        'direct-blocker:1',
+        'blocker should be direct-blocker:1'
+    )
+    t.equal(
+        selection.blockers[0].attempt,
+        2,
+        'blocker should be the latest done (attempt 2)'
     )
 })
 
@@ -429,7 +594,7 @@ test('AC2.4: renderHistory of empty selection returns empty string', t => {
 
 test('AC2.5: renderHistory truncates long entries', t => {
     const longBody = 'x'.repeat(MAX_ENTRY_CHARS * 3)
-    const shortBody = ''
+    const emptyBody = ''
 
     const entries:LearningEntry[] = [
         {
@@ -444,33 +609,38 @@ test('AC2.5: renderHistory truncates long entries', t => {
             attempt:1,
             outcome:'done',
             timedOut:false,
-            body:shortBody,
+            body:emptyBody,
         },
     ]
 
-    const selection = selectHistory(entries, {
+    const selectionA = selectHistory(entries, {
         key:'feat:1',
-        blockerKeys:['feat:2'],
+        blockerKeys:[],
     })
 
-    const result = renderHistory(selection)
+    const selectionB = selectHistory(entries, {
+        key:'feat:2',
+        blockerKeys:[],
+    })
 
-    const truncatedLength =
+    const resultA = renderHistory(selectionA)
+    const resultB = renderHistory(selectionB)
+
+    // Verify truncation happened
+    t.ok(
+        resultA.includes(TRUNCATED_MARKER),
+        'should include truncation marker for long entry'
+    )
+
+    // Verify the difference in lengths
+    const lengthDiff = resultA.length - resultB.length
+    const maxAllowedDiff =
         MAX_ENTRY_CHARS + TRUNCATED_MARKER.length + 1
 
     t.ok(
-        result.includes(TRUNCATED_MARKER),
-        'should include truncation marker'
-    )
-
-    t.ok(
-        result.length < longBody.length,
-        'output should be much shorter than long input'
-    )
-
-    t.ok(
-        result.length <= truncatedLength * 2,
-        'total length should be reasonable'
+        lengthDiff <= maxAllowedDiff,
+        `length difference ${lengthDiff} <= ` +
+        `${maxAllowedDiff} (max)`
     )
 })
 

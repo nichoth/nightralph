@@ -30,9 +30,9 @@ export type LearningEntry = {
 }
 
 type EntryBase = {
-    key:string
-    label:string
-    attempt:number
+    key:string  // ticketKey(feature, num)
+    label:string  // ticketLabel(ticket), e.g. "my-feature/04"
+    attempt:number  // 0 for merge entries
     now:Date
 }
 
@@ -85,6 +85,38 @@ function sanitize (text:string|null):string {
     )
 }
 
+function renderAgentSummary (
+    run:AgentRunRecord,
+    effort?:string
+):string {
+    const effortLine = effort ?
+        `Effort: ${effort}.` :
+        ''
+
+    const exitLine = `Agent exit: ${run.exitCode}.`
+
+    const itemsText = run.completedItems.length > 0 ?
+        run.completedItems.map(item =>
+            `"${sanitize(item)}"`
+        ).join(', ') + '.' :
+        'none.'
+
+    const itemsLine = `Checked items: ${itemsText}`
+
+    return [
+        effortLine,
+        exitLine,
+        itemsLine,
+    ].filter(Boolean).join(' ')
+}
+
+function renderNotesSection (notes:string|null):string {
+    const notesSanitized = sanitize(notes)
+    return notesSanitized.trim() ?
+        `### Agent notes\n${notesSanitized}` :
+        'The agent left no notes.'
+}
+
 function formatDate (date:Date):string {
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -97,49 +129,59 @@ function formatDate (date:Date):string {
 export function isLearningOutcome (
     value:string
 ):value is LearningOutcome {
-    return LEARNING_OUTCOMES.includes(value as LearningOutcome)
+    return LEARNING_OUTCOMES.some(o => o === value)
 }
-
-// -- Task 1: renderEntry --
 
 export function renderEntry (input:EntryInput):string {
     const encodedKey = encodeKey(input.key)
 
-    const timedOutStr = 'run' in input && input.run.timedOut
-        ? ' timedout=true'
-        : ''
+    const timedOutStr = 'run' in input && input.run.timedOut ?
+        ' timedout=true' :
+        ''
 
     const sentinel =
         `<!-- nightralph:entry ticket=${encodedKey} ` +
-        `attempt=${input.attempt} outcome=${input.outcome}${timedOutStr} -->`
+        `attempt=${input.attempt} outcome=${input.outcome}` +
+        `${timedOutStr} -->`
 
     const timestamp = formatDate(input.now)
-    const attemptStr = input.outcome === 'merge' ? '' : ` attempt ${input.attempt}`
+    const attemptStr = input.outcome === 'merge' ?
+        '' :
+        ` attempt ${input.attempt}`
 
     let description:string
 
-    if (input.outcome === 'done') {
-        description = 'done'
-    } else if (input.outcome === 'exit') {
-        const run = input.run
-        description = `failed (exit ${run.exitCode})`
-    } else if (input.outcome === 'tests') {
-        description = 'failed (tests)'
-    } else if (input.outcome === 'install') {
-        description = 'failed (install)'
-    } else if (input.outcome === 'no-commits') {
-        description = 'no commits'
-    } else if (input.outcome === 'error') {
-        description = 'error'
-    } else if (input.outcome === 'merge') {
-        description = 'merge failed'
-    } else {
-        description = input.outcome
+    switch (input.outcome) {
+        case 'done':
+            description = 'done'
+            break
+        case 'exit':
+            description = `failed (exit ${input.run.exitCode})`
+            break
+        case 'tests':
+            description = 'failed (tests)'
+            break
+        case 'install':
+            description = 'failed (install)'
+            break
+        case 'no-commits':
+            description = 'no commits'
+            break
+        case 'error':
+            description = 'error'
+            break
+        case 'merge':
+            description = 'merge failed'
+            break
+        default: {
+            const _exhaustive:never = input
+            description = _exhaustive
+        }
     }
 
-    const timedOutPrefix = 'run' in input && input.run.timedOut
-        ? 'timed out, then '
-        : ''
+    const timedOutPrefix = 'run' in input && input.run.timedOut ?
+        'timed out, then ' :
+        ''
 
     const heading =
         `## ${timestamp} -- ${input.label}${attemptStr} -- ` +
@@ -150,54 +192,40 @@ export function renderEntry (input:EntryInput):string {
     if (input.outcome === 'done' || input.outcome === 'exit' ||
         input.outcome === 'no-commits') {
         const run = input.run
+        const summary = renderAgentSummary(run, input.effort)
+        const notesSection = renderNotesSection(run.notes)
+        body = summary + '\n\n' + notesSection
+    } else if (input.outcome === 'tests') {
+        const logTail = sanitize(input.logTail)
+        const fenced = fence(logTail)
+        const summary = renderAgentSummary(
+            input.run,
+            input.effort
+        )
+        const notesSection = renderNotesSection(input.run.notes)
 
-        const effortLine = input.effort
-            ? `Effort: ${input.effort}.`
-            : ''
+        const lastNLines =
+            `Last ${LOG_TAIL_LINES} lines of ` +
+            `\`${sanitize(input.logName)}\`:`
 
-        const exitLine = `Agent exit: ${run.exitCode}.`
-
-        const itemsText = run.completedItems.length > 0
-            ? run.completedItems.map(item => `"${sanitize(item)}"`).join(', ') + '.'
-            : 'none.'
-
-        const itemsLine = `Checked items: ${itemsText}`
-
-        const mainPart = [
-            effortLine,
-            exitLine,
-            itemsLine,
-        ].filter(Boolean).join(' ')
-
-        const notesSanitized = sanitize(run.notes)
-        const notesSection = notesSanitized.trim()
-            ? `### Agent notes\n${notesSanitized}`
-            : 'The agent left no notes.'
-
-        body = mainPart + '\n\n' + notesSection
-    } else if (input.outcome === 'tests' || input.outcome === 'install') {
-        const prefix = input.outcome === 'tests'
-            ? 'Test gate failed.'
-            : 'Install failed.'
-
+        body =
+            summary + '\n\n' +
+            'Test gate failed.\n' +
+            `${lastNLines}\n` +
+            `${fenced}\n\n` +
+            notesSection
+    } else if (input.outcome === 'install') {
         const logTail = sanitize(input.logTail)
         const fenced = fence(logTail)
 
-        if (input.outcome === 'tests') {
-            const runNotes = input.run.notes
-            const notesSanitized = sanitize(runNotes)
-            const notesSection = notesSanitized.trim()
-                ? `### Agent notes\n${notesSanitized}`
-                : 'The agent left no notes.'
+        const lastNLines =
+            `Last ${LOG_TAIL_LINES} lines of ` +
+            `\`${sanitize(input.logName)}\`:`
 
-            body =
-                `${prefix}\nLast ${LOG_TAIL_LINES} lines of \`${sanitize(input.logName)}\`:\n` +
-                `${fenced}\n\n${notesSection}`
-        } else {
-            body =
-                `${prefix}\nLast ${LOG_TAIL_LINES} lines of \`${sanitize(input.logName)}\`:\n` +
-                fenced
-        }
+        body =
+            'Install failed.\n' +
+            `${lastNLines}\n` +
+            fenced
     } else if (input.outcome === 'error') {
         const errorText = sanitize(input.error)
         const fenced = fence(errorText)
@@ -207,16 +235,19 @@ export function renderEntry (input:EntryInput):string {
         const fenced = fence(stderrText)
         body = `Merge failed.\n${fenced}`
     } else {
-        body = ''
+        // Exhaustiveness check: if we reach here, input.outcome
+        // is not one of the handled cases
+        throw new Error(`Unknown outcome: ${input.outcome}`)
     }
 
     return `${sentinel}\n${heading}\n\n${body}\n\n---\n`
 }
 
-// -- Task 2: parseEntries --
-
 export function parseEntries (text:string):LearningEntry[] {
-    const lines = text.split('\n')
+    const lines = text.split('\n').map(line => {
+        // Strip trailing \r for CRLF support
+        return line.endsWith('\r') ? line.slice(0, -1) : line
+    })
     const entries:LearningEntry[] = []
 
     let currentSentinel:string|null = null
@@ -262,9 +293,13 @@ function parseSentinel (
     const attrs:Record<string, string> = {}
 
     for (const part of parts) {
-        const [key, value] = part.split('=')
-        if (key && value) {
-            attrs[key] = value
+        const idx = part.indexOf('=')
+        if (idx > 0) {
+            const key = part.slice(0, idx)
+            const value = part.slice(idx + 1)
+            if (value) {
+                attrs[key] = value
+            }
         }
     }
 
@@ -284,8 +319,9 @@ function parseSentinel (
     const attemptStr = attrs.attempt
     if (!attemptStr) return null
 
-    const attempt = parseInt(attemptStr, 10)
-    if (!Number.isInteger(attempt) || attempt < 0) return null
+    if (!/^\d+$/.test(attemptStr)) return null
+    const attempt = Number(attemptStr)
+    if (attempt < 0) return null
 
     // Validate outcome
     const outcome = attrs.outcome
@@ -297,9 +333,10 @@ function parseSentinel (
     // Parse body
     let body = bodyLines.join('\n').trim()
 
-    // Remove trailing --- separator
-    if (body.endsWith('---')) {
-        body = body.slice(0, -3).trim()
+    // Remove trailing --- line (full line only)
+    const lines = body.split('\n')
+    if (lines.length > 0 && lines[lines.length - 1] === '---') {
+        body = lines.slice(0, -1).join('\n').trim()
     }
 
     return {
@@ -310,8 +347,6 @@ function parseSentinel (
         body,
     }
 }
-
-// -- Task 2: selectHistory --
 
 export function selectHistory (
     entries:LearningEntry[],
@@ -332,8 +367,6 @@ export function selectHistory (
     return { own, blockers }
 }
 
-// -- Task 2: renderHistory --
-
 export function renderHistory (selection:HistorySelection):string {
     if (selection.own.length === 0 && selection.blockers.length === 0) {
         return ''
@@ -349,16 +382,13 @@ export function renderHistory (selection:HistorySelection):string {
 
     if (selection.own.length > 0) {
         parts.push('---- PREVIOUS ATTEMPTS AT THIS TICKET ----')
-        parts.push(
-            ...selection.own.map(e => capEntry(e)).join('\n\n').split('\n')
-        )
+        parts.push(selection.own.map(e => capEntry(e)).join('\n\n'))
     }
 
     if (selection.blockers.length > 0) {
+        parts.push('')
         parts.push('---- WHAT THE BLOCKING TICKETS DID ----')
-        parts.push(
-            ...selection.blockers.map(e => capEntry(e)).join('\n\n').split('\n')
-        )
+        parts.push(selection.blockers.map(e => capEntry(e)).join('\n\n'))
     }
 
     return parts.join('\n')
@@ -371,8 +401,6 @@ function capEntry (entry:LearningEntry):string {
 
     return entry.body.slice(0, MAX_ENTRY_CHARS) + '\n' + TRUNCATED_MARKER
 }
-
-// -- Task 2: tailLines --
 
 export function tailLines (text:string, n:number):string {
     let lines = text.split('\n')
@@ -389,8 +417,6 @@ export function tailLines (text:string, n:number):string {
 
     return lines.join('\n')
 }
-
-// -- Task 2: learningsPathFor --
 
 export function learningsPathFor (progressPath:string):string {
     return join(dirname(progressPath), 'learnings.md')
