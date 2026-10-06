@@ -1832,7 +1832,7 @@ test('renderPrompt includes history when provided ' +
         history,
     })
     const tokenIdx = prompt.indexOf(token)
-    const ticketIdx = prompt.indexOf(ticket.filename)
+    const ticketEnd = prompt.indexOf(ticket.body) + ticket.body.length
     const instructionsIdx = prompt.indexOf(
         'AGENT INSTRUCTIONS'
     )
@@ -1841,8 +1841,8 @@ test('renderPrompt includes history when provided ' +
         'prompt contains history token'
     )
     t.ok(
-        tokenIdx > ticketIdx,
-        'history token appears after ticket'
+        tokenIdx > ticketEnd,
+        'history token appears after the ticket body'
     )
     t.ok(
         tokenIdx < instructionsIdx,
@@ -1866,6 +1866,19 @@ test('renderPrompt with empty history equals no history ' +
         noHistory,
         emptyHistory,
         'empty history string produces same prompt as no history'
+    )
+
+    // History adds exactly its own text plus one blank line, so the
+    // no-history prompt cannot carry an empty header or extra lines
+    const history = 'HIST-' + randomUUID()
+    const withHistory = renderPrompt('spec body', ticket, {
+        testCmd:'npm test',
+        history,
+    })
+    t.equal(
+        withHistory.replace(history + '\n\n', ''),
+        noHistory,
+        'history adds exactly its text and one blank line'
     )
 })
 
