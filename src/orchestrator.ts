@@ -6,6 +6,7 @@ import {
     writeFileSync,
     unlinkSync,
     readdirSync,
+    statSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
@@ -50,7 +51,21 @@ import {
     type TicketRef,
 } from './display.js'
 import { runTestCmd } from './testcmd.js'
-import { NOTES_PATH } from './learnings.js'
+import {
+    NOTES_PATH,
+    LOG_TAIL_LINES,
+    appendEntry,
+    collectNotes,
+    ensureNotesIgnored,
+    learningsPathFor,
+    readEntries,
+    renderEntry,
+    renderHistory,
+    selectHistory,
+    tailLines,
+    type AgentRunRecord,
+    type EntryInput,
+} from './learnings.js'
 
 export type Ticket = {
     num:number
@@ -1648,19 +1663,34 @@ type TicketOutcome =
         kind:'no-commits'
         worktreePath:string
         branchName:string
+        // null only for the placeholder outcome in
+        // runTicketAttempts, which no agent produced
+        agentRun:AgentRunRecord|null
     }
     | {
+        // No agent ran, so there is no agent record
         kind:'failed'
-        reason:'exit'|'tests'|'install'
+        reason:'install'
         branchName:string
         exitCode:number
         completedItems:string[]
+    }
+    | {
+        kind:'failed'
+        reason:'exit'|'tests'
+        branchName:string
+        // A placeholder 1 for 'tests'; the agent's real exit
+        // code is agentRun.exitCode
+        exitCode:number
+        completedItems:string[]
+        agentRun:AgentRunRecord
     }
     | {
         kind:'ready'
         worktreePath:string
         branchName:string
         completedItems:string[]
+        agentRun:AgentRunRecord
     }
 
 type TicketAttemptOpts = {
@@ -1678,7 +1708,35 @@ type TicketAttemptOpts = {
     installCmd?:string
     maxTurns?:number
     effort?:EffortLevel
+    learningsPath:string
     d:Display
+}
+
+// The ticket's own earlier attempts and its direct blockers'
+// last successful runs, rendered for the prompt. Learnings are
+// advisory, so an unreadable log means no history, not a failure.
+function buildHistory (
+    learningsPath:string,
+    ticket:Ticket,
+    d:Display
+):string {
+    try {
+        return renderHistory(selectHistory(
+            readEntries(learningsPath),
+            {
+                key:ticketKey(ticket.feature, ticket.num),
+                blockerKeys:ticket.blockers.map(b => {
+                    return ticketKey(ticket.feature, b)
+                }),
+            }
+        ))
+    } catch (err) {
+        d.log(
+            `  ${ticket.filename}: could not read ` +
+            `learnings: ${formatErrorMessage(err)}`
+        )
+        return ''
+    }
 }
 
 // One attempt at a ticket: a fresh worktree, one agent run,
@@ -1729,6 +1787,16 @@ async function runTicketAttempt (
         }
     }
 
+    // Keeps the agent's notes out of any `git add -A`.
+    try {
+        ensureNotesIgnored(worktree.worktreePath)
+    } catch (err) {
+        d.log(
+            `  ${ticket.filename}: could not set up the notes ` +
+            `directory: ${formatErrorMessage(err)}`
+        )
+    }
+
     const ticketSpec = lookupSpec(
         opts.specBodies, opts.specBody, ticket.feature
     )
@@ -1738,6 +1806,11 @@ async function runTicketAttempt (
             {
                 testCmd:opts.testCmd,
                 installCmd:opts.installCmd,
+                // Rebuilt every attempt, so a retry sees the
+                // entry its previous attempt just wrote
+                history:buildHistory(
+                    opts.learningsPath, ticket, d
+                ),
             }
         ),
         agentCmd:opts.agentCmd,
@@ -1752,6 +1825,24 @@ async function runTicketAttempt (
         effort:opts.effort,
         onLine:(line) => d.log(line),
     })
+
+    // Collect before anything commits or removes the worktree,
+    // so the notes never reach the timeout auto-commit.
+    let notes:string|null = null
+    try {
+        notes = collectNotes(worktree.worktreePath)
+    } catch (err) {
+        d.log(
+            `  ${ticket.filename}: could not collect ` +
+            `notes: ${formatErrorMessage(err)}`
+        )
+    }
+    const agentRun:AgentRunRecord = {
+        exitCode:agentResult.exitCode,
+        completedItems:agentResult.completedItems,
+        timedOut:agentResult.timedOut,
+        notes,
+    }
 
     // A timeout kill is not the agent reporting failure.
     // Keep whatever it committed and let the test gate and
@@ -1773,6 +1864,7 @@ async function runTicketAttempt (
             branchName:worktree.branchName,
             exitCode:agentResult.exitCode,
             completedItems:agentResult.completedItems,
+            agentRun,
         }
     }
 
@@ -1798,6 +1890,7 @@ async function runTicketAttempt (
             kind:'no-commits',
             worktreePath:worktree.worktreePath,
             branchName:worktree.branchName,
+            agentRun,
         }
     }
 
@@ -1821,6 +1914,7 @@ async function runTicketAttempt (
             branchName:worktree.branchName,
             exitCode:1,
             completedItems:agentResult.completedItems,
+            agentRun,
         }
     }
 
@@ -1829,6 +1923,121 @@ async function runTicketAttempt (
         worktreePath:worktree.worktreePath,
         branchName:worktree.branchName,
         completedItems:agentResult.completedItems,
+        agentRun,
+    }
+}
+
+// The last lines of a log for a learnings entry; a missing or
+// unreadable log gives an empty tail.
+function readLogTail (path:string):string {
+    try {
+        return tailLines(readFileSync(path, 'utf8'), LOG_TAIL_LINES)
+    } catch {
+        return ''
+    }
+}
+
+// Maps one attempt's outcome to a learnings entry, or null when
+// there is nothing to record. The exit code always comes from the
+// agent record, never the outcome's top-level `exitCode`, which is
+// a progress.md placeholder.
+function attemptEntry (opts:{
+    logsDir:string
+    ticket:Ticket
+    attempt:number
+    effort?:EffortLevel
+    outcome:TicketOutcome
+}):EntryInput|null {
+    const { logsDir, ticket, attempt, effort, outcome } = opts
+    const base = {
+        key:ticketKey(ticket.feature, ticket.num),
+        label:ticketLabel(ticket),
+        attempt,
+        now:new Date(),
+    }
+    const logFor = (ext:string) => {
+        const path = attemptLogPath(logsDir, ticket, attempt, ext)
+        return { logName:basename(path), logTail:readLogTail(path) }
+    }
+
+    switch (outcome.kind) {
+        case 'ready':
+            return {
+                ...base,
+                outcome:'done',
+                run:outcome.agentRun,
+                effort,
+            }
+        case 'failed':
+            switch (outcome.reason) {
+                case 'exit':
+                    return {
+                        ...base,
+                        outcome:'exit',
+                        run:outcome.agentRun,
+                        effort,
+                    }
+                case 'tests':
+                    return {
+                        ...base,
+                        outcome:'tests',
+                        run:outcome.agentRun,
+                        effort,
+                        ...logFor('.test.log'),
+                    }
+                case 'install':
+                    return {
+                        ...base,
+                        outcome:'install',
+                        ...logFor('.install.log'),
+                    }
+                default: {
+                    const _exhaustive:never = outcome
+                    return _exhaustive
+                }
+            }
+        case 'no-commits':
+            if (!outcome.agentRun) return null
+            return {
+                ...base,
+                outcome:'no-commits',
+                run:outcome.agentRun,
+                effort,
+            }
+        case 'error':
+        case 'worktree-error':
+            return {
+                ...base,
+                outcome:'error',
+                error:formatErrorMessage(outcome.error),
+            }
+        default: {
+            const _exhaustive:never = outcome
+            return _exhaustive
+        }
+    }
+}
+
+// Appends one attempt's entry to the learnings log. Learnings are
+// advisory: a failure is reported and never fails the ticket.
+function recordAttempt (opts:{
+    learningsPath:string
+    logsDir:string
+    ticket:Ticket
+    attempt:number
+    effort?:EffortLevel
+    outcome:TicketOutcome
+    d:Display
+}):void {
+    try {
+        const entry = attemptEntry(opts)
+        if (!entry) return
+        appendEntry(opts.learningsPath, renderEntry(entry))
+    } catch (err) {
+        opts.d.log(
+            `  ${opts.ticket.filename}: could not record ` +
+            `learnings: ${formatErrorMessage(err)}`
+        )
     }
 }
 
@@ -1844,7 +2053,10 @@ async function runTicketAttempts (
     const isKnown = providerName in EFFORT_LADDERS
     let effort = opts.effort
     let outcome:TicketOutcome = {
-        kind:'no-commits', worktreePath:'', branchName:'',
+        kind:'no-commits',
+        worktreePath:'',
+        branchName:'',
+        agentRun:null,
     }
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -1869,6 +2081,17 @@ async function runTicketAttempts (
             )
             if (delay > 0) await sleep(delay * 1000)
         }
+        const record = (o:TicketOutcome):void => {
+            recordAttempt({
+                learningsPath:opts.learningsPath,
+                logsDir:opts.logsDir,
+                ticket,
+                attempt,
+                effort,
+                outcome:o,
+                d,
+            })
+        }
         try {
             outcome = await runTicketAttempt({
                 ...opts, attempt, effort,
@@ -1878,8 +2101,11 @@ async function runTicketAttempts (
                 `  ${ticket.filename}: attempt ${attempt} ` +
                 `threw: ${formatErrorMessage(error)}`
             )
-            return { kind:'error', error }
+            const errorOutcome:TicketOutcome = { kind:'error', error }
+            record(errorOutcome)
+            return errorOutcome
         }
+        record(outcome)
         if (outcome.kind === 'ready') {
             // The agent is no longer running, but the branch is
             // only merged once the whole wave has finished.
@@ -1900,6 +2126,16 @@ function failureNote (reason:'exit'|'tests'|'install'):string {
     return 'failed'
 }
 
+// A path that git can stage as a file: a directory or other bad
+// path must not make `git add` fail and take a commit down with it.
+function isRegularFile (path:string):boolean {
+    try {
+        return statSync(path).isFile()
+    } catch {
+        return false
+    }
+}
+
 // Wraps writeProgress + commitProgress so callers do not each
 // need to guard against a commit failure (e.g. a git lock held
 // by a concurrent process) crashing the run.
@@ -1911,8 +2147,12 @@ async function saveProgress (
     d:Display
 ):Promise<void> {
     writeProgress(progressPath, progress)
+    const learningsPath = learningsPathFor(progressPath)
+    const paths = isRegularFile(learningsPath) ?
+        [progressPath, learningsPath] :
+        progressPath
     try {
-        await commitProgress(repoRoot, progressPath, message)
+        await commitProgress(repoRoot, paths, message)
     } catch (err) {
         d.log(
             '  Failed to commit progress: ' +
@@ -2408,11 +2648,37 @@ export async function runWavesIsolated (opts:{
                 installCmd:opts.installCmd,
                 maxTurns:opts.maxTurns,
                 effort:opts.effort,
+                learningsPath:learningsPathFor(
+                    tracker.pathFor(t.feature)
+                ),
                 retries,
                 retryDelay,
                 d,
             })
         )
+
+        // Entries were appended while the pool ran, but not every
+        // outcome below saves progress before merging. Commit them
+        // now, so the base tree has no modified tracked files when
+        // mergeWave touches it.
+        const touched = new Set(ready.map(t => {
+            return learningsPathFor(tracker.pathFor(t.feature))
+        }))
+        for (const path of touched) {
+            if (!isRegularFile(path)) continue
+            try {
+                await commitProgress(
+                    repoRoot, path,
+                    'nightralph: record attempt learnings'
+                )
+            } catch (err) {
+                d.log(
+                    '  Failed to commit learnings: ' +
+                    formatErrorMessage(err)
+                )
+            }
+        }
+
         // runTicketAttempts never rejects (a throw inside an
         // attempt becomes an 'error' outcome), so every
         // result here is fulfilled.
@@ -2703,6 +2969,30 @@ export async function runWavesIsolated (opts:{
                             exitCode:0,
                             done:false,
                         })
+                        // saveProgress below commits this entry
+                        try {
+                            appendEntry(
+                                learningsPathFor(
+                                    tracker.pathFor(ticket.feature)
+                                ),
+                                renderEntry({
+                                    outcome:'merge',
+                                    key:ticketKey(
+                                        ticket.feature, ticket.num
+                                    ),
+                                    label:ticketLabel(ticket),
+                                    attempt:0,
+                                    now:new Date(),
+                                    stderr:branchResult.stderr ?? '',
+                                })
+                            )
+                        } catch (err) {
+                            d.log(
+                                `  ${ticket.filename}: could not ` +
+                                'record learnings: ' +
+                                formatErrorMessage(err)
+                            )
+                        }
                         await saveProgress(
                             repoRoot,
                             tracker.pathFor(ticket.feature),
