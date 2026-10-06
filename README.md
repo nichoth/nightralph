@@ -157,7 +157,7 @@ Flags:
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
 | `<provider>` | yes | -- | Agent harness to spawn (e.g. `claude`, `codex`, `pi`) |
-| `[turns]` | no | -- | Max agentic turns per ticket (positional shorthand for `--max-turns`) |
+| `[turns]` | no | -- | Max agentic turns per agent run (positional shorthand for `--max-turns`) |
 | `-m`, `--model` | no | -- | Model flag passed to the agent |
 | `--spec <name>` | no | auto | Feature name (resolves `.scratch/<name>/`) |
 | `--dry-run` | no | -- | Show wave order and prompt without running |
@@ -165,7 +165,7 @@ Flags:
 | `--timeout` | no | `3600` | Kill the agent after N seconds. A killed agent is not a failure: its work is kept (see Notes) |
 | `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable. Shares the agent's `--timeout`. Dependencies are already installed by `--install-cmd` |
 | `--install-cmd <cmd>` | no | auto | Run in each fresh worktree before the agent starts, and again after a merge-conflict rebase; non-zero exit fails the attempt (it is retried like any other failure). Auto-detects from the lockfile: `pnpm-lock.yaml` -> `pnpm install --prefer-offline --frozen-lockfile`, `package-lock.json` -> `npm ci --prefer-offline --no-audit --no-fund`, a `package.json` with no lockfile -> `npm install --prefer-offline --no-audit --no-fund --no-package-lock`, no `package.json` -> no install. Pass `""` to disable. Shares the agent's `--timeout`. Output goes to `<ticket>.install.log` |
-| `--max-turns <n>` | no | -- | Max agentic turns per ticket. Forwarded verbatim as `--max-turns <n>` to the provider CLI. Only `claude` accepts it; `codex` and `pi` reject it as an unknown option and the agent exits immediately. Applies to every agent spawn, including a re-spawn after a merge conflict. When omitted, `claude` applies no turn limit, so `--timeout` is the only cap. Reaching the limit is an error exit, so the ticket is recorded as failed |
+| `--max-turns <n>` | no | -- | Max agentic turns per agent run. Forwarded as `--max-turns <n>` to `claude` only; for `codex` and `pi` the flag is skipped with a warning and the agent runs with no turn limit. The limit is per spawn, not a total for the ticket: every retry and every re-spawn after a merge conflict starts with a fresh budget of `n` turns, so with `--retries 3` one ticket can use up to 4 x `n`. When omitted (or `0`), no limit is passed, so `--timeout` is the only cap. Takes precedence over the `[turns]` positional when both are given. Reaching the limit is an error exit, so the attempt fails and is retried like any other failure |
 | `--effort <level>` | no | -- | Starting effort/reasoning level. Each provider has its own ladder: `claude` supports `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--effort`); `codex` supports `low`, `medium`, `high` (forwarded as `-c model_reasoning_effort=<level>`); `pi` supports `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--thinking`). Omitted = provider default. Each retry steps up from here (see `--retries`) |
 | `--retries <n>` | no | `3` | Extra attempts per ticket after a failed run. Each retry starts from a fresh worktree and raises the effort level one rung (see Notes). `0` disables retries |
 | `--retry-delay <n>` | no | `30` | Seconds to wait before the first retry; doubles each further retry (30s, 60s, 120s, ...). `0` disables the wait |
