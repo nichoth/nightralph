@@ -7,6 +7,7 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
     parseTicketFilename,
     parseStatus,
@@ -41,6 +42,7 @@ import {
     type Ticket,
     type EffortLevel,
 } from '../src/orchestrator.js'
+import { NOTES_PATH } from '../src/learnings.js'
 
 // -- helpers --
 
@@ -1816,6 +1818,69 @@ test('renderPrompt asks for a commit per checklist item',
             'prompt asks for per-item commits'
         )
     })
+
+test('renderPrompt includes history when provided ' +
+    '(AC4.1)', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const token = randomUUID()
+    const history = `Some history\ncontaining ${token}`
+    const prompt = renderPrompt('spec body', ticket, {
+        testCmd:'npm test',
+        history,
+    })
+    const tokenIdx = prompt.indexOf(token)
+    const ticketIdx = prompt.indexOf(ticket.filename)
+    const instructionsIdx = prompt.indexOf(
+        'AGENT INSTRUCTIONS'
+    )
+    t.ok(
+        tokenIdx >= 0,
+        'prompt contains history token'
+    )
+    t.ok(
+        tokenIdx > ticketIdx,
+        'history token appears after ticket'
+    )
+    t.ok(
+        tokenIdx < instructionsIdx,
+        'history token appears before AGENT INSTRUCTIONS'
+    )
+})
+
+test('renderPrompt with empty history equals no history ' +
+    '(AC4.2)', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const noHistory = renderPrompt('spec body', ticket,
+        { testCmd:'npm test' })
+    const emptyHistory = renderPrompt('spec body', ticket, {
+        testCmd:'npm test',
+        history:'',
+    })
+    t.equal(
+        noHistory,
+        emptyHistory,
+        'empty history string produces same prompt as no history'
+    )
+})
+
+test('renderPrompt includes NOTES_PATH', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderPrompt('spec body', ticket,
+        { testCmd:'npm test' })
+    t.ok(
+        prompt.includes(NOTES_PATH),
+        'prompt mentions NOTES_PATH'
+    )
+})
 
 test('renderMergePrompt keeps both sides of doc conflicts',
     t => {

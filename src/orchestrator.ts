@@ -50,6 +50,7 @@ import {
     type TicketRef,
 } from './display.js'
 import { runTestCmd } from './testcmd.js'
+import { NOTES_PATH } from './learnings.js'
 
 export type Ticket = {
     num:number
@@ -468,10 +469,19 @@ function installRule (installCmd?:string):string[] {
     ]
 }
 
+function historyBlock (history?:string):string[] {
+    if (!history) return []
+    return [history, '']
+}
+
 export function renderPrompt (
     specBody:string,
     ticket:Ticket,
-    opts:{ testCmd:string; installCmd?:string }
+    opts:{
+        testCmd:string
+        installCmd?:string
+        history?:string
+    }
 ):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -481,6 +491,7 @@ export function renderPrompt (
         ticket.filename,
         ticket.body,
         '',
+        ...historyBlock(opts.history),
         '---- AGENT INSTRUCTIONS ----',
         'You are an autonomous coding agent. ' +
             'Implement the ticket using /tdd.',
@@ -503,7 +514,11 @@ export function renderPrompt (
             'seams named in the spec\'s Testing ' +
             'Decisions section, then write only ' +
             'enough code to make it pass, then ' +
-            'refactor.',
+            'refactor. For a checklist item that is ' +
+            'pure scaffolding, config, or docs (where ' +
+            'a test adds no value), skip test-first ' +
+            'and record that decision in your notes ' +
+            'file.',
         '- While iterating, run only the tests ' +
             'relevant to what you changed. Run ' +
             `\`${opts.testCmd}\` in full once, as the ` +
@@ -519,12 +534,23 @@ export function renderPrompt (
             'result. Only report a checklist item done ' +
             'when its real tests genuinely pass. If an ' +
             'item cannot be completed honestly, leave ' +
-            'it unchecked and say what blocked you.',
+            'it unchecked and record what blocked you ' +
+            'in your notes file.',
         '- Do NOT read or modify files outside ' +
             'your current directory (the worktree).',
         '- Do NOT run git push.',
         '- Commit after each checklist item, and make ' +
-            'sure everything is committed when finished.',
+            'sure everything is committed when finished, ' +
+            'except your notes file.',
+        `- Keep notes for this attempt in \`${NOTES_PATH}\` ` +
+            '(create the directory). Update it after each ' +
+            'checklist item and as soon as you hit a ' +
+            'blocker, not only at the end. Record what you ' +
+            'implemented, files changed, how you read any ' +
+            'vague acceptance criteria, what blocked you, and ' +
+            'anything the next attempt at this ticket should ' +
+            'know. Never commit, git add, or delete this ' +
+            'file; the orchestrator collects it.',
         '- After completing each checklist item in the ' +
             'ticket, print a line: [x] <item text> ' +
             '(matching the checklist text exactly).',
@@ -538,7 +564,10 @@ export function renderPrompt (
             'Do NOT add ticket-specific details or ' +
             'temporary debugging notes. Only write ' +
             'when you have knowledge that would help ' +
-            'future work in that directory.',
+            'future work in that directory. Reusable ' +
+            'patterns go in AGENTS.md; anything ' +
+            'specific to this ticket goes in your ' +
+            'notes file.',
         '',
     ].join('\n')
 }
