@@ -26,6 +26,8 @@ export type LearningEntry = {
     attempt:number
     outcome:LearningOutcome
     timedOut:boolean
+    // Everything after the sentinel line, trimmed, without
+    // the trailing `---` separator
     body:string
 }
 
@@ -36,6 +38,8 @@ type EntryBase = {
     now:Date
 }
 
+// What one agent process did. Phase 4 attaches this to every attempt
+// outcome where an agent actually ran.
 export type AgentRunRecord = {
     exitCode:number
     completedItems:string[]
@@ -135,7 +139,10 @@ export function isLearningOutcome (
 export function renderEntry (input:EntryInput):string {
     const encodedKey = encodeKey(input.key)
 
-    const timedOutStr = 'run' in input && input.run.timedOut ?
+    const hasRun = 'run' in input
+    const timedOut = hasRun && input.run.timedOut
+
+    const timedOutStr = timedOut ?
         ' timedout=true' :
         ''
 
@@ -179,7 +186,7 @@ export function renderEntry (input:EntryInput):string {
         }
     }
 
-    const timedOutPrefix = 'run' in input && input.run.timedOut ?
+    const timedOutPrefix = timedOut ?
         'timed out, then ' :
         ''
 
@@ -189,55 +196,67 @@ export function renderEntry (input:EntryInput):string {
 
     let body:string
 
-    if (input.outcome === 'done' || input.outcome === 'exit' ||
-        input.outcome === 'no-commits') {
-        const run = input.run
-        const summary = renderAgentSummary(run, input.effort)
-        const notesSection = renderNotesSection(run.notes)
-        body = summary + '\n\n' + notesSection
-    } else if (input.outcome === 'tests') {
-        const logTail = sanitize(input.logTail)
-        const fenced = fence(logTail)
-        const summary = renderAgentSummary(
-            input.run,
-            input.effort
-        )
-        const notesSection = renderNotesSection(input.run.notes)
+    switch (input.outcome) {
+        case 'done':
+        case 'exit':
+        case 'no-commits': {
+            const run = input.run
+            const summary = renderAgentSummary(run, input.effort)
+            const notesSection = renderNotesSection(run.notes)
+            body = summary + '\n\n' + notesSection
+            break
+        }
+        case 'tests': {
+            const logTail = sanitize(input.logTail)
+            const fenced = fence(logTail)
+            const summary = renderAgentSummary(
+                input.run,
+                input.effort
+            )
+            const notesSection = renderNotesSection(input.run.notes)
 
-        const lastNLines =
-            `Last ${LOG_TAIL_LINES} lines of ` +
-            `\`${sanitize(input.logName)}\`:`
+            const lastNLines =
+                `Last ${LOG_TAIL_LINES} lines of ` +
+                `\`${sanitize(input.logName)}\`:`
 
-        body =
-            summary + '\n\n' +
-            'Test gate failed.\n' +
-            `${lastNLines}\n` +
-            `${fenced}\n\n` +
-            notesSection
-    } else if (input.outcome === 'install') {
-        const logTail = sanitize(input.logTail)
-        const fenced = fence(logTail)
+            body =
+                summary + '\n\n' +
+                'Test gate failed.\n' +
+                `${lastNLines}\n` +
+                `${fenced}\n\n` +
+                notesSection
+            break
+        }
+        case 'install': {
+            const logTail = sanitize(input.logTail)
+            const fenced = fence(logTail)
 
-        const lastNLines =
-            `Last ${LOG_TAIL_LINES} lines of ` +
-            `\`${sanitize(input.logName)}\`:`
+            const lastNLines =
+                `Last ${LOG_TAIL_LINES} lines of ` +
+                `\`${sanitize(input.logName)}\`:`
 
-        body =
-            'Install failed.\n' +
-            `${lastNLines}\n` +
-            fenced
-    } else if (input.outcome === 'error') {
-        const errorText = sanitize(input.error)
-        const fenced = fence(errorText)
-        body = fenced
-    } else if (input.outcome === 'merge') {
-        const stderrText = sanitize(input.stderr)
-        const fenced = fence(stderrText)
-        body = `Merge failed.\n${fenced}`
-    } else {
-        // Exhaustiveness check: if we reach here, input.outcome
-        // is not one of the handled cases
-        throw new Error(`Unknown outcome: ${input.outcome}`)
+            body =
+                'Install failed.\n' +
+                `${lastNLines}\n` +
+                fenced
+            break
+        }
+        case 'error': {
+            const errorText = sanitize(input.error)
+            const fenced = fence(errorText)
+            body = fenced
+            break
+        }
+        case 'merge': {
+            const stderrText = sanitize(input.stderr)
+            const fenced = fence(stderrText)
+            body = `Merge failed.\n${fenced}`
+            break
+        }
+        default: {
+            const _exhaustive:never = input.outcome
+            body = _exhaustive
+        }
     }
 
     return `${sentinel}\n${heading}\n\n${body}\n\n---\n`
@@ -321,7 +340,6 @@ function parseSentinel (
 
     if (!/^\d+$/.test(attemptStr)) return null
     const attempt = Number(attemptStr)
-    if (attempt < 0) return null
 
     // Validate outcome
     const outcome = attrs.outcome
@@ -383,10 +401,10 @@ export function renderHistory (selection:HistorySelection):string {
     if (selection.own.length > 0) {
         parts.push('---- PREVIOUS ATTEMPTS AT THIS TICKET ----')
         parts.push(selection.own.map(e => capEntry(e)).join('\n\n'))
+        parts.push('')
     }
 
     if (selection.blockers.length > 0) {
-        parts.push('')
         parts.push('---- WHAT THE BLOCKING TICKETS DID ----')
         parts.push(selection.blockers.map(e => capEntry(e)).join('\n\n'))
     }

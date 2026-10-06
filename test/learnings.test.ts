@@ -58,9 +58,9 @@ test('AC1.1: entries round-trip through render and parse', t => {
             outcome:'tests',
             run:{
                 exitCode:1,
-                completedItems:['test item'],
+                completedItems:[randomUUID()],
                 timedOut:false,
-                notes:'Test notes',
+                notes:randomUUID(),
             },
             logName:'npm-test.log',
             logTail:'line 1\nline 2\nline 3',
@@ -142,6 +142,19 @@ test('AC1.1: entries round-trip through render and parse', t => {
         errorEntry && errorEntry.body.includes(token),
         'error entry should preserve unique content'
     )
+
+    // Verify tests entry contains both item and notes tokens
+    const testsEntry = parsed.find(e => e.outcome === 'tests')
+    t.ok(
+        testsEntry &&
+        testsEntry.body.includes(entries[2].run.completedItems[0]),
+        'tests entry body should contain agent summary ' +
+        'with completed item token'
+    )
+    t.ok(
+        testsEntry && testsEntry.body.includes(entries[2].run.notes),
+        'tests entry body should contain notes section with token'
+    )
 })
 
 // -- AC1.2: Entries with sentinel prefix in notes --
@@ -188,7 +201,7 @@ test('AC1.2: notes containing sentinel prefix parse as one entry', t => {
     )
 })
 
-test('AC1.2: key with space and = encodes and decodes correctly', t => {
+test('AC1.1/I1: key with space and = encodes and decodes correctly', t => {
     const entries:EntryInput[] = [
         {
             key:'my feature:1=test',
@@ -277,9 +290,9 @@ unknown outcome
     t.equal(parsed[0].key, 'valid:2', 'should be the valid entry')
 })
 
-// -- AC1.2+: CRLF line endings --
+// -- Parsing robustness: CRLF line endings --
 
-test('AC1.2+: CRLF line endings are handled', t => {
+test('Parsing robustness: CRLF line endings are handled', t => {
     const token = randomUUID()
     const entry:EntryInput = {
         key:'test:crlf',
@@ -305,6 +318,200 @@ test('AC1.2+: CRLF line endings are handled', t => {
     t.ok(
         parsed[0].body.includes(token),
         'token should be preserved with CRLF'
+    )
+})
+
+// -- AC1.2+: Sanitization of free-text fields --
+
+test('AC1.2+: logTail with sentinel is sanitized', t => {
+    const token = randomUUID()
+    const sentinel =
+        '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
+        'outcome=done -->'
+    const entry:EntryInput = {
+        key:'test:1',
+        label:'test/01',
+        attempt:1,
+        now:new Date(),
+        outcome:'tests',
+        run:{
+            exitCode:1,
+            completedItems:[],
+            timedOut:false,
+            notes:null,
+        },
+        logName:'test.log',
+        logTail:`some output\n${sentinel}\n${token}`,
+    }
+
+    const rendered = renderEntry(entry)
+    const parsed = parseEntries(rendered)
+
+    t.equal(parsed.length, 1, 'should parse single entry')
+    t.ok(
+        parsed[0].body.includes(token),
+        'logTail token should be preserved in body'
+    )
+    t.ok(
+        parsed[0].body.includes('<!-- nightralph-entry'),
+        'sentinel in logTail should be sanitized'
+    )
+})
+
+test('AC1.2+: error field with sentinel is sanitized', t => {
+    const token = randomUUID()
+    const sentinel =
+        '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
+        'outcome=done -->'
+    const entry:EntryInput = {
+        key:'test:2',
+        label:'test/02',
+        attempt:1,
+        now:new Date(),
+        outcome:'error',
+        error:`error occurred\n${sentinel}\n${token}`,
+    }
+
+    const rendered = renderEntry(entry)
+    const parsed = parseEntries(rendered)
+
+    t.equal(parsed.length, 1, 'should parse single entry')
+    t.ok(
+        parsed[0].body.includes(token),
+        'error token should be preserved in body'
+    )
+    t.ok(
+        parsed[0].body.includes('<!-- nightralph-entry'),
+        'sentinel in error should be sanitized'
+    )
+})
+
+test('AC1.2+: stderr field with sentinel is sanitized', t => {
+    const token = randomUUID()
+    const sentinel =
+        '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
+        'outcome=done -->'
+    const entry:EntryInput = {
+        key:'test:3',
+        label:'test/03',
+        attempt:0,
+        now:new Date(),
+        outcome:'merge',
+        stderr:`conflict here\n${sentinel}\n${token}`,
+    }
+
+    const rendered = renderEntry(entry)
+    const parsed = parseEntries(rendered)
+
+    t.equal(parsed.length, 1, 'should parse single entry')
+    t.ok(
+        parsed[0].body.includes(token),
+        'stderr token should be preserved in body'
+    )
+    t.ok(
+        parsed[0].body.includes('<!-- nightralph-entry'),
+        'sentinel in stderr should be sanitized'
+    )
+})
+
+test('AC1.2+: completedItems with sentinel are sanitized', t => {
+    const token = randomUUID()
+    const sentinel =
+        '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
+        'outcome=done -->'
+    const entry:EntryInput = {
+        key:'test:4',
+        label:'test/04',
+        attempt:1,
+        now:new Date(),
+        outcome:'done',
+        run:{
+            exitCode:0,
+            completedItems:[`item\n${sentinel}\n${token}`],
+            timedOut:false,
+            notes:null,
+        },
+    }
+
+    const rendered = renderEntry(entry)
+    const parsed = parseEntries(rendered)
+
+    t.equal(parsed.length, 1, 'should parse single entry')
+    t.ok(
+        parsed[0].body.includes(token),
+        'completedItems token should be preserved'
+    )
+    t.ok(
+        parsed[0].body.includes('<!-- nightralph-entry'),
+        'sentinel in completedItems should be sanitized'
+    )
+})
+
+test('AC1.2+: variable-length code fence preserved', t => {
+    const token = randomUUID()
+    const logTail = (
+        'normal line\n' +
+        '````\n' +
+        'backtick run of length 4\n' +
+        '````\n' +
+        `${token}`
+    )
+    const entry:EntryInput = {
+        key:'test:5',
+        label:'test/05',
+        attempt:1,
+        now:new Date(),
+        outcome:'tests',
+        run:{
+            exitCode:1,
+            completedItems:[],
+            timedOut:false,
+            notes:null,
+        },
+        logName:'test.log',
+        logTail,
+    }
+
+    const rendered = renderEntry(entry)
+    const parsed = parseEntries(rendered)
+
+    t.equal(
+        parsed.length,
+        1,
+        'should parse as single entry with 4-backtick content'
+    )
+    t.ok(
+        parsed[0].body.includes(token),
+        'token after backtick fence should be preserved'
+    )
+})
+
+// -- Mi2: Notes ending with --- separator --
+
+test('Mi2: notes ending with --- plus token preserves token', t => {
+    const token = randomUUID()
+    const entry:EntryInput = {
+        key:'test:6',
+        label:'test/06',
+        attempt:1,
+        now:new Date(),
+        outcome:'done',
+        run:{
+            exitCode:0,
+            completedItems:[],
+            timedOut:false,
+            notes:`Some notes ${token}---`,
+        },
+    }
+
+    const rendered = renderEntry(entry)
+    const parsed = parseEntries(rendered)
+
+    t.equal(parsed.length, 1, 'should parse entry')
+    t.ok(
+        parsed[0].body.includes(token),
+        'body should contain token even when notes end ' +
+        'with ---'
     )
 })
 
@@ -540,11 +747,18 @@ test('AC2.3: excludes unrelated entries and transitive blockers', t => {
             timedOut:false,
             body:'direct blocker succeeded',
         },
+        {
+            key:'direct-blocker:1',
+            attempt:3,
+            outcome:'exit',
+            timedOut:false,
+            body:'direct blocker failed again',
+        },
     ]
 
     const selection = selectHistory(entries, {
         key:'feat:4',
-        blockerKeys:['direct-blocker:1'],
+        blockerKeys:['blocker:1', 'direct-blocker:1'],
     })
 
     t.equal(
