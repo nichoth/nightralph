@@ -15,6 +15,7 @@ TESTS=(
     orchestrator
     worktree
     progress
+    learnings
     merge
     display
     testcmd
