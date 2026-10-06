@@ -8,7 +8,9 @@ import {
     rmSync,
     writeFileSync,
     existsSync,
+    lstatSync,
     mkdirSync,
+    readFileSync,
 } from 'node:fs'
 import { join, dirname, basename } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -1044,8 +1046,12 @@ test(
             const notesPath = join(dir, NOTES_PATH)
             const notesDir = dirname(notesPath)
 
-            // Create empty .nightralph dir
-            mkdirSync(notesDir, { recursive:true })
+            // The real setup: the dir holds only its .gitignore
+            ensureNotesIgnored(dir)
+            t.ok(
+                existsSync(join(notesDir, '.gitignore')),
+                'precondition: .gitignore exists'
+            )
 
             const result = collectNotes(dir)
 
@@ -1211,13 +1217,8 @@ test('AC3.3: ensureNotesIgnored creates .gitignore', t => {
         const exists = existsSync(gitignorePath)
         t.equal(exists, true, '.gitignore should exist')
 
-        const content = spawnSync(
-            'cat',
-            [gitignorePath],
-            { encoding:'utf8' }
-        )
         t.equal(
-            content.stdout,
+            readFileSync(gitignorePath, 'utf8'),
             '*\n',
             '.gitignore should contain "*\\n"'
         )
@@ -1231,14 +1232,11 @@ test(
     'empty template and core.excludesFile',
     t => {
         const { repoRoot, templateDir } = initTempRepo()
-        let worktreePath:string|undefined
-
         try {
             // Snapshot info/exclude before ensureNotesIgnored
             const excludePath = join(repoRoot, '.git', 'info', 'exclude')
             const excludeContentBefore = existsSync(excludePath) ?
-                spawnSync('cat', [excludePath], { encoding:'utf8' })
-                    .stdout :
+                readFileSync(excludePath, 'utf8') :
                 null
 
             // Call ensureNotesIgnored twice (should be idempotent)
@@ -1276,8 +1274,7 @@ test(
 
             // Verify info/exclude is unchanged
             const excludeContentAfter = existsSync(excludePath) ?
-                spawnSync('cat', [excludePath], { encoding:'utf8' })
-                    .stdout :
+                readFileSync(excludePath, 'utf8') :
                 null
             t.equal(
                 excludeContentAfter,
@@ -1286,21 +1283,15 @@ test(
             )
 
             // Verify it's not a symlink
-            const lsResult = spawnSync(
-                'test',
-                ['!', '-L', excludePath],
-                { encoding:'utf8' }
-            )
+            const isLink = existsSync(excludePath) &&
+                lstatSync(excludePath).isSymbolicLink()
             t.equal(
-                lsResult.status,
-                0,
+                isLink,
+                false,
                 'info/exclude must not be a symlink ' +
                 '(should be regular file or not exist)'
             )
         } finally {
-            if (worktreePath) {
-                rmSync(worktreePath, { recursive:true, force:true })
-            }
             rmSync(repoRoot, { recursive:true, force:true })
             rmSync(templateDir, { recursive:true, force:true })
         }
