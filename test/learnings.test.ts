@@ -361,6 +361,31 @@ test('AC1.2+: logTail with sentinel is sanitized', t => {
     )
 })
 
+test('AC1.2+: install logTail with sentinel is sanitized', t => {
+    const token = randomUUID()
+    const sentinel =
+        '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
+        'outcome=done -->'
+    const entry:EntryInput = {
+        key:'test:2',
+        label:'test/02',
+        attempt:1,
+        now:new Date(),
+        outcome:'install',
+        logName:'install.log',
+        logTail:`some output\n${sentinel}\n${token}`,
+    }
+
+    const parsed = parseEntries(renderEntry(entry))
+
+    t.equal(parsed.length, 1, 'should parse single entry')
+    t.equal(parsed[0].key, 'test:2', 'should keep the original key')
+    t.ok(
+        parsed[0].body.includes(token),
+        'install logTail token should be preserved in body'
+    )
+})
+
 test('AC1.2+: error field with sentinel is sanitized', t => {
     const token = randomUUID()
     const sentinel =
@@ -499,30 +524,20 @@ test('AC1.2+: variable-length code fence preserved', t => {
 
 // -- Mi2: Notes ending with --- separator --
 
-test('Mi2: notes ending with --- plus token preserves token', t => {
+test('parseEntries strips only a whole --- separator line', t => {
     const token = randomUUID()
-    const entry:EntryInput = {
-        key:'test:6',
-        label:'test/06',
-        attempt:1,
-        now:new Date(),
-        outcome:'done',
-        run:{
-            exitCode:0,
-            completedItems:[],
-            timedOut:false,
-            notes:`Some notes ${token}---`,
-        },
-    }
+    // No separator line, so a suffix-based strip would eat the
+    // trailing --- of the body text itself
+    const text =
+        '<!-- nightralph:entry ticket=p:2 attempt=1 outcome=done -->\n' +
+        `notes ${token}---\n`
 
-    const rendered = renderEntry(entry)
-    const parsed = parseEntries(rendered)
+    const parsed = parseEntries(text)
 
     t.equal(parsed.length, 1, 'should parse entry')
     t.ok(
-        parsed[0].body.includes(token),
-        'body should contain token even when notes end ' +
-        'with ---'
+        parsed[0].body.endsWith(`${token}---`),
+        'body should keep a trailing --- that is not its own line'
     )
 })
 
@@ -813,6 +828,20 @@ test('AC2.4: renderHistory of empty selection returns empty string', t => {
     })
 
     t.equal(result, '', 'should be empty string')
+})
+
+test('renderHistory with only blockers has no double blank line', t => {
+    const blocker:LearningEntry = {
+        key:'feat:1',
+        attempt:1,
+        outcome:'done',
+        timedOut:false,
+        body:randomUUID(),
+    }
+    const result = renderHistory({ own:[], blockers:[blocker] })
+
+    t.ok(result.includes(blocker.body), 'should include blocker body')
+    t.ok(!result.includes('\n\n\n'), 'should not have a double blank line')
 })
 
 // -- AC2.5: Truncation --
