@@ -25,6 +25,81 @@ orchestrator saw, plus anything the agent noticed -- so the next agent
 starts informed. Success is measured by the next agent's prompt
 containing that record.
 
+## Acceptance Criteria
+
+### attempt-learnings-design.AC1: Entries round-trip through the log
+- **attempt-learnings-design.AC1.1 Success:** An entry built by
+  `renderEntry` and read back by `parseEntries` keeps its ticket key,
+  attempt number, outcome, and timed-out flag.
+- **attempt-learnings-design.AC1.2 Edge:** Agent notes containing the
+  sentinel prefix still parse as exactly one entry.
+- **attempt-learnings-design.AC1.3 Success:** `tailLines(text, n)`
+  returns the last `n` lines, or the whole input when it has fewer.
+
+### attempt-learnings-design.AC2: History is bounded and relevant
+- **attempt-learnings-design.AC2.1 Success:** A ticket's own history
+  holds at most its `MAX_OWN_ENTRIES` most recent entries, oldest first.
+- **attempt-learnings-design.AC2.2 Success:** For each direct blocker,
+  the history holds only that blocker's most recent `done` entry.
+- **attempt-learnings-design.AC2.3 Failure:** Blocker failures,
+  unrelated tickets, the same ticket number in another feature, and
+  blockers of blockers are excluded.
+- **attempt-learnings-design.AC2.4 Edge:** An empty selection renders
+  as an empty string.
+- **attempt-learnings-design.AC2.5 Edge:** An entry longer than
+  `MAX_ENTRY_CHARS` renders within `MAX_ENTRY_CHARS` plus the
+  truncation marker.
+
+### attempt-learnings-design.AC3: Learnings IO
+- **attempt-learnings-design.AC3.1 Success:** `collectNotes` returns
+  the notes file's contents and removes the file.
+- **attempt-learnings-design.AC3.2 Edge:** `collectNotes` returns
+  `null` when there is no notes file.
+- **attempt-learnings-design.AC3.3 Success:** `ensureExcluded` run
+  twice leaves exactly one `.nightralph/` line in the repo's
+  `info/exclude`.
+- **attempt-learnings-design.AC3.4 Edge:** `readEntries` on a missing
+  file returns `[]`.
+
+### attempt-learnings-design.AC4: The prompt carries history
+- **attempt-learnings-design.AC4.1 Success:** A history string passed
+  to `renderPrompt` appears in the prompt.
+- **attempt-learnings-design.AC4.2 Edge:** A prompt rendered with no
+  history equals one rendered with `history:''`.
+- **attempt-learnings-design.AC4.3 Human:** The prompt tells the agent
+  to keep `.nightralph/notes.md` current and never commit it, splits
+  reusable patterns (AGENTS.md) from ticket notes, and allows skipping
+  test-first for pure scaffolding, config, or docs items.
+
+### attempt-learnings-design.AC5: Later agents see earlier attempts
+- **attempt-learnings-design.AC5.1 Success:** A retry's prompt
+  contains the previous attempt's agent notes.
+- **attempt-learnings-design.AC5.2 Success:** `learnings.md` records
+  one entry per attempt, in order, with outcomes matching what
+  happened.
+- **attempt-learnings-design.AC5.3 Success:** A downstream ticket's
+  prompt contains its direct blocker's agent notes.
+- **attempt-learnings-design.AC5.4 Success:** A second run's
+  first-attempt prompt contains notes written during the first run.
+
+### attempt-learnings-design.AC6: Failures are explained
+- **attempt-learnings-design.AC6.1 Success:** Notes written before a
+  timeout kill appear in that attempt's entry, and the entry is marked
+  timed out.
+- **attempt-learnings-design.AC6.2 Success:** A red test gate's entry
+  has outcome `tests` and contains the tail of the test log.
+- **attempt-learnings-design.AC6.3 Success:** An unrecovered merge
+  failure appends a `merge` entry for that ticket.
+
+### attempt-learnings-design.AC7: Repo hygiene and safety
+- **attempt-learnings-design.AC7.1 Success:** No commit on any ref
+  contains a `.nightralph/` path.
+- **attempt-learnings-design.AC7.2 Success:** `learnings.md` is
+  committed and the base working tree is clean when the run ends.
+- **attempt-learnings-design.AC7.3 Failure:** When `learnings.md`
+  cannot be read or written, the ticket still finishes `done` and
+  `progress.md` is still committed.
+
 ## Decisions
 
 1. **Who reads it.** An agent's prompt gets its own ticket's earlier
@@ -274,9 +349,68 @@ parsed entry, the log).
    the first run's token in attempt 1's prompt.
 6. **Advisory.** A directory occupies the `learnings.md` path; the
    ticket still finishes `done` and `progress.md` is still committed.
+7. **Merge failure.** Two tickets in one wave edit the same line, run
+   with `-X`; the stopped ticket gets a `merge` entry.
 
 `renderPrompt` unit tests: a passed history string appears in the
 prompt; a prompt with no history equals one with `history:''`.
+
+## Implementation Phases
+
+<!-- START_PHASE_1 -->
+### Phase 1: Learnings core (pure)
+
+Create `src/learnings.ts` with the pure functions and constants
+(`renderEntry`, `parseEntries`, `selectHistory`, `renderHistory`,
+`tailLines`, `MAX_OWN_ENTRIES`, `MAX_ENTRY_CHARS`, `LOG_TAIL_LINES`,
+`NOTES_PATH`). Add `test/learnings.test.ts` and register it in
+`scripts/test.sh`.
+
+Done when: unit tests pass for AC1.1-AC1.3 and AC2.1-AC2.5.
+<!-- END_PHASE_1 -->
+
+<!-- START_PHASE_2 -->
+### Phase 2: Learnings IO
+
+Add `readEntries`, `appendEntry`, `collectNotes`, and
+`ensureExcluded` to `src/learnings.ts`.
+
+Done when: tests pass for AC3.1-AC3.4.
+<!-- END_PHASE_2 -->
+
+<!-- START_PHASE_3 -->
+### Phase 3: Prompt changes
+
+`renderPrompt` takes optional `history` and carries the new notes,
+AGENTS.md-split, and TDD-exception instructions.
+
+Done when: tests pass for AC4.1-AC4.2; AC4.3 checked by reading the
+rendered prompt.
+<!-- END_PHASE_3 -->
+
+<!-- START_PHASE_4 -->
+### Phase 4: Orchestrator wiring
+
+Collect notes after each agent run, append an entry per attempt and
+per unrecovered merge failure, feed history into the prompt,
+`commitProgress` accepts a path list, `saveProgress` stages the log,
+`runWavesIsolated` calls `ensureExcluded`. New mock agents for the
+integration tests.
+
+Done when: integration tests pass for AC5.1-AC5.4, AC6.1-AC6.3, and
+AC7.1-AC7.3; the full suite and lint pass.
+<!-- END_PHASE_4 -->
+
+<!-- START_PHASE_5 -->
+### Phase 5: Docs
+
+AGENTS.md contracts and Project Structure entry for
+`src/learnings.ts`; updated `renderPrompt`, `TicketOutcome`,
+`commitProgress`, and `runWavesIsolated` entries; README note on
+`learnings.md`.
+
+Done when: docs reflect the shipped behavior. Verifies: None.
+<!-- END_PHASE_5 -->
 
 ## Out of scope
 
