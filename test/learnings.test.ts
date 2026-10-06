@@ -21,6 +21,8 @@ import {
 
 test('AC1.1: entries round-trip through render and parse', t => {
     const token = randomUUID()
+    const itemToken = randomUUID()
+    const notesToken = randomUUID()
 
     const entries:EntryInput[] = [
         {
@@ -58,9 +60,9 @@ test('AC1.1: entries round-trip through render and parse', t => {
             outcome:'tests',
             run:{
                 exitCode:1,
-                completedItems:[randomUUID()],
+                completedItems:[itemToken],
                 timedOut:false,
-                notes:randomUUID(),
+                notes:notesToken,
             },
             logName:'npm-test.log',
             logTail:'line 1\nline 2\nline 3',
@@ -146,13 +148,12 @@ test('AC1.1: entries round-trip through render and parse', t => {
     // Verify tests entry contains both item and notes tokens
     const testsEntry = parsed.find(e => e.outcome === 'tests')
     t.ok(
-        testsEntry &&
-        testsEntry.body.includes(entries[2].run.completedItems[0]),
+        testsEntry && testsEntry.body.includes(itemToken),
         'tests entry body should contain agent summary ' +
         'with completed item token'
     )
     t.ok(
-        testsEntry && testsEntry.body.includes(entries[2].run.notes),
+        testsEntry && testsEntry.body.includes(notesToken),
         'tests entry body should contain notes section with token'
     )
 })
@@ -276,6 +277,8 @@ empty ticket
 non-numeric attempt
 <!-- nightralph:entry ticket=valid:1a attempt=1abc outcome=done -->
 attempt with suffix
+<!-- nightralph:entry ticket=valid:1b attempt=1.5 outcome=done -->
+fractional attempt
 <!-- nightralph:entry ticket=%E0%A attempt=1 outcome=done -->
 malformed escape
 <!-- nightralph:entry ticket=valid:2 attempt=1 outcome=done -->
@@ -483,6 +486,14 @@ test('AC1.2+: variable-length code fence preserved', t => {
     t.ok(
         parsed[0].body.includes(token),
         'token after backtick fence should be preserved'
+    )
+
+    // A content line of 4 backticks would close a shorter fence early,
+    // so the opening fence must be longer than any run in the content
+    const opening = rendered.split('\n').find(l => /^`{3,}$/.test(l))
+    t.ok(
+        opening && opening.length > 4,
+        'opening fence should be longer than the content backtick run'
     )
 })
 

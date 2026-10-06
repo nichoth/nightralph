@@ -254,8 +254,8 @@ export function renderEntry (input:EntryInput):string {
             break
         }
         default: {
-            const _exhaustive:never = input.outcome
-            body = _exhaustive
+            const unknown:never = input
+            throw new Error(`Unknown outcome: ${JSON.stringify(unknown)}`)
         }
     }
 
