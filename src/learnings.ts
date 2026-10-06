@@ -1,4 +1,12 @@
-import { dirname, join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import {
+    appendFileSync,
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    rmSync,
+} from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 // -- Constants and types --
 
@@ -6,6 +14,8 @@ export const MAX_OWN_ENTRIES = 4
 export const MAX_ENTRY_CHARS = 4000
 export const LOG_TAIL_LINES = 40
 export const NOTES_PATH = '.nightralph/notes.md'
+
+const EXCLUDE_LINE = '.nightralph/'
 
 const SENTINEL_PREFIX = '<!-- nightralph:entry'
 export const TRUNCATED_MARKER = '[truncated]'
@@ -438,4 +448,54 @@ export function tailLines (text:string, n:number):string {
 
 export function learningsPathFor (progressPath:string):string {
     return join(dirname(progressPath), 'learnings.md')
+}
+
+// -- IO functions --
+
+// A missing log means no history yet. Any other read error (e.g.
+// the path is a directory) is thrown for the caller to report.
+export function readEntries (path:string):LearningEntry[] {
+    if (!existsSync(path)) return []
+    return parseEntries(readFileSync(path, 'utf8'))
+}
+
+// Synchronous on purpose: tickets in a wave run concurrently in one
+// Node thread, so sync appends can never interleave.
+export function appendEntry (path:string, text:string):void {
+    mkdirSync(dirname(path), { recursive:true })
+    appendFileSync(path, text)
+}
+
+// Reads the agent's notes and removes the notes directory, so the
+// file can never reach a commit. Blank notes count as none.
+export function collectNotes (worktreePath:string):string|null {
+    const notesPath = join(worktreePath, NOTES_PATH)
+    if (!existsSync(notesPath)) return null
+    const text = readFileSync(notesPath, 'utf8').trim()
+    rmSync(dirname(notesPath), { recursive:true, force:true })
+    return text || null
+}
+
+// Adds the notes directory to the repo's local, unversioned
+// exclude file, shared by every worktree of the repo.
+export function ensureExcluded (repoRoot:string):void {
+    const commonDir = resolve(
+        repoRoot,
+        execFileSync(
+            'git',
+            ['rev-parse', '--git-common-dir'],
+            { cwd:repoRoot, encoding:'utf8' }
+        ).trim()
+    )
+    const excludePath = join(commonDir, 'info', 'exclude')
+    mkdirSync(dirname(excludePath), { recursive:true })
+    const current = existsSync(excludePath) ?
+        readFileSync(excludePath, 'utf8') :
+        ''
+    const present = current
+        .split('\n')
+        .some(line => line.trim() === EXCLUDE_LINE)
+    if (present) return
+    const sep = current && !current.endsWith('\n') ? '\n' : ''
+    appendFileSync(excludePath, `${sep}${EXCLUDE_LINE}\n`)
 }

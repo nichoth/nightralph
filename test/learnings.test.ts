@@ -1,6 +1,15 @@
 import { test } from '@substrate-system/tapzero'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import {
+    execSync,
+    spawnSync,
+} from 'node:child_process'
+import {
+    mkdtempSync,
+    rmSync,
+} from 'node:fs'
+import { join, dirname, basename } from 'node:path'
+import { tmpdir } from 'node:os'
 import type {
     LearningEntry,
     EntryInput,
@@ -9,12 +18,17 @@ import {
     MAX_OWN_ENTRIES,
     MAX_ENTRY_CHARS,
     TRUNCATED_MARKER,
+    NOTES_PATH,
     renderEntry,
     parseEntries,
     selectHistory,
     renderHistory,
     tailLines,
     learningsPathFor,
+    readEntries,
+    appendEntry,
+    collectNotes,
+    ensureExcluded,
 } from '../src/learnings.js'
 
 // -- AC1.1: Round-trip test for all outcome variants --
@@ -910,3 +924,312 @@ test('learningsPathFor returns correct path', t => {
         'should replace progress.md with learnings.md'
     )
 })
+
+// -- Helper for git tests --
+
+function initTempRepo ():string {
+    const dir = mkdtempSync(
+        join(tmpdir(), 'nightralph-learnings-test-')
+    )
+    execSync('git init', { cwd:dir })
+    execSync('git config core.hooksPath /dev/null', { cwd:dir })
+    execSync('git commit --allow-empty -m "init" --no-verify', {
+        cwd:dir,
+        env:{
+            ...process.env,
+            GIT_COMMITTER_NAME:'Test',
+            GIT_COMMITTER_EMAIL:'test@example.com',
+            GIT_AUTHOR_NAME:'Test',
+            GIT_AUTHOR_EMAIL:'test@example.com',
+        },
+    })
+    return dir
+}
+
+// -- AC3.1: collectNotes returns file contents and removes file --
+
+test('AC3.1: collectNotes returns notes file contents', t => {
+    const dir = mkdtempSync(
+        join(tmpdir(), 'nightralph-learnings-')
+    )
+    try {
+        const notesPath = join(dir, NOTES_PATH)
+        const notesDir = dirname(notesPath)
+        const content = `random token: ${randomUUID()}`
+
+        // Create notes file
+        const cmd = `mkdir -p "${notesDir}" && ` +
+            `echo "${content}" > "${notesPath}"`
+        execSync(cmd, { shell:true } as never)
+
+        const result = collectNotes(dir)
+
+        t.equal(
+            result,
+            content,
+            'should return notes file content'
+        )
+
+        // Verify file and directory are removed
+        const fileExists = (execSync(
+            `[ -f "${notesPath}" ] && echo "exists" || echo "gone"`,
+            { shell:true, encoding:'utf8' } as never
+        ) as string).trim()
+
+        const dirExists = (execSync(
+            `[ -d "${notesDir}" ] && echo "exists" || echo "gone"`,
+            { shell:true, encoding:'utf8' } as never
+        ) as string).trim()
+
+        t.equal(
+            fileExists,
+            'gone',
+            'notes file should be removed'
+        )
+        t.equal(
+            dirExists,
+            'gone',
+            'notes directory should be removed'
+        )
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
+// -- AC3.2: collectNotes returns null for missing file or blank --
+
+test('AC3.2: collectNotes returns null for missing file', t => {
+    const dir = mkdtempSync(
+        join(tmpdir(), 'nightralph-learnings-')
+    )
+    try {
+        const result = collectNotes(dir)
+
+        t.equal(
+            result,
+            null,
+            'should return null when notes file missing'
+        )
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
+test('AC3.2: collectNotes returns null for blank notes', t => {
+    const dir = mkdtempSync(
+        join(tmpdir(), 'nightralph-learnings-')
+    )
+    try {
+        const notesPath = join(dir, NOTES_PATH)
+        const notesDir = dirname(notesPath)
+
+        // Create blank notes file with only whitespace
+        execSync(
+            `mkdir -p "${notesDir}" && echo "   " > "${notesPath}"`,
+            { shell:true } as never
+        )
+
+        const result = collectNotes(dir)
+
+        t.equal(
+            result,
+            null,
+            'should return null for whitespace-only notes'
+        )
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
+// -- AC3.4: readEntries returns [] for missing file --
+
+test('AC3.4: readEntries returns empty array for missing file', t => {
+    const dir = mkdtempSync(
+        join(tmpdir(), 'nightralph-learnings-')
+    )
+    try {
+        const missingPath = join(dir, 'missing.md')
+        const result = readEntries(missingPath)
+
+        t.deepEqual(
+            result,
+            [],
+            'should return empty array for missing file'
+        )
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
+
+// -- Round trip through disk --
+
+test(
+    'appendEntry and readEntries round-trip entries correctly',
+    t => {
+        const dir = mkdtempSync(
+            join(tmpdir(), 'nightralph-learnings-')
+        )
+        try {
+            const logPath = join(dir, 'subdir', 'learnings.md')
+
+            const entry1:EntryInput = {
+                key:'feat:1',
+                label:'feat/01',
+                attempt:1,
+                now:new Date('2026-10-06T14:30:00'),
+                outcome:'done',
+                run:{
+                    exitCode:0,
+                    completedItems:['item 1', 'item 2'],
+                    timedOut:false,
+                    notes:'some notes',
+                },
+            }
+
+            const entry2:EntryInput = {
+                key:'feat:2',
+                label:'feat/02',
+                attempt:1,
+                now:new Date('2026-10-06T15:00:00'),
+                outcome:'done',
+                run:{
+                    exitCode:0,
+                    completedItems:[],
+                    timedOut:false,
+                    notes:null,
+                },
+            }
+
+            const rendered1 = renderEntry(entry1)
+            const rendered2 = renderEntry(entry2)
+
+            appendEntry(logPath, rendered1)
+            appendEntry(logPath, rendered2)
+
+            const parsed = readEntries(logPath)
+
+            t.equal(
+                parsed.length,
+                2,
+                'should read 2 entries'
+            )
+            t.equal(
+                parsed[0].key,
+                'feat:1',
+                'first entry key correct'
+            )
+            t.equal(
+                parsed[1].key,
+                'feat:2',
+                'second entry key correct'
+            )
+        } finally {
+            rmSync(dir, { recursive:true, force:true })
+        }
+    }
+)
+
+// -- AC3.3: ensureExcluded idempotent and git check-ignore works --
+
+test('AC3.3: ensureExcluded adds line to exclude file', t => {
+    const repoRoot = initTempRepo()
+    try {
+        ensureExcluded(repoRoot)
+
+        const result = execSync(
+            `grep -c "^\\.nightralph/$" "${repoRoot}/.git/info/exclude"`,
+            { encoding:'utf8', stdio:['pipe', 'pipe', 'ignore'] }
+        ).trim()
+
+        t.equal(
+            result,
+            '1',
+            'should have exactly one .nightralph/ line'
+        )
+    } finally {
+        rmSync(repoRoot, { recursive:true, force:true })
+    }
+})
+
+test('AC3.3: ensureExcluded is idempotent', t => {
+    const repoRoot = initTempRepo()
+    try {
+        ensureExcluded(repoRoot)
+        ensureExcluded(repoRoot)
+
+        const result = execSync(
+            `grep -c "^\\.nightralph/$" "${repoRoot}/.git/info/exclude"`,
+            { encoding:'utf8', stdio:['pipe', 'pipe', 'ignore'] }
+        ).trim()
+
+        t.equal(
+            result,
+            '1',
+            'calling twice should still have exactly one line'
+        )
+    } finally {
+        rmSync(repoRoot, { recursive:true, force:true })
+    }
+})
+
+test('AC3.3: git check-ignore works after ensureExcluded', t => {
+    const repoRoot = initTempRepo()
+    try {
+        ensureExcluded(repoRoot)
+
+        const result = spawnSync(
+            'git',
+            ['check-ignore', '-q', '.nightralph/notes.md'],
+            { cwd:repoRoot }
+        )
+
+        t.equal(
+            result.status,
+            0,
+            'git check-ignore should exit 0 for excluded path'
+        )
+    } finally {
+        rmSync(repoRoot, { recursive:true, force:true })
+    }
+})
+
+test(
+    'AC3.3: git check-ignore works in worktree after ensureExcluded',
+    t => {
+        const repoRoot = initTempRepo()
+        try {
+            ensureExcluded(repoRoot)
+
+            // Create a worktree
+            const worktreePath = join(
+                dirname(repoRoot),
+                `${basename(repoRoot)}.worktree`
+            )
+
+            execSync(
+                `git worktree add "${worktreePath}" -b test-branch`,
+                { cwd:repoRoot }
+            )
+
+            // Check ignore in worktree
+            const result = spawnSync(
+                'git',
+                ['check-ignore', '-q', '.nightralph/notes.md'],
+                { cwd:worktreePath }
+            )
+
+            t.equal(
+                result.status,
+                0,
+                'git check-ignore should exit 0 in worktree'
+            )
+
+            // Clean up worktree
+            execSync(`git worktree remove "${worktreePath}"`, {
+                cwd:repoRoot,
+            })
+        } finally {
+            rmSync(repoRoot, { recursive:true, force:true })
+        }
+    }
+)
