@@ -1283,8 +1283,9 @@ test(
             )
 
             // Verify it's not a symlink
-            const isLink = existsSync(excludePath) &&
-                lstatSync(excludePath).isSymbolicLink()
+            // lstat, not existsSync: a dangling link must still count
+            const isLink = lstatSync(excludePath, { throwIfNoEntry:false })
+                ?.isSymbolicLink() ?? false
             t.equal(
                 isLink,
                 false,
