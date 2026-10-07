@@ -52,6 +52,24 @@ import {
 } from './display.js'
 import { runTestCmd } from './testcmd.js'
 import {
+    EFFORT_LADDERS,
+    escalateEffort,
+    retryDelayFor,
+    runWithRetries,
+    sleep,
+    type EffortLevel,
+    type ProviderName,
+} from './retry.js'
+
+export {
+    EFFORT_LADDERS,
+    ALL_EFFORT_LEVELS,
+    escalateEffort,
+    retryDelayFor,
+    type EffortLevel,
+    type ProviderName,
+} from './retry.js'
+import {
     NOTES_PATH,
     LOG_TAIL_LINES,
     appendEntry,
@@ -741,43 +759,6 @@ const PROVIDER_ARGS:Record<string, string[]> = {
 export function getProviderArgs (cmd:string):string[] {
     const name = basename(cmd)
     return PROVIDER_ARGS[name] ?? []
-}
-
-// Per-provider effort ladders.
-export const EFFORT_LADDERS = {
-    pi:['off', 'minimal', 'low', 'medium',
-        'high', 'xhigh', 'max'],
-    claude:['low', 'medium', 'high',
-        'xhigh', 'max'],
-    codex:['low', 'medium', 'high'],
-} as const
-
-export type ProviderName =
-    keyof typeof EFFORT_LADDERS
-
-export type EffortLevel =
-    typeof EFFORT_LADDERS[ProviderName][number]
-
-export const ALL_EFFORT_LEVELS:EffortLevel[] = [
-    'off', 'minimal', 'low', 'medium',
-    'high', 'xhigh', 'max',
-]
-
-// Step up the effort ladder for a given provider.
-// Without a starting level, the first retry jumps to high.
-// Otherwise, step one rung up and stop at the provider's max.
-export function escalateEffort (
-    provider:ProviderName,
-    level?:EffortLevel
-):EffortLevel {
-    if (!level) return 'high'
-    const ladder = EFFORT_LADDERS[provider]
-    const i = (ladder as readonly string[])
-        .indexOf(level)
-    if (i === -1) return level
-    return ladder[
-        Math.min(i + 1, ladder.length - 1)
-    ] as EffortLevel
 }
 
 export function formatStreamLine (
@@ -1629,14 +1610,6 @@ export async function runPool<T, R> (
     return results
 }
 
-export function retryDelayFor (base:number, attempt:number):number {
-    return base * 2 ** (attempt - 2)
-}
-
-function sleep (ms:number):Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
-}
-
 // Log file for one attempt: the first attempt keeps the
 // plain name so existing tooling still finds it, later
 // attempts get their own file instead of overwriting it.
@@ -1663,9 +1636,7 @@ type TicketOutcome =
         kind:'no-commits'
         worktreePath:string
         branchName:string
-        // null only for the placeholder outcome in
-        // runTicketAttempts, which no agent produced
-        agentRun:AgentRunRecord|null
+        agentRun:AgentRunRecord
     }
     | {
         // No agent ran, so there is no agent record
@@ -1997,7 +1968,6 @@ function attemptEntry (opts:{
                 }
             }
         case 'no-commits':
-            if (!outcome.agentRun) return null
             return {
                 ...base,
                 outcome:'no-commits',
@@ -2048,39 +2018,14 @@ async function runTicketAttempts (
     opts:TicketAttemptOpts&{ retries:number; retryDelay:number }
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
-    const maxAttempts = opts.retries + 1
-    const providerName = basename(opts.agentCmd)
-    const isKnown = providerName in EFFORT_LADDERS
-    let effort = opts.effort
-    let outcome:TicketOutcome = {
-        kind:'no-commits',
-        worktreePath:'',
-        branchName:'',
-        agentRun:null,
-    }
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        if (attempt === 1) {
-            d.log(`  Starting ${ticket.filename}`)
-        } else {
-            if (isKnown) {
-                effort = escalateEffort(
-                    providerName as ProviderName,
-                    effort
-                )
-            }
-            const delay = retryDelayFor(opts.retryDelay, attempt)
-            d.log(
-                `  ${ticket.filename}: retrying ` +
-                `(attempt ${attempt}/${maxAttempts}` +
-                (isKnown && effort ?
-                    `, effort ${effort}` : '') +
-                (delay > 0 ?
-                    `, waiting ${delay}s` : '') +
-                ')'
-            )
-            if (delay > 0) await sleep(delay * 1000)
-        }
+    return runWithRetries<TicketOutcome>({
+        maxAttempts:opts.retries + 1,
+        retryDelay:opts.retryDelay,
+        agentCmd:opts.agentCmd,
+        effort:opts.effort,
+        label:ticket.filename,
+        log:(msg) => d.log(msg),
+    }, async (attempt, effort) => {
         const record = (o:TicketOutcome):void => {
             recordAttempt({
                 learningsPath:opts.learningsPath,
@@ -2092,6 +2037,7 @@ async function runTicketAttempts (
                 d,
             })
         }
+        let outcome:TicketOutcome
         try {
             outcome = await runTicketAttempt({
                 ...opts, attempt, effort,
@@ -2103,7 +2049,7 @@ async function runTicketAttempts (
             )
             const errorOutcome:TicketOutcome = { kind:'error', error }
             record(errorOutcome)
-            return errorOutcome
+            return { result:errorOutcome, stop:true }
         }
         record(outcome)
         if (outcome.kind === 'ready') {
@@ -2113,11 +2059,13 @@ async function runTicketAttempts (
                 ticket.num, 'awaiting-merge',
                 ticket.feature,
             )
-            return outcome
+            return { result:outcome, stop:true }
         }
-        if (outcome.kind === 'worktree-error') return outcome
-    }
-    return outcome
+        return {
+            result:outcome,
+            stop:outcome.kind === 'worktree-error',
+        }
+    })
 }
 
 function failureNote (reason:'exit'|'tests'|'install'):string {

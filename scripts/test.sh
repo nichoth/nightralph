@@ -13,6 +13,7 @@ PATH="$PWD/node_modules/.bin:$PATH"
 TESTS=(
     setup
     orchestrator
+    retry
     worktree
     progress
     learnings
