@@ -9,6 +9,7 @@ import {
     REVIEW_MARKER,
     FIX_MARKER,
     reviewDiffCommand,
+    reviewExcludeFor,
     renderReviewPrompt,
     FIX_FAILURE_TEXT,
     renderFixPrompt,
@@ -268,4 +269,46 @@ test('renderFixPrompt - carries findings, test command, and the ' +
     t.ok(retry.includes(FIX_FAILURE_TEXT.tests),
         'previous failure reason')
     t.ok(retry.includes('npm ci'), 'install rule')
+})
+
+// -- reviewExcludeFor --
+
+test('reviewExcludeFor - is relative to the repo root', t => {
+    t.equal(
+        reviewExcludeFor('/r', '/r/.scratch/feat/review.md'),
+        '.scratch',
+        'feature log at the repo root'
+    )
+    t.equal(
+        reviewExcludeFor('/r', '/r/.scratch/review.md'),
+        '.scratch',
+        'multi-feature log'
+    )
+    t.equal(
+        reviewExcludeFor('/r', '/r/pkg/app/.scratch/feat/review.md'),
+        'pkg/app/.scratch',
+        'run launched from a subdirectory'
+    )
+})
+
+test('reviewExcludeFor - falls back without a .scratch dir', t => {
+    t.equal(
+        reviewExcludeFor('/r', '/r/notes/review.md'),
+        '.scratch',
+        'no .scratch ancestor'
+    )
+    t.equal(
+        reviewExcludeFor('/r', '/elsewhere/.scratch/review.md'),
+        '.scratch',
+        'scratch dir outside the repo'
+    )
+})
+
+test('reviewDiffCommand and prompt use the given exclude', t => {
+    const cmd = reviewDiffCommand(A, B, 'pkg/.scratch')
+    t.ok(cmd.includes(':(exclude)pkg/.scratch'), 'custom exclude')
+    const prompt = renderReviewPrompt({
+        specBody:'S', from:A, to:B, exclude:'pkg/.scratch',
+    })
+    t.ok(prompt.includes(cmd), 'prompt carries the derived command')
 })

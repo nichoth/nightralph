@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import {
     NOTES_PATH,
     formatDate,
@@ -46,14 +46,39 @@ export const REVIEW_EXCLUDE = '.scratch'
 export const REVIEW_MARKER = '---- REVIEW INSTRUCTIONS ----'
 export const FIX_MARKER = '---- REVIEW FINDINGS ----'
 
-export function reviewDiffCommand (from:string, to:string):string {
-    return `git diff ${from}..${to} -- . ':(exclude)${REVIEW_EXCLUDE}'`
+// The bookkeeping directory for a review log: the nearest ancestor
+// of reviewPath named .scratch, relative to the repo root, so a run
+// launched from a subdirectory excludes the right path. Falls back
+// to REVIEW_EXCLUDE when reviewPath is not under a .scratch.
+export function reviewExcludeFor (
+    repoRoot:string,
+    reviewPath:string
+):string {
+    let dir = dirname(reviewPath)
+    while (dirname(dir) !== dir) {
+        if (basename(dir) === '.scratch') {
+            const rel = relative(repoRoot, dir)
+            if (rel && !rel.startsWith('..')) return rel
+            break
+        }
+        dir = dirname(dir)
+    }
+    return REVIEW_EXCLUDE
+}
+
+export function reviewDiffCommand (
+    from:string,
+    to:string,
+    exclude:string = REVIEW_EXCLUDE
+):string {
+    return `git diff ${from}..${to} -- . ':(exclude)${exclude}'`
 }
 
 export function renderReviewPrompt (opts:{
     specBody:string
     from:string
     to:string
+    exclude?:string
 }):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -66,7 +91,7 @@ export function renderReviewPrompt (opts:{
         '',
         'The change to review:',
         '',
-        `    ${reviewDiffCommand(opts.from, opts.to)}`,
+        `    ${reviewDiffCommand(opts.from, opts.to, opts.exclude)}`,
         '',
         'Follow these rules:',
         '- Read any AGENTS.md in or above the directories the ' +
@@ -570,7 +595,11 @@ export async function runReviewer (
             ensureNotesIgnored(wt.worktreePath)
             await deps.spawnAgent({
                 prompt:renderReviewPrompt({
-                    specBody:opts.specBody, ...range,
+                    specBody:opts.specBody,
+                    ...range,
+                    exclude:reviewExcludeFor(
+                        opts.repoRoot, opts.reviewPath
+                    ),
                 }),
                 agentCmd:opts.agentCmd,
                 model:opts.model,
@@ -762,7 +791,8 @@ export async function runReviewPass (
         forkPoint,
         launchCommit:opts.launchCommit,
     })
-    if (!hasChangesOutside(opts.repoRoot, from, to, REVIEW_EXCLUDE)) {
+    const exclude = reviewExcludeFor(opts.repoRoot, opts.reviewPath)
+    if (!hasChangesOutside(opts.repoRoot, from, to, exclude)) {
         opts.log('\nReview: nothing new to review')
         return { status:'skipped', findings:0, fixed:0 }
     }
