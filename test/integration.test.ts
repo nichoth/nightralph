@@ -2,11 +2,14 @@ import { test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync,
     readFileSync, existsSync, rmSync, chmodSync,
-    symlinkSync,
+    symlinkSync, readdirSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { execFile, execSync, spawn } from 'node:child_process'
+import {
+    execFile, execFileSync, execSync, spawn,
+} from 'node:child_process'
 import {
     findFeatureDirs,
     resolveIssuesDir,
@@ -20,8 +23,11 @@ import {
     spawnAgent,
     killRunningAgents,
     killProcessGroup,
+    ticketKey,
     type Ticket,
 } from '../src/orchestrator.js'
+import { parseEntries, readEntries } from '../src/learnings.js'
+import { readProgress } from '../src/progress.js'
 
 function tmp ():string {
     return mkdtempSync(
@@ -607,6 +613,9 @@ const MOCK_DELETE_WORKTREE_01 = join(
 const MOCK_DIRTY_THEN_FAIL = join(
     process.cwd(), 'test', 'mock-agent-dirty-then-fail.js'
 )
+const MOCK_NOTES = join(
+    process.cwd(), 'test', 'mock-agent-notes.js'
+)
 
 const GIT_ENV = {
     ...process.env,
@@ -624,9 +633,20 @@ function commitAll (dir:string, message:string):void {
     )
 }
 
-function initTempGitRepo ():string {
+// With `templateDir`, the repo also ignores the machine's git
+// template and global excludes file, so neither can hide paths
+// from `git add -A` or receive writes meant for this repo.
+function initTempGitRepo (opts?:{ templateDir?:string }):string {
     const dir = tmp()
-    execSync('git init', { cwd:dir })
+    if (opts?.templateDir) {
+        execFileSync(
+            'git', ['init', `--template=${opts.templateDir}`],
+            { cwd:dir, stdio:'ignore' }
+        )
+        execSync('git config core.excludesFile /dev/null', { cwd:dir })
+    } else {
+        execSync('git init', { cwd:dir })
+    }
     execSync(
         'git config user.email test@example.com',
         { cwd:dir }
@@ -4313,4 +4333,418 @@ test('runWavesIsolated - multi-feature tickets write ' +
         cleanupWorktrees(projectDir)
         rmSync(projectDir, { recursive:true, force:true })
     }
+})
+
+// -- attempt learnings, end to end (runWavesIsolated) --
+
+type NotesRecord = {
+    time:number
+    cwd:string
+    token:string
+    prompt:string
+}
+
+function toNotesRecord (value:unknown):NotesRecord {
+    if (
+        typeof value === 'object' && value !== null &&
+        'time' in value && typeof value.time === 'number' &&
+        'cwd' in value && typeof value.cwd === 'string' &&
+        'token' in value && typeof value.token === 'string' &&
+        'prompt' in value && typeof value.prompt === 'string'
+    ) {
+        return {
+            time:value.time,
+            cwd:value.cwd,
+            token:value.token,
+            prompt:value.prompt,
+        }
+    }
+    throw new Error('malformed mock-agent-notes record')
+}
+
+// Every record the notes mock wrote, oldest first
+function readNotesRecords (dir:string):NotesRecord[] {
+    return readdirSync(dir)
+        .filter(f => f.endsWith('.json'))
+        .map(f => toNotesRecord(
+            JSON.parse(readFileSync(join(dir, f), 'utf8'))
+        ))
+        .sort((a, b) => a.time - b.time)
+}
+
+// Records from agents that ran in one ticket's worktree, which is
+// named `<repo>.<NN>-<slug>` after the ticket file
+function recordsFor (
+    records:NotesRecord[],
+    filename:string
+):NotesRecord[] {
+    const suffix = '.' + filename.replace(/\.md$/, '')
+    return records.filter(r => basename(r.cwd).endsWith(suffix))
+}
+
+function gitOut (cwd:string, args:string[]):string {
+    return execFileSync('git', args, { cwd, encoding:'utf8' })
+}
+
+function restoreEnv (name:string, value:string|undefined):void {
+    if (value === undefined) {
+        Reflect.deleteProperty(process.env, name)
+    } else {
+        process.env[name] = value
+    }
+}
+
+type RunIsolatedOpts = Parameters<typeof runWavesIsolated>[0]
+
+type NotesRepo = {
+    projectDir:string
+    issuesDir:string
+    recordDir:string
+    learningsPath:string
+    addTicket:(filename:string, blockers?:number[]) => void
+    run:(
+        tickets:Ticket[],
+        overrides?:Partial<RunIsolatedOpts>
+    ) => Promise<{ allDone:boolean }>
+}
+
+// A hermetic repo driven by the notes mock: MOCK_RECORD_DIR points
+// at a fresh dir, and cwd, env and temp dirs are restored after.
+// The test sets MOCK_MODE itself.
+async function withNotesRepo (
+    fn:(repo:NotesRepo) => Promise<void>
+):Promise<void> {
+    const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+    const recordDir = mkdtempSync(join(tmpdir(), 'nightralph-rec-'))
+    const originalCwd = process.cwd()
+    const savedRecordDir = process.env.MOCK_RECORD_DIR
+    const savedMode = process.env.MOCK_MODE
+    let projectDir = ''
+    try {
+        projectDir = initTempGitRepo({ templateDir })
+        const issuesDir = join(projectDir, 'issues')
+        mkdirSync(issuesDir)
+        const logsDir = join(projectDir, '.logs')
+        process.env.MOCK_RECORD_DIR = recordDir
+        process.chdir(projectDir)
+        await fn({
+            projectDir,
+            issuesDir,
+            recordDir,
+            learningsPath:join(projectDir, 'learnings.md'),
+            addTicket:(filename, blockers) => {
+                writeFileSync(
+                    join(issuesDir, filename),
+                    makeTicketBody({
+                        status:'ready-for-agent',
+                        blockers,
+                    })
+                )
+            },
+            run:(tickets, overrides) => runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_NOTES,
+                model:null,
+                timeout:30,
+                logsDir,
+                featureName:'test-feature-learnings',
+                conflictStrategy:'respawn',
+                display:recordingDisplay().display,
+                testCmd:'true',
+                retries:0,
+                retryDelay:0,
+                ...overrides,
+            }),
+        })
+    } finally {
+        process.chdir(originalCwd)
+        restoreEnv('MOCK_RECORD_DIR', savedRecordDir)
+        restoreEnv('MOCK_MODE', savedMode)
+        if (projectDir) removeWorktreesAndRepo(projectDir)
+        rmSync(recordDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+}
+
+// The base-branch commit right before the agent's work landed:
+// the first parent of the oldest first-parent commit whose tree
+// holds a file the notes mock committed
+function commitBeforeAgentWork (dir:string):string {
+    const commits = gitOut(dir, [
+        'log', '--first-parent', '--reverse', '--format=%H', 'HEAD',
+    ]).split('\n').filter(Boolean)
+    const landed = commits.find(c => {
+        return gitOut(dir, ['ls-tree', '--name-only', c])
+            .split('\n')
+            .some(f => f.startsWith('mock-agent-change-'))
+    })
+    if (!landed) throw new Error('the agent work never landed')
+    return gitOut(dir, ['rev-parse', `${landed}^1`]).trim()
+}
+
+function learningsAt (dir:string, commit:string):string {
+    try {
+        return gitOut(dir, ['show', `${commit}:learnings.md`])
+    } catch {
+        return ''
+    }
+}
+
+test('runWavesIsolated - AC5.1 AC5.2 AC7.1 AC7.2: a retry sees ' +
+    'its first attempt\'s notes and the log is committed',
+async t => {
+    await withNotesRepo(async repo => {
+        process.env.MOCK_MODE = 'fail-once'
+        repo.addTicket('01-flaky.md')
+        const tickets = scanTickets(repo.issuesDir)
+        commitAll(repo.projectDir, 'add tickets')
+
+        t.ok(
+            !existsSync(join(
+                repo.projectDir, '.git', 'info', 'exclude'
+            )),
+            'the repo has no template exclude file to lean on'
+        )
+
+        await repo.run(tickets, { retries:1 })
+
+        const records = readNotesRecords(repo.recordDir)
+        t.equal(records.length, 2, 'the agent ran twice')
+        t.ok(
+            !records[0].prompt.includes(records[1].token),
+            'the first prompt does not carry later notes'
+        )
+        t.ok(
+            records[1].prompt.includes(records[0].token),
+            'the retry prompt carries the first attempt\'s notes'
+        )
+
+        const key = ticketKey(tickets[0].feature, tickets[0].num)
+        const entries = readEntries(repo.learningsPath)
+            .filter(e => e.key === key)
+        t.deepEqual(
+            entries.map(e => [e.attempt, e.outcome]),
+            [[1, 'exit'], [2, 'done']],
+            'one entry per attempt, in order, with its outcome'
+        )
+        t.equal(tickets[0].status, 'done', 'the retry finished it')
+
+        const paths = gitOut(repo.projectDir, [
+            'log', '--all', '--name-only', '--format=',
+        ]).split('\n')
+        t.ok(
+            paths.some(p => p.startsWith('mock-agent-change-')),
+            'the agent\'s `git add -A` commit is in the history'
+        )
+        t.deepEqual(
+            paths.filter(p => p.startsWith('.nightralph/')),
+            [],
+            'no commit on any ref contains a .nightralph/ path'
+        )
+
+        t.ok(
+            gitOut(repo.projectDir, ['ls-files', 'learnings.md'])
+                .trim(),
+            'learnings.md is tracked'
+        )
+        t.equal(
+            gitOut(repo.projectDir, [
+                'status', '--porcelain', '--', 'learnings.md',
+            ]),
+            '',
+            'learnings.md has no uncommitted changes'
+        )
+
+        // The log is committed before the merge, not only by a
+        // later progress commit, so the base tree is clean while
+        // the branch merges
+        const beforeMerge = commitBeforeAgentWork(repo.projectDir)
+        const committed = parseEntries(
+            learningsAt(repo.projectDir, beforeMerge)
+        ).filter(e => e.key === key)
+        t.equal(
+            committed.length, 2,
+            'both entries were committed before the branch merged'
+        )
+    })
+})
+
+test('runWavesIsolated - AC5.3: a downstream ticket\'s prompt ' +
+    'carries its blocker\'s notes', async t => {
+    await withNotesRepo(async repo => {
+        process.env.MOCK_MODE = 'pass'
+        repo.addTicket('01-first.md')
+        repo.addTicket('02-second.md', [1])
+        const tickets = scanTickets(repo.issuesDir)
+        commitAll(repo.projectDir, 'add tickets')
+
+        await repo.run(tickets)
+
+        const records = readNotesRecords(repo.recordDir)
+        const first = recordsFor(records, '01-first.md')
+        const second = recordsFor(records, '02-second.md')
+        t.equal(first.length, 1, 'ticket 1 ran once')
+        t.equal(second.length, 1, 'ticket 2 ran once')
+        t.ok(
+            second[0]?.prompt.includes(first[0]?.token ?? '-'),
+            'ticket 2\'s prompt carries ticket 1\'s notes'
+        )
+        t.ok(
+            !first[0]?.prompt.includes(second[0]?.token ?? '-'),
+            'ticket 1\'s prompt does not carry ticket 2\'s notes'
+        )
+    })
+})
+
+test('runWavesIsolated - AC5.4: a second run\'s first prompt ' +
+    'carries notes from the first run', async t => {
+    await withNotesRepo(async repo => {
+        repo.addTicket('01-again.md')
+        // Keeps the first run's logs from dirtying the base tree,
+        // which would make the second run refuse to start
+        writeFileSync(
+            join(repo.projectDir, '.gitignore'), '.logs/\n'
+        )
+        commitAll(repo.projectDir, 'add tickets')
+
+        process.env.MOCK_MODE = 'fail'
+        await repo.run(scanTickets(repo.issuesDir))
+        const firstRun = readNotesRecords(repo.recordDir)
+        t.equal(firstRun.length, 1, 'the first run ran once')
+
+        process.env.MOCK_MODE = 'pass'
+        const tickets = scanTickets(repo.issuesDir)
+        await repo.run(tickets)
+        const secondRun = readNotesRecords(repo.recordDir)
+            .slice(firstRun.length)
+
+        t.equal(secondRun.length, 1, 'the second run ran once')
+        t.ok(
+            secondRun[0]?.prompt.includes(firstRun[0]?.token ?? '-'),
+            'the second run\'s prompt carries the first run\'s notes'
+        )
+        t.equal(tickets[0].status, 'done', 'the second run finished')
+    })
+})
+
+test('runWavesIsolated - AC6.1: notes written before a timeout ' +
+    'kill reach a timed-out entry', async t => {
+    await withNotesRepo(async repo => {
+        process.env.MOCK_MODE = 'hang'
+        repo.addTicket('01-slow.md')
+        const tickets = scanTickets(repo.issuesDir)
+        commitAll(repo.projectDir, 'add tickets')
+
+        await repo.run(tickets, { timeout:2 })
+
+        const records = readNotesRecords(repo.recordDir)
+        t.equal(
+            records.length, 1,
+            'the agent left its notes before the kill'
+        )
+        const key = ticketKey(tickets[0].feature, tickets[0].num)
+        const entries = readEntries(repo.learningsPath)
+            .filter(e => e.key === key)
+        t.equal(entries.length, 1, 'one entry for the attempt')
+        t.equal(entries[0]?.timedOut, true, 'marked timed out')
+        t.ok(
+            entries[0]?.body.includes(records[0]?.token ?? '-'),
+            'the entry holds the notes written before the kill'
+        )
+    })
+})
+
+test('runWavesIsolated - AC6.2: a red test gate\'s entry has ' +
+    'outcome tests and the test log tail', async t => {
+    await withNotesRepo(async repo => {
+        process.env.MOCK_MODE = 'pass'
+        repo.addTicket('01-red.md')
+        const tickets = scanTickets(repo.issuesDir)
+        commitAll(repo.projectDir, 'add tickets')
+        const testToken = randomUUID()
+
+        await repo.run(tickets, {
+            testCmd:`echo ${testToken}; exit 1`,
+        })
+
+        const key = ticketKey(tickets[0].feature, tickets[0].num)
+        const entries = readEntries(repo.learningsPath)
+            .filter(e => e.key === key)
+        t.deepEqual(
+            entries.map(e => e.outcome), ['tests'],
+            'one entry, with outcome tests'
+        )
+        t.ok(
+            entries[0]?.body.includes(testToken),
+            'the entry holds the tail of the test log'
+        )
+    })
+})
+
+test('runWavesIsolated - AC6.3: an unrecovered merge failure ' +
+    'appends a merge entry', async t => {
+    await withNotesRepo(async repo => {
+        const repoName = basename(repo.projectDir)
+        const fakeGit = installMergeFailingGit(
+            `${repoName}--01-clash`
+        )
+        try {
+            process.env.MOCK_MODE = 'pass'
+            repo.addTicket('01-clash.md')
+            const tickets = scanTickets(repo.issuesDir)
+            commitAll(repo.projectDir, 'add tickets')
+
+            await repo.run(tickets, { conflictStrategy:'stop' })
+
+            const key = ticketKey(
+                tickets[0].feature, tickets[0].num
+            )
+            const outcomes = readEntries(repo.learningsPath)
+                .filter(e => e.key === key)
+                .map(e => e.outcome)
+            t.deepEqual(
+                outcomes, ['done', 'merge'],
+                'the attempt entry is followed by a merge entry'
+            )
+            t.equal(
+                tickets[0].status, 'ready-for-agent',
+                'the merge was not recovered'
+            )
+        } finally {
+            fakeGit.restore()
+        }
+    })
+})
+
+test('runWavesIsolated - AC7.3: an unwritable learnings.md never ' +
+    'fails the ticket or the progress commit', async t => {
+    await withNotesRepo(async repo => {
+        process.env.MOCK_MODE = 'pass'
+        repo.addTicket('01-steady.md')
+        const tickets = scanTickets(repo.issuesDir)
+        commitAll(repo.projectDir, 'add tickets')
+        // An empty directory is invisible to `git status`, so the
+        // dirty-tree check still passes
+        mkdirSync(repo.learningsPath)
+
+        await repo.run(tickets)
+
+        t.equal(tickets[0].status, 'done', 'the ticket finished')
+        t.equal(
+            gitOut(repo.projectDir, [
+                'status', '--porcelain', '--', 'progress.md',
+            ]),
+            '',
+            'the final progress state is committed'
+        )
+        const progress = readProgress(
+            join(repo.projectDir, 'progress.md')
+        )
+        t.deepEqual(
+            progress?.tickets.map(p => [p.num, p.done]),
+            [[tickets[0].num, true]],
+            'progress.md records the ticket as done'
+        )
+    })
 })
