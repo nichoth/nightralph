@@ -42,22 +42,24 @@ whose changes pass the test gate before they merge.
   whichever exists locally, else `null`.
 
 ### integration-branch-review-design.AC2: Integration branch in a run
-- **integration-branch-review-design.AC2.1 Success:** With
-  `integrationBranch` set and no such branch, the run creates it from
-  the current branch, merges every ticket into it, and leaves the
-  launch branch where it was.
-- **integration-branch-review-design.AC2.2 Success:** With
-  `integrationBranch` set and the branch already present, the run
-  checks it out, keeps tickets already `done` there, and logs how many
-  commits the launch branch is ahead.
-- **integration-branch-review-design.AC2.3 Success:** Without
-  `integrationBranch`, the run merges into the current branch exactly
-  as before.
+- **integration-branch-review-design.AC2.1 Success:** Launched from
+  the default branch with no integration branch yet,
+  `prepareIntegrationBranch` creates it from the current branch and
+  checks it out; the run merges every ticket into it and the launch
+  branch does not move.
+- **integration-branch-review-design.AC2.2 Success:** Launched from
+  the default branch with the integration branch already present,
+  `prepareIntegrationBranch` checks it out and reports how many
+  commits the launch branch is ahead; tickets scanned afterwards keep
+  the `done` status they have there, so the run does not redo them.
+- **integration-branch-review-design.AC2.3 Success:** Launched from
+  any other branch, nothing is checked out and the run merges into the
+  current branch exactly as before.
 - **integration-branch-review-design.AC2.4 Success:** The run returns
   `{ allDone, branch }`, with `branch` naming where the work landed,
   and the main checkout is left on that branch.
 - **integration-branch-review-design.AC2.5 Failure:** A dirty working
-  tree still throws before any branch is created or checked out.
+  tree throws before any branch is created or checked out.
 
 ### integration-branch-review-design.AC3: Review log
 - **integration-branch-review-design.AC3.1 Success:** An entry built
@@ -143,7 +145,10 @@ whose changes pass the test gate before they merge.
 4. **Policy in the CLI, mechanism in the library.** The CLI decides
    whether to use an integration branch and whether to review;
    `runWavesIsolated` only acts on what it is given. This keeps the 37
-   existing isolated-run tests unchanged.
+   existing isolated-run tests unchanged. The CLI must also enter the
+   integration branch *before* it scans tickets: ticket statuses live
+   on that branch, and a scan of the launch branch would hand a
+   resumed run stale `ready-for-agent` tickets.
 5. **Two agents.** A reviewer writes findings; a separate fixer
    addresses them. Findings survive a failed fix, and the fixer cannot
    grade its own work.
@@ -173,24 +178,29 @@ New in `src/worktree.ts`:
   pure, see AC1.1.
 - `planIntegrationBranch(current, defaultBranch, features)` -- pure;
   the name when `current === defaultBranch`, else `null`.
-- `enterIntegrationBranch(repoRoot, name)` -- checks out an existing
-  branch and returns `{ created:false, behind:n }`, where `n` is
-  `git rev-list --count <name>..<launch branch>`; otherwise
-  `git checkout -b <name>` and `{ created:true, behind:0 }`.
+- `prepareIntegrationBranch(repoRoot, features):IntegrationPlan` --
+  when `planIntegrationBranch` returns a name: throws on a dirty tree,
+  then checks out the existing branch
+  (`{ created:false, resumed:true, behind:n }`, `n` from
+  `git rev-list --count <name>..<launch branch>`) or runs
+  `git checkout -b <name>` (`{ created:true, resumed:false,
+  behind:0 }`). Otherwise it checks nothing out and returns the
+  current branch. `forkedFrom` is the default branch whenever the
+  resulting branch is the integration branch (including one the user
+  checked out by hand), else `null`.
+- `describeIntegrationBranch(repoRoot, features):string` -- the same
+  decision for `--dry-run`, as one line, without checking anything
+  out.
 
-`runWavesIsolated` gains `integrationBranch?:string`. After the
-dirty-tree check it records the launch commit, and when
-`integrationBranch` is set it calls `enterIntegrationBranch` and uses
-that name as `baseBranch` for worktrees, merges, progress and
-learnings commits, and the review. It logs one line, e.g.
-`Created branch nightralph--x from main` or
-`Resumed nightralph--x (main is 3 commits ahead)`. It returns
-`{ allDone, branch }` and leaves the main checkout on `branch`;
-`renderFinishSummary`'s caller adds a `Work is on <branch>` line.
-
-`dryRunIsolated` takes the same option and prints the branch it would
-create or resume, without checking anything out. In-place `runWaves`
-is unchanged.
+The CLI calls `prepareIntegrationBranch` after its first ticket scan
+(so a run with no tickets creates nothing) and, when it resumed an
+existing branch, scans again so the tickets carry that branch's
+statuses. It logs one line, e.g. `Created branch nightralph--x from
+main` or `Resumed nightralph--x (main is 3 commits ahead)`.
+`runWavesIsolated` then simply runs on the current branch as today; it
+records the launch commit (`HEAD`) after its dirty-tree check, returns
+`{ allDone, branch }`, and logs `Work is on <branch>` after the finish
+summary. In-place `runWaves` is unchanged.
 
 ### Review log: `review.md`
 
@@ -303,21 +313,33 @@ too.
 ### Module boundaries
 
 `src/review.ts` holds the pure functions (`renderReviewPrompt`,
-`renderFixPrompt`, `parseFindings`, `renderReviewEntry`,
-`parseReviewEntries`, `selectReviewBase`) and
-`runReviewPass(opts, deps)`, where `deps` is
-`{ spawnAgent, runInstall, runTestGate }` injected by
-`orchestrator.ts`. Like `learnings.ts`, it imports no values from
-`orchestrator.ts`. `runWavesIsolated` calls `runReviewPass` after the
-wave loop (including after an `-X` stop) and before the finish
-summary, when `opts.review` is set.
+`renderFixPrompt`, `parseFindings`, `markFixed`, `renderReviewEntry`,
+`parseReviewEntries`, `selectReviewBase`, `renderReviewSummary`),
+`runReviewer`, `runFixer`, and `runReviewPass(opts, deps)`, where
+`deps` is `{ spawnAgent, registry }` injected by `orchestrator.ts`
+(`registry` is the running-process set, so SIGINT kills review
+installs and test gates too). Like `learnings.ts`, it imports no
+values from `orchestrator.ts`; it calls `runTestCmd`, the worktree
+helpers, `mergeBranch`, and `commitProgress` directly.
+`runWavesIsolated` gains `review?:{ reviewPath, forkedFrom? }` and
+calls `runReviewPass` after the wave loop (including after an `-X`
+stop) and before the finish summary.
+
+The shared rule lines move from `renderPrompt` into `src/rules.ts`
+(parameterized by the unit of work, e.g. "checklist item" or
+"finding"), producing byte-identical ticket prompts.
+`EFFORT_LADDERS`, `ALL_EFFORT_LEVELS`, `EffortLevel`, `ProviderName`,
+`escalateEffort`, and `retryDelayFor` move to `src/retry.ts` (so
+`retry.ts` and `review.ts` need nothing from the orchestrator) and are
+re-exported from `src/orchestrator.ts` unchanged.
 
 ### CLI
 
 - `--no-review` (yargs boolean `review`, default `true`).
-- The CLI calls `getDefaultBranch` and `planIntegrationBranch` and
-  passes the result as `integrationBranch`.
-- `--dry-run` prints the planned branch and whether review is on.
+- The CLI calls `prepareIntegrationBranch` (see above) and passes
+  `review:{ reviewPath, forkedFrom }` unless `--no-review`.
+- `--dry-run` prints `describeIntegrationBranch` and whether review is
+  on.
 
 ### Error handling
 
@@ -369,9 +391,9 @@ Done when: AC7.4 -- the full existing suite passes with no test edits.
 ### Phase 2: Integration branch
 
 `getDefaultBranch`, `integrationBranchName`, `planIntegrationBranch`,
-`enterIntegrationBranch`, `createNamedWorktree`; the
-`integrationBranch` option and `{ allDone, branch }` return in
-`runWavesIsolated`; `dryRunIsolated` output; CLI wiring.
+`prepareIntegrationBranch`, `describeIntegrationBranch`,
+`createNamedWorktree`, `deleteBranch`; the `{ allDone, branch }`
+return in `runWavesIsolated`; CLI wiring and `--dry-run` output.
 
 Done when: tests pass for AC1.1-AC1.5 and AC2.1-AC2.5.
 <!-- END_PHASE_2 -->
