@@ -56,7 +56,7 @@ type Harness = {
     projectDir:string
     recordDir:string
     reviewPath:string
-    run:(review?:boolean) => Promise<{
+    run:(review?:boolean, display?:Display) => Promise<{
         allDone:boolean
         branch:string
     }>
@@ -104,13 +104,7 @@ async function withHarness (
             projectDir,
             recordDir,
             reviewPath,
-            run:(review = true) => {
-                // A finished run leaves the done ticket file
-                // modified; a rerun needs a clean tree.
-                if (git(projectDir, ['status', '--short'])) {
-                    git(projectDir, ['add', '-A'])
-                    git(projectDir, ['commit', '-m', 'between runs'])
-                }
+            run:(review = true, display = quietDisplay()) => {
                 return runWavesIsolated({
                     tickets:scanTickets(issuesDir, FEAT),
                     specBody:'SPEC',
@@ -124,7 +118,7 @@ async function withHarness (
                     logsDir:join(base, 'logs'),
                     featureName:FEAT,
                     conflictStrategy:'respawn',
-                    display:quietDisplay(),
+                    display,
                     testCmd:'test ! -f broken.txt',
                     retries:0,
                     retryDelay:0,
@@ -161,6 +155,8 @@ test('review pass - AC6.1 AC7.1 a fix merges and the log is ' +
     }, async h => {
         const result = await h.run()
         t.ok(result.allDone, 'tickets done')
+        t.equal(git(h.projectDir, ['status', '--porcelain']), '',
+            'the run leaves a clean tree')
         t.equal(result.branch, 'main', 'AC2.4 reports the branch')
         t.deepEqual(countRoles(h.recordDir),
             { reviewer:1, fixer:1, ticket:1 }, 'one of each')
@@ -232,8 +228,14 @@ test('review pass - AC7.2 a broken review does not change the ' +
         writeFileSync(join(h.reviewPath, 'keep'), '')
         git(h.projectDir, ['add', '-A'])
         git(h.projectDir, ['commit', '-m', 'block the log'])
-        const result = await h.run()
+        const logs:string[] = []
+        const display = {
+            ...quietDisplay(),
+            log:(msg:string) => { logs.push(msg) },
+        }
+        const result = await h.run(true, display)
         t.ok(result.allDone, 'still all done')
+        t.ok(logs.length > 0, 'the run logged through the display')
     })
 })
 

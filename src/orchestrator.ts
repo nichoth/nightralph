@@ -2763,6 +2763,7 @@ export async function runWavesIsolated (opts:{
                 strategy:opts.conflictStrategy,
             })
 
+            const doneThisWave:Ticket[] = []
             for (const branchResult of mergeResult.merged) {
                 const bk = branchToKey.get(
                     branchResult.branch
@@ -2774,6 +2775,7 @@ export async function runWavesIsolated (opts:{
 
                 if (branchResult.merged) {
                     markDone(ticket)
+                    doneThisWave.push(ticket)
                     waveCompleted++
                     totalCompleted++
                     d.setTicketStatus(
@@ -2836,6 +2838,7 @@ export async function runWavesIsolated (opts:{
 
                     if (recovered) {
                         markDone(ticket)
+                        doneThisWave.push(ticket)
                         waveCompleted++
                         totalCompleted++
                         d.setTicketStatus(
@@ -2930,6 +2933,9 @@ export async function runWavesIsolated (opts:{
                     }
                 }
             }
+
+            // markDone edited the ticket files in the base checkout
+            await commitTicketFiles(repoRoot, doneThisWave, d)
 
             if (mergeResult.stoppedAt) {
                 d.log(
