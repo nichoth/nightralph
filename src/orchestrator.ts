@@ -9,7 +9,7 @@ import {
     statSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, dirname, basename } from 'node:path'
+import { join, dirname, basename, relative } from 'node:path'
 import { createInterface } from 'node:readline'
 import { promisify } from 'node:util'
 
@@ -63,6 +63,7 @@ import {
     notesRule,
     agentsMdRule,
 } from './rules.js'
+import { runReviewPass, renderReviewSummary } from './review.js'
 import {
     EFFORT_LADDERS,
     escalateEffort,
@@ -488,6 +489,18 @@ export function stripSpecSection (
     }
 
     return out.join('\n')
+}
+
+// The spec text for the review: the one spec, or every feature's
+// spec under its own heading for a multi-feature run.
+function reviewSpecBody (
+    specBody:string,
+    specBodies?:Map<string, string>
+):string {
+    if (!specBodies || specBodies.size <= 1) return specBody
+    return [...specBodies]
+        .map(([name, body]) => `# Feature: ${name}\n\n${body}`)
+        .join('\n\n')
 }
 
 export function lookupSpec (
@@ -2421,6 +2434,14 @@ export async function runWavesIsolated (opts:{
     concurrency?:number
     // per-feature progress paths for multi-feature runs
     progressPaths?:Map<string, string>
+    // review the unreviewed work and run one fix pass at the end;
+    // unset = no review
+    review?:{
+        reviewPath:string
+        // the default branch, when this run is on an
+        // integration branch
+        forkedFrom?:string
+    }
 }):Promise<{ allDone:boolean; branch:string }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
@@ -2443,9 +2464,8 @@ export async function runWavesIsolated (opts:{
     }
 
     // The review falls back to this when no earlier review or
-    // fork point applies. Unused (hence the underscore) until
-    // Task 10 wires the review; rename it there.
-    const _launchCommit = headCommit(repoRoot)
+    // fork point applies.
+    const launchCommit = headCommit(repoRoot)
 
     const features = new Set(
         opts.tickets.map(t => t.feature).filter(Boolean)
@@ -2966,12 +2986,48 @@ export async function runWavesIsolated (opts:{
 
     if (waveNum > 0) reportBlocked(d, opts.tickets, failedKeys)
 
+    // Advisory, like learnings: a broken review is reported and
+    // never changes the run's result.
+    let reviewLine:string|null = null
+    if (opts.review) {
+        try {
+            const outcome = await runReviewPass({
+                repoRoot,
+                repoName,
+                baseBranch,
+                reviewPath:opts.review.reviewPath,
+                forkedFrom:opts.review.forkedFrom,
+                launchCommit,
+                specBody:reviewSpecBody(
+                    opts.specBody, opts.specBodies
+                ),
+                agentCmd:opts.agentCmd,
+                model:opts.model,
+                timeout:opts.timeout,
+                logsDir:opts.logsDir,
+                testCmd:opts.testCmd,
+                installCmd:opts.installCmd,
+                maxTurns:opts.maxTurns,
+                effort:opts.effort,
+                retries,
+                retryDelay,
+                log:(msg) => d.log(msg),
+            }, { spawnAgent, registry:runningAgents })
+            reviewLine = renderReviewSummary(
+                outcome, relative(repoRoot, opts.review.reviewPath)
+            )
+        } catch (err) {
+            d.log(`\nReview failed: ${formatErrorMessage(err)}`)
+        }
+    }
+
     const remaining = opts.tickets.filter(
         t => t.status === 'ready-for-agent'
     )
     d.log('\n' + renderFinishSummary(
         opts.tickets, totalCompleted, failedKeys
     ))
+    if (reviewLine) d.log(reviewLine)
     d.log(`Work is on ${baseBranch}`)
     d.cleanup()
 

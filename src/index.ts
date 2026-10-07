@@ -337,6 +337,16 @@ function loadTickets (
     }
 }
 
+// One feature keeps its review log next to its progress file; a
+// multi-feature run reviews one combined diff, so its log sits in
+// .scratch/ itself.
+function reviewPathFor (issuesDirs:string[]):string {
+    const featureDir = dirname(issuesDirs[0])
+    return issuesDirs.length === 1 ?
+        join(featureDir, 'review.md') :
+        join(dirname(featureDir), 'review.md')
+}
+
 async function runExecute (argv:{
     provider:string
     model?:string
@@ -435,9 +445,8 @@ async function runExecute (argv:{
                     getRepoRoot(), featureNames
                 )
             )
-            console.log(
-                `Review:       ${argv.review === false ? 'off' : 'on'}`
-            )
+            const reviewState = argv.review === false ? 'off' : 'on'
+            console.log(`Review:       ${reviewState}`)
         } else {
             dryRun(allTickets, fallbackSpec, testCmd)
         }
@@ -476,6 +485,12 @@ async function runExecute (argv:{
             retryDelay:argv.retryDelay,
             concurrency:argv.concurrency,
             progressPaths,
+            review:argv.review === false ?
+                undefined :
+                {
+                    reviewPath:reviewPathFor(loaded.issuesDirs),
+                    forkedFrom:plan?.forkedFrom ?? undefined,
+                },
         })
     } else {
         result = await runWaves(

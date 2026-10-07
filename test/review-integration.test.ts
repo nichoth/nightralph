@@ -1,0 +1,250 @@
+import { test } from '@substrate-system/tapzero'
+import {
+    mkdtempSync, mkdirSync, writeFileSync, readFileSync,
+    readdirSync, existsSync, rmSync,
+} from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { execFileSync, execSync } from 'node:child_process'
+import type { Display } from '../src/display.js'
+import { runWavesIsolated, scanTickets } from '../src/orchestrator.js'
+import { parseReviewEntries } from '../src/review.js'
+
+const MOCK = join(process.cwd(), 'test', 'mock-agent-review.js')
+const FEAT = 'feat'
+
+const GIT_ENV = {
+    ...process.env,
+    GIT_COMMITTER_NAME:'Test',
+    GIT_COMMITTER_EMAIL:'test@example.com',
+    GIT_AUTHOR_NAME:'Test',
+    GIT_AUTHOR_EMAIL:'test@example.com',
+}
+
+function git (cwd:string, args:string[]):string {
+    return execFileSync('git', args, {
+        cwd, env:GIT_ENV, encoding:'utf8',
+    }).trim()
+}
+
+function quietDisplay ():Display {
+    const noop = ():void => {}
+    return {
+        startRun:noop,
+        startWave:noop,
+        setTicketStatus:noop,
+        setBlocked:noop,
+        log:noop,
+        cleanup:noop,
+    }
+}
+
+type Roles = { reviewer:number; fixer:number; ticket:number }
+
+function countRoles (recordDir:string):Roles {
+    const counts:Roles = { reviewer:0, fixer:0, ticket:0 }
+    for (const f of readdirSync(recordDir)) {
+        const { role } = JSON.parse(
+            readFileSync(join(recordDir, f), 'utf8')
+        ) as { role:keyof Roles }
+        counts[role]++
+    }
+    return counts
+}
+
+type Harness = {
+    projectDir:string
+    recordDir:string
+    reviewPath:string
+    run:(review?:boolean) => Promise<{
+        allDone:boolean
+        branch:string
+    }>
+}
+
+const ENV_KEYS = [
+    'MOCK_RECORD_DIR', 'MOCK_REVIEW', 'MOCK_FIX', 'MOCK_TICKET',
+] as const
+
+async function withHarness (
+    env:Partial<Record<typeof ENV_KEYS[number], string>>,
+    fn:(h:Harness) => Promise<void>
+):Promise<void> {
+    const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+    const projectDir = mkdtempSync(join(tmpdir(), 'nightralph-ri-'))
+    const recordDir = mkdtempSync(join(tmpdir(), 'nightralph-rec-'))
+    const saved = Object.fromEntries(
+        ENV_KEYS.map(k => [k, process.env[k]])
+    )
+    const originalCwd = process.cwd()
+    try {
+        execFileSync('git', ['init', `--template=${templateDir}`],
+            { cwd:projectDir, stdio:'ignore' })
+        execSync('git config core.excludesFile /dev/null',
+            { cwd:projectDir })
+        execSync('git config core.hooksPath /dev/null',
+            { cwd:projectDir })
+        const base = join(projectDir, '.scratch', FEAT)
+        const issuesDir = join(base, 'issues')
+        mkdirSync(issuesDir, { recursive:true })
+        writeFileSync(join(projectDir, '.gitignore'),
+            '.scratch/*/logs/\n')
+        writeFileSync(join(issuesDir, '01-only.md'),
+            '# Ticket\n\n**Status:** ready-for-agent\n')
+        git(projectDir, ['add', '-A'])
+        git(projectDir, ['commit', '-m', 'init'])
+        git(projectDir, ['branch', '-M', 'main'])
+
+        process.env.MOCK_RECORD_DIR = recordDir
+        for (const [k, v] of Object.entries(env)) process.env[k] = v
+        process.chdir(projectDir)
+
+        const reviewPath = join(base, 'review.md')
+        await fn({
+            projectDir,
+            recordDir,
+            reviewPath,
+            run:(review = true) => {
+                // A finished run leaves the done ticket file
+                // modified; a rerun needs a clean tree.
+                if (git(projectDir, ['status', '--short'])) {
+                    git(projectDir, ['add', '-A'])
+                    git(projectDir, ['commit', '-m', 'between runs'])
+                }
+                return runWavesIsolated({
+                    tickets:scanTickets(issuesDir, FEAT),
+                    specBody:'SPEC',
+                    specBodies:new Map([[FEAT, 'SPEC']]),
+                    progressPaths:new Map([
+                        [FEAT, join(base, 'progress.md')],
+                    ]),
+                    agentCmd:MOCK,
+                    model:null,
+                    timeout:30,
+                    logsDir:join(base, 'logs'),
+                    featureName:FEAT,
+                    conflictStrategy:'respawn',
+                    display:quietDisplay(),
+                    testCmd:'test ! -f broken.txt',
+                    retries:0,
+                    retryDelay:0,
+                    review:review ? { reviewPath } : undefined,
+                })
+            },
+        })
+    } finally {
+        process.chdir(originalCwd)
+        for (const k of ENV_KEYS) {
+            if (saved[k] === undefined) {
+                Reflect.deleteProperty(process.env, k)
+            } else {
+                process.env[k] = saved[k]
+            }
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(recordDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+}
+
+function committedEntries (projectDir:string, reviewPath:string) {
+    const rel = reviewPath.slice(projectDir.length + 1)
+    return parseReviewEntries(
+        git(projectDir, ['show', `HEAD:${rel}`])
+    )
+}
+
+test('review pass - AC6.1 AC7.1 a fix merges and the log is ' +
+    'committed', async t => {
+    await withHarness({
+        MOCK_REVIEW:'findings', MOCK_FIX:'pass', MOCK_TICKET:'pass',
+    }, async h => {
+        const result = await h.run()
+        t.ok(result.allDone, 'tickets done')
+        t.equal(result.branch, 'main', 'AC2.4 reports the branch')
+        t.deepEqual(countRoles(h.recordDir),
+            { reviewer:1, fixer:1, ticket:1 }, 'one of each')
+        const entries = committedEntries(h.projectDir, h.reviewPath)
+        t.equal(entries.length, 1, 'one committed entry')
+        t.equal(entries[0].status, 'fixed', 'fixed')
+        t.deepEqual(entries[0].findings.map(f => f.checked),
+            [true, false], 'the echoed finding is checked')
+        t.equal(entries[0].to, git(h.projectDir, ['rev-parse', 'HEAD~1']),
+            'marker is the tip after the fix, before the log commit')
+    })
+})
+
+test('review pass - AC6.2 AC6.3 a red fix merges nothing but ' +
+    'the marker advances', async t => {
+    await withHarness({
+        MOCK_REVIEW:'findings', MOCK_FIX:'break', MOCK_TICKET:'pass',
+    }, async h => {
+        await h.run()
+        t.ok(!existsSync(join(h.projectDir, 'broken.txt')),
+            'the broken fix did not merge')
+        const [entry] = committedEntries(h.projectDir, h.reviewPath)
+        t.equal(entry.status, 'unresolved', 'unresolved')
+        t.ok(entry.findings.every(f => !f.checked), 'all unchecked')
+
+        await h.run()
+        t.equal(countRoles(h.recordDir).reviewer, 1,
+            'a second run does not review the same range')
+    })
+})
+
+test('review pass - AC4.4 bookkeeping-only changes skip the ' +
+    'review', async t => {
+    await withHarness({
+        MOCK_REVIEW:'findings', MOCK_FIX:'pass', MOCK_TICKET:'fail',
+    }, async h => {
+        await h.run()
+        t.equal(countRoles(h.recordDir).reviewer, 0, 'no reviewer')
+        t.ok(!existsSync(h.reviewPath), 'no review log')
+    })
+})
+
+test('review pass - a clean review, then nothing new to review',
+    async t => {
+        await withHarness({
+            MOCK_REVIEW:'clean', MOCK_FIX:'pass', MOCK_TICKET:'pass',
+        }, async h => {
+            await h.run()
+            const counts = countRoles(h.recordDir)
+            t.equal(counts.reviewer, 1, 'reviewed once')
+            t.equal(counts.fixer, 0, 'AC5.2 no fixer')
+            t.equal(
+                committedEntries(h.projectDir, h.reviewPath)[0].status,
+                'clean', 'clean entry'
+            )
+            await h.run()
+            t.equal(countRoles(h.recordDir).reviewer, 1,
+                'the review log commit does not trigger a review')
+        })
+    })
+
+test('review pass - AC7.2 a broken review does not change the ' +
+    'result', async t => {
+    await withHarness({
+        MOCK_REVIEW:'clean', MOCK_FIX:'pass', MOCK_TICKET:'pass',
+    }, async h => {
+        // A directory where the log file should be: appending throws
+        mkdirSync(h.reviewPath, { recursive:true })
+        writeFileSync(join(h.reviewPath, 'keep'), '')
+        git(h.projectDir, ['add', '-A'])
+        git(h.projectDir, ['commit', '-m', 'block the log'])
+        const result = await h.run()
+        t.ok(result.allDone, 'still all done')
+    })
+})
+
+test('review pass - AC7.3 no review option, no reviewer',
+    async t => {
+        await withHarness({
+            MOCK_REVIEW:'findings',
+            MOCK_FIX:'pass',
+            MOCK_TICKET:'pass',
+        }, async h => {
+            await h.run(false)
+            t.equal(countRoles(h.recordDir).reviewer, 0, 'no reviewer')
+        })
+    })

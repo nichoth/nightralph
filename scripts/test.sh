@@ -24,6 +24,7 @@ TESTS=(
     testcmd
     resolve
     integration
+    review-integration
 )
 
 RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/nightralph-testrun-XXXXXX")

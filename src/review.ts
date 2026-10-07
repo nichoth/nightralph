@@ -1,12 +1,14 @@
-import { writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
     NOTES_PATH,
     formatDate,
     collectNotes,
     ensureNotesIgnored,
+    appendEntry,
 } from './learnings.js'
 import { runTestCmd } from './testcmd.js'
+import { commitProgress } from './progress.js'
 import { runWithRetries, type EffortLevel } from './retry.js'
 import {
     createNamedWorktree,
@@ -15,6 +17,10 @@ import {
     commitDirty,
     hasNewCommits,
     isDirty,
+    hasChangesOutside,
+    headCommit,
+    isAncestor,
+    mergeBase,
 } from './worktree.js'
 import { mergeBranch } from './merge.js'
 import type { AgentResult } from './orchestrator.js'
@@ -731,4 +737,81 @@ export async function runFixer (
             await discardWorktree(opts, wt)
         }
     })
+}
+
+export function readReviewEntries (path:string):ReviewEntry[] {
+    if (!existsSync(path)) return []
+    return parseReviewEntries(readFileSync(path, 'utf8'))
+}
+
+// Reviews everything since the last reviewed commit, runs one fix
+// pass when there are findings, and appends and commits one entry
+// to the review log. Skips entirely when the range only touches
+// bookkeeping under REVIEW_EXCLUDE.
+export async function runReviewPass (
+    opts:ReviewPassOpts,
+    deps:ReviewDeps
+):Promise<ReviewOutcome> {
+    const now = opts.now ?? (() => new Date())
+    const to = headCommit(opts.repoRoot)
+    const forkPoint = opts.forkedFrom ?
+        mergeBase(opts.repoRoot, opts.forkedFrom, to) :
+        null
+    const from = selectReviewBase(readReviewEntries(opts.reviewPath), {
+        isAncestor:sha => isAncestor(opts.repoRoot, sha, to),
+        forkPoint,
+        launchCommit:opts.launchCommit,
+    })
+    if (!hasChangesOutside(opts.repoRoot, from, to, REVIEW_EXCLUDE)) {
+        opts.log('\nReview: nothing new to review')
+        return { status:'skipped', findings:0, fixed:0 }
+    }
+
+    opts.log(`\nReviewing ${from.slice(0, 7)}..${to.slice(0, 7)}`)
+    const findings = await runReviewer(opts, deps, { from, to })
+
+    let entry:ReviewEntryInput
+    if (findings === null) {
+        entry = {
+            from,
+            to,
+            status:'review-failed',
+            now:now(),
+            findings:[]
+        }
+    } else if (findings.length === 0) {
+        entry = { from, to, status:'clean', now:now(), findings:[] }
+    } else {
+        opts.log(
+            `Review: ${findings.length} finding` +
+            `${findings.length === 1 ? '' : 's'}`
+        )
+        const fix = await runFixer(opts, deps, findings)
+        entry = {
+            from,
+            // A merged fix counts as reviewed
+            to:fix.merged ? headCommit(opts.repoRoot) : to,
+            status:fix.merged ? 'fixed' : 'unresolved',
+            now:now(),
+            findings:fix.findings,
+            fix:{
+                attempts:fix.attempts,
+                maxAttempts:opts.retries + 1,
+                effort:fix.effort,
+                exitCode:fix.exitCode,
+                result:fix.result,
+                notes:fix.notes,
+            },
+        }
+    }
+
+    appendEntry(opts.reviewPath, renderReviewEntry(entry))
+    await commitProgress(
+        opts.repoRoot, opts.reviewPath, 'nightralph: record review'
+    )
+    return {
+        status:entry.status,
+        findings:entry.findings.length,
+        fixed:entry.findings.filter(f => f.checked).length,
+    }
 }
