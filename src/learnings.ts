@@ -46,8 +46,8 @@ type EntryBase = {
     now:Date
 }
 
-// What one agent process did. Phase 4 attaches this to every attempt
-// outcome where an agent actually ran.
+// What one agent process did: its exit code, the items it reported,
+// whether it was killed at the timeout, and the notes it left.
 export type AgentRunRecord = {
     exitCode:number
     completedItems:string[]
