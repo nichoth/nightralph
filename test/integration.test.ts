@@ -28,6 +28,7 @@ import {
 } from '../src/orchestrator.js'
 import { parseEntries, readEntries } from '../src/learnings.js'
 import { readProgress } from '../src/progress.js'
+import { parseReviewEntries } from '../src/review.js'
 
 function tmp ():string {
     return mkdtempSync(
@@ -4936,3 +4937,134 @@ test('CLI subprocess - AC2.2 a run from main resumes the ' +
         rmSync(templateDir, { recursive:true, force:true })
     }
 })
+
+const MOCK_REVIEW_AGENT = join(
+    process.cwd(), 'test', 'mock-agent-review.js'
+)
+
+function headBranch (dir:string):string {
+    return gitOut(dir, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()
+}
+
+function countReviewerRuns (recordDir:string):number {
+    return readdirSync(recordDir).filter(f => {
+        const rec = JSON.parse(
+            readFileSync(join(recordDir, f), 'utf8')
+        ) as { role:string }
+        return rec.role === 'reviewer'
+    }).length
+}
+
+test('CLI subprocess - a stale integration branch is reported and ' +
+    'the launch branch is checked back out', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writeFileSync(
+            join(issuesDir, '01-pass.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        // The branch forks before the tickets exist and has a commit
+        // of its own, so it is neither current nor an ancestor of main
+        execSync(`git checkout -q -b nightralph--${FEAT} HEAD~1`,
+            { cwd:projectDir })
+        writeFileSync(join(projectDir, 'other.txt'), 'x')
+        commitAll(projectDir, 'unrelated work')
+        execSync('git checkout -q main', { cwd:projectDir })
+
+        const { code } = await spawnCli([
+            MOCK_AGENT,
+            '--spec', FEAT,
+            '--timeout', '10',
+            '--retry-delay', '0',
+            '--test-cmd', 'true',
+            '--no-review',
+        ], { cwd:projectDir })
+
+        t.equal(code, 2, 'exit 2')
+        t.equal(headBranch(projectDir), 'main',
+            'the launch branch is checked out again')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - a review runs once across a run and its ' +
+    'resume', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    const recordDir = mkdtempSync(join(tmpdir(), 'nightralph-rec-'))
+    try {
+        writeFileSync(
+            join(issuesDir, '01-pass.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        const args = [
+            MOCK_REVIEW_AGENT,
+            '--spec', FEAT,
+            '--timeout', '30',
+            '--retry-delay', '0',
+            '--test-cmd', 'true',
+        ]
+        const env = {
+            ...process.env,
+            MOCK_RECORD_DIR:recordDir,
+            MOCK_REVIEW:'clean',
+            MOCK_FIX:'pass',
+            MOCK_TICKET:'pass',
+        }
+
+        const first = await spawnCli(args, { cwd:projectDir, env })
+        t.equal(first.code, 0, 'first run exits 0')
+        t.equal(headBranch(projectDir), `nightralph--${FEAT}`,
+            'left on the integration branch')
+        const entries = parseReviewEntries(gitOut(projectDir, [
+            'show', `HEAD:.scratch/${FEAT}/review.md`,
+        ]))
+        t.deepEqual(entries.map(e => e.status), ['clean'],
+            'one committed clean entry')
+        t.equal(countReviewerRuns(recordDir), 1, 'reviewed once')
+
+        execSync('git checkout -q main', { cwd:projectDir })
+        const second = await spawnCli(args, { cwd:projectDir, env })
+        t.equal(second.code, 0, 'second run exits 0')
+        t.equal(countReviewerRuns(recordDir), 1,
+            'a resume with nothing new does not review again')
+        t.equal(gitOut(projectDir, ['status', '--porcelain']), '',
+            'working tree is clean')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(recordDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - a dry run from main changes no branch',
+    async t => {
+        const { projectDir, issuesDir, templateDir } = cliGitRepo()
+        try {
+            writeFileSync(
+                join(issuesDir, '01-pass.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            commitAll(projectDir, 'add tickets')
+
+            const { code } = await spawnCli([
+                MOCK_AGENT,
+                '--spec', FEAT,
+                '--dry-run',
+            ], { cwd:projectDir })
+
+            t.equal(code, 0, 'exit 0')
+            t.equal(headBranch(projectDir), 'main', 'still on main')
+            t.equal(
+                gitOut(projectDir, ['branch', '--list', 'nightralph--*'])
+                    .trim(),
+                '', 'no integration branch created'
+            )
+        } finally {
+            removeWorktreesAndRepo(projectDir)
+            rmSync(templateDir, { recursive:true, force:true })
+        }
+    })

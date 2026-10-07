@@ -56,7 +56,11 @@ type Harness = {
     projectDir:string
     recordDir:string
     reviewPath:string
-    run:(review?:boolean, display?:Display) => Promise<{
+    run:(
+        review?:boolean,
+        display?:Display,
+        forkedFrom?:string
+    ) => Promise<{
         allDone:boolean
         branch:string
     }>
@@ -104,7 +108,7 @@ async function withHarness (
             projectDir,
             recordDir,
             reviewPath,
-            run:(review = true, display = quietDisplay()) => {
+            run:(review = true, display = quietDisplay(), forkedFrom) => {
                 return runWavesIsolated({
                     tickets:scanTickets(issuesDir, FEAT),
                     specBody:'SPEC',
@@ -122,7 +126,7 @@ async function withHarness (
                     testCmd:'test ! -f broken.txt',
                     retries:0,
                     retryDelay:0,
-                    review:review ? { reviewPath } : undefined,
+                    review:review ? { reviewPath, forkedFrom } : undefined,
                 })
             },
         })
@@ -251,3 +255,24 @@ test('review pass - AC7.3 no review option, no reviewer',
             t.equal(countRoles(h.recordDir).reviewer, 0, 'no reviewer')
         })
     })
+
+test('review pass - a reviewer that writes no findings file is ' +
+    'review-failed and is retried next run', async t => {
+    await withHarness({
+        MOCK_REVIEW:'none', MOCK_FIX:'pass', MOCK_TICKET:'pass',
+    }, async h => {
+        // As on an integration branch: the fork point is the floor
+        git(h.projectDir, ['checkout', '-b', 'nightralph--feat'])
+        await h.run(true, undefined, 'main')
+        const counts = countRoles(h.recordDir)
+        t.equal(counts.reviewer, 1, 'reviewed once')
+        t.equal(counts.fixer, 0, 'no fixer')
+        const entries = committedEntries(h.projectDir, h.reviewPath)
+        t.equal(entries.length, 1, 'one entry')
+        t.equal(entries[0].status, 'review-failed', 'review-failed')
+
+        await h.run(true, undefined, 'main')
+        t.equal(countRoles(h.recordDir).reviewer, 2,
+            'the unreviewed range is reviewed again')
+    })
+})
