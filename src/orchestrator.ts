@@ -53,6 +53,17 @@ import {
 } from './display.js'
 import { runTestCmd } from './testcmd.js'
 import {
+    readDocsRule,
+    installRule,
+    testGateRule,
+    LINT_RULE,
+    integrityRule,
+    CONFINEMENT_RULES,
+    commitRule,
+    notesRule,
+    agentsMdRule,
+} from './rules.js'
+import {
     EFFORT_LADDERS,
     escalateEffort,
     retryDelayFor,
@@ -71,7 +82,6 @@ export {
     type ProviderName,
 } from './retry.js'
 import {
-    NOTES_PATH,
     LOG_TAIL_LINES,
     appendEntry,
     collectNotes,
@@ -489,20 +499,6 @@ export function lookupSpec (
     return specBodies.get(feature) ?? fallback
 }
 
-// The rule for agents in a worktree the orchestrator has
-// already installed dependencies into. Empty without one.
-function installRule (installCmd?:string):string[] {
-    if (!installCmd) return []
-    return [
-        '- Dependencies are already installed with ' +
-            `\`${installCmd}\`. Do NOT reinstall them ` +
-            'with any other command; to reinstall, run ' +
-            'that same command. To add a dependency, use ' +
-            'the package manager that command uses, so ' +
-            'its lockfile stays in sync.',
-    ]
-}
-
 function historyBlock (history?:string):string[] {
     if (!history) return []
     return [history, '']
@@ -531,12 +527,7 @@ export function renderPrompt (
             'Implement the ticket using /tdd.',
         '',
         'Follow these rules:',
-        '- Read the files directly relevant to the ' +
-            'ticket before writing code. Also read any ' +
-            'AGENTS.md in or above the directories you ' +
-            'will touch, plus CONTEXT.md and the ' +
-            'relevant docs/adr/ entries if they exist. ' +
-            'If they do not exist, proceed silently.',
+        readDocsRule('ticket'),
         '- Work ONLY on this ticket. Do not fix ' +
             'unrelated problems you notice.',
         '- Do NOT research external APIs or services ' +
@@ -553,55 +544,16 @@ export function renderPrompt (
             'a test adds no value), skip test-first ' +
             'and record that decision in your notes ' +
             'file.',
-        '- While iterating, run only the tests ' +
-            'relevant to what you changed. Run ' +
-            `\`${opts.testCmd}\` in full once, as the ` +
-            'final gate before your last commit. Do ' +
-            'not commit with failing tests. The ' +
-            'orchestrator runs the same command after ' +
-            'you exit and rejects the ticket if it ' +
-            'fails.',
-        '- If the project has a lint script, run it ' +
-            'and fix what it reports.',
-        '- INTEGRITY: never delete, skip, weaken, or ' +
-            'write tautological tests to force a green ' +
-            'result. Only report a checklist item done ' +
-            'when its real tests genuinely pass. If an ' +
-            'item cannot be completed honestly, leave ' +
-            'it unchecked and record what blocked you ' +
-            'in your notes file.',
-        '- Do NOT read or modify files outside ' +
-            'your current directory (the worktree).',
-        '- Do NOT run git push.',
-        '- Commit after each checklist item, and make ' +
-            'sure everything is committed when finished, ' +
-            'except your notes file.',
-        `- Keep notes for this attempt in \`${NOTES_PATH}\` ` +
-            '(create the directory). Update it after each ' +
-            'checklist item and as soon as you hit a ' +
-            'blocker, not only at the end. Record what you ' +
-            'implemented, files changed, how you read any ' +
-            'vague acceptance criteria, what blocked you, and ' +
-            'anything the next attempt at this ticket should ' +
-            'know. Never commit, git add, or delete this ' +
-            'file; the orchestrator collects it.',
+        testGateRule(opts.testCmd, 'ticket'),
+        LINT_RULE,
+        integrityRule('checklist item'),
+        ...CONFINEMENT_RULES,
+        commitRule('checklist item'),
+        notesRule('checklist item', 'ticket'),
         '- After completing each checklist item in the ' +
             'ticket, print a line: [x] <item text> ' +
             '(matching the checklist text exactly).',
-        '- Before your final commit, record reusable ' +
-            'learnings in the nearest AGENTS.md (in or ' +
-            'above the directories you modified; ' +
-            'prefer that over the repo root). Good ' +
-            'additions: module conventions, gotchas, ' +
-            'files that must change together, how to ' +
-            'test that area, environment requirements. ' +
-            'Do NOT add ticket-specific details or ' +
-            'temporary debugging notes. Only write ' +
-            'when you have knowledge that would help ' +
-            'future work in that directory. Reusable ' +
-            'patterns go in AGENTS.md; anything ' +
-            'specific to this ticket goes in your ' +
-            'notes file.',
+        agentsMdRule('ticket'),
         '',
     ].join('\n')
 }

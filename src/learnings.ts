@@ -6,7 +6,7 @@ import {
     rmSync,
     writeFileSync,
 } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 // -- Constants and types --
 
@@ -129,7 +129,7 @@ function renderNotesSection (notes:string|null):string {
         'The agent left no notes.'
 }
 
-function formatDate (date:Date):string {
+export function formatDate (date:Date):string {
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')
     const day = String(date.getDate()).padStart(2, '0')
@@ -464,15 +464,20 @@ export function appendEntry (path:string, text:string):void {
     appendFileSync(path, text)
 }
 
-// Reads the agent's notes and removes the whole notes directory
-// (also when there are no notes), so nothing in it can reach a
-// commit. Blank notes count as none.
-export function collectNotes (worktreePath:string):string|null {
-    const notesPath = join(worktreePath, NOTES_PATH)
-    const text = existsSync(notesPath) ?
-        readFileSync(notesPath, 'utf8').trim() :
+// Reads one file from the worktree's notes directory (the notes
+// by default), then removes the whole directory (also when the
+// file is missing), so nothing in it can reach a commit. Blank
+// text counts as none.
+export function collectNotes (
+    worktreePath:string,
+    file:string = basename(NOTES_PATH)
+):string|null {
+    const dir = join(worktreePath, dirname(NOTES_PATH))
+    const path = join(dir, file)
+    const text = existsSync(path) ?
+        readFileSync(path, 'utf8').trim() :
         ''
-    rmSync(dirname(notesPath), { recursive:true, force:true })
+    rmSync(dir, { recursive:true, force:true })
     return text || null
 }
 

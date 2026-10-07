@@ -1370,3 +1370,20 @@ test(
         }
     }
 )
+
+test('collectNotes - reads a named file and removes the dir', t => {
+    const dir = mkdtempSync(join(tmpdir(), 'nightralph-notes-'))
+    try {
+        mkdirSync(join(dir, '.nightralph'))
+        writeFileSync(
+            join(dir, '.nightralph', 'findings.md'), '- [ ] a\n'
+        )
+        writeFileSync(join(dir, '.nightralph', 'notes.md'), 'n')
+        t.equal(collectNotes(dir, 'findings.md'), '- [ ] a',
+            'returns the named file, trimmed')
+        t.ok(!existsSync(join(dir, '.nightralph')),
+            'removes the whole directory')
+    } finally {
+        rmSync(dir, { recursive:true, force:true })
+    }
+})
