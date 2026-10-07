@@ -237,7 +237,9 @@ export async function commitProgress (
     paths:string|string[],
     message:string
 ):Promise<boolean> {
-    const list = typeof paths === 'string' ? [paths] : paths
+    const list = typeof paths === 'string' ?
+        [paths] :
+        paths
     await execFileAsync(
         'git',
         ['add', '--force', '--', ...list],

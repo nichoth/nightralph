@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto'
 //   pass       commit a new file with `git add -A`, exit 0
 //   fail       exit 1
 //   fail-once  exit 1 the first time per worktree, then pass
+//   no-commit  exit 0 without committing anything
 //   hang       never exit
 // Each invocation writes one JSON record into MOCK_RECORD_DIR:
 // { time, cwd, token, prompt }. The notes contain the token, so a
@@ -76,6 +77,7 @@ function run (prompt) {
         process.exit(0)
     }
     if (mode === 'fail') process.exit(1)
+    if (mode === 'no-commit') process.exit(0)
     if (mode === 'fail-once') {
         // The worktree directory name is stable across attempts
         // of one ticket, so the marker counts per ticket.

@@ -7,6 +7,7 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
     generateProgress,
     generateMultiFeatureProgress,
@@ -657,6 +658,52 @@ test(
             countAfter,
             countBefore,
             'should not create a new commit'
+        )
+    }
+)
+
+test(
+    'commitProgress with array commits when only a later path changed',
+    async t => {
+        const repoRoot = initTempRepo()
+        const progressPath = 'progress.md'
+        const learningsPath = 'learnings.md'
+        const fullLearningsPath = join(repoRoot, learningsPath)
+
+        const data = generateProgress('later-path-feature', [
+            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+        ])
+        writeProgress(join(repoRoot, progressPath), data)
+        writeFileSync(fullLearningsPath, '# Learnings\n\n')
+        await commitProgress(
+            repoRoot,
+            [progressPath, learningsPath],
+            'Initial commit'
+        )
+        const headBefore = execSync('git rev-parse HEAD', {
+            cwd:repoRoot,
+        }).toString().trim()
+
+        const updated = `# Learnings\n\n${randomUUID()}\n`
+        writeFileSync(fullLearningsPath, updated)
+
+        const committed = await commitProgress(
+            repoRoot,
+            [progressPath, learningsPath],
+            'Only learnings changed'
+        )
+        t.equal(committed, true, 'reports that it committed')
+
+        const headAfter = execSync('git rev-parse HEAD', {
+            cwd:repoRoot,
+        }).toString().trim()
+        t.notEqual(headAfter, headBefore, 'HEAD moved')
+        t.equal(
+            execSync(`git show HEAD:${learningsPath}`, {
+                cwd:repoRoot,
+            }).toString(),
+            updated,
+            'the new commit holds the changed second file'
         )
     }
 )

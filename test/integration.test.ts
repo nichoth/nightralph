@@ -4748,3 +4748,88 @@ test('runWavesIsolated - AC7.3: an unwritable learnings.md never ' +
         )
     })
 })
+
+test('runWavesIsolated - AC6: an attempt that throws appends ' +
+    'an error entry', async t => {
+    await withNotesRepo(async repo => {
+        repo.addTicket('01-vanish.md')
+        const tickets = scanTickets(repo.issuesDir)
+        commitAll(repo.projectDir, 'add tickets')
+
+        await repo.run(tickets, { agentCmd:MOCK_DELETE_WORKTREE_01 })
+
+        const key = ticketKey(tickets[0].feature, tickets[0].num)
+        t.deepEqual(
+            readEntries(repo.learningsPath)
+                .filter(e => e.key === key)
+                .map(e => [e.attempt, e.outcome]),
+            [[1, 'error']],
+            'one entry, with outcome error'
+        )
+        t.equal(
+            tickets[0].status, 'ready-for-agent',
+            'the ticket did not finish'
+        )
+    })
+})
+
+test('runWavesIsolated - AC6: a failed install appends an ' +
+    'install entry with the install log tail', async t => {
+    await withNotesRepo(async repo => {
+        process.env.MOCK_MODE = 'pass'
+        repo.addTicket('01-deps.md')
+        const tickets = scanTickets(repo.issuesDir)
+        commitAll(repo.projectDir, 'add tickets')
+        const installToken = randomUUID()
+
+        await repo.run(tickets, {
+            installCmd:`echo ${installToken}; exit 1`,
+        })
+
+        t.deepEqual(
+            readNotesRecords(repo.recordDir), [],
+            'the agent never ran'
+        )
+        const key = ticketKey(tickets[0].feature, tickets[0].num)
+        const entries = readEntries(repo.learningsPath)
+            .filter(e => e.key === key)
+        t.deepEqual(
+            entries.map(e => e.outcome), ['install'],
+            'one entry, with outcome install'
+        )
+        t.ok(
+            entries[0]?.body.includes('01-deps.install.log'),
+            'the entry names the install log'
+        )
+        t.ok(
+            entries[0]?.body.includes(installToken),
+            'the entry holds the tail of the install log'
+        )
+    })
+})
+
+test('runWavesIsolated - AC6: an attempt with no commits ' +
+    'appends a no-commits entry with its notes', async t => {
+    await withNotesRepo(async repo => {
+        process.env.MOCK_MODE = 'no-commit'
+        repo.addTicket('01-idle.md')
+        const tickets = scanTickets(repo.issuesDir)
+        commitAll(repo.projectDir, 'add tickets')
+
+        await repo.run(tickets)
+
+        const records = readNotesRecords(repo.recordDir)
+        t.equal(records.length, 1, 'the agent ran once')
+        const key = ticketKey(tickets[0].feature, tickets[0].num)
+        const entries = readEntries(repo.learningsPath)
+            .filter(e => e.key === key)
+        t.deepEqual(
+            entries.map(e => e.outcome), ['no-commits'],
+            'one entry, with outcome no-commits'
+        )
+        t.ok(
+            entries[0]?.body.includes(records[0]?.token ?? '-'),
+            'the entry holds the notes the agent left'
+        )
+    })
+})
