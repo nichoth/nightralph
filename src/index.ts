@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import yargs from 'yargs'
@@ -245,11 +246,15 @@ type LoadedTickets = {
     issuesDirs:string[]
     firstFeatureName:string
     firstLogsDir:string
+    // paths a selection needs that are not in the working tree
+    missing:string[]
 }
 
 // Scans every selected feature's tickets from the working tree.
 // `log` is a no-op for the silent re-scan after resuming an
-// integration branch.
+// integration branch. A selection whose issues dir or spec is
+// absent is skipped and reported in `missing`; the caller decides
+// whether that is fatal.
 function loadTickets (
     selections:FeatureSelection[],
     log:(msg:string) => void
@@ -260,21 +265,18 @@ function loadTickets (
     const issuesDirs:string[] = []
     let firstFeatureName = ''
     let firstLogsDir = ''
+    const missing:string[] = []
 
     for (const selection of selections) {
         const { dir, spec, name } = selection
 
         if (!existsSync(dir)) {
-            console.error(
-                `Directory not found: ${dir}`
-            )
-            process.exit(2)
+            missing.push(`Directory not found: ${dir}`)
+            continue
         }
         if (!existsSync(spec)) {
-            console.error(
-                `Spec file not found: ${spec}`
-            )
-            process.exit(2)
+            missing.push(`Spec file not found: ${spec}`)
+            continue
         }
 
         const specBody = stripSpecSection(
@@ -334,7 +336,46 @@ function loadTickets (
         issuesDirs,
         firstFeatureName,
         firstLogsDir,
+        missing,
     }
+}
+
+// The first scan of a run: anything missing is a usage error.
+function loadTicketsOrExit (
+    selections:FeatureSelection[]
+):LoadedTickets {
+    const loaded = loadTickets(selections, console.log)
+    if (loaded.missing.length > 0) {
+        for (const msg of loaded.missing) console.error(msg)
+        process.exit(2)
+    }
+    return loaded
+}
+
+// A resumed integration branch can predate the tickets or spec of
+// this run. Puts the launch branch back and exits 2 with the fix.
+function failStaleResume (
+    plan:IntegrationPlan,
+    problems:string[]
+):never {
+    try {
+        execFileSync(
+            'git', ['checkout', '--quiet', plan.launchBranch],
+            { cwd:getRepoRoot(), stdio:'ignore' }
+        )
+    } catch {
+        // report the problem below either way
+    }
+    const n = plan.behind
+    console.error(
+        `Cannot resume ${plan.branch}: ` +
+        `${problems.join('; ')}. It is ${n} ` +
+        `commit${n === 1 ? '' : 's'} behind ${plan.launchBranch}. ` +
+        `Merge ${plan.launchBranch} into it, or delete it with ` +
+        `\`git branch -D ${plan.branch}\`. ` +
+        `Back on ${plan.launchBranch}.`
+    )
+    process.exit(2)
 }
 
 // One feature keeps its review log next to its progress file; a
@@ -367,7 +408,7 @@ async function runExecute (argv:{
         argv.spec
     )
 
-    let loaded = loadTickets(selections, console.log)
+    let loaded = loadTicketsOrExit(selections)
     if (loaded.allTickets.length === 0) return
 
     const isolated = isGitRepo()
@@ -390,6 +431,9 @@ async function runExecute (argv:{
         } else if (plan.resumed) {
             console.log(
                 `Resumed ${plan.branch}` +
+                (plan.fastForwarded ?
+                    ` (fast-forwarded to ${plan.launchBranch})` :
+                    '') +
                 (plan.behind > 0 ?
                     ` (${plan.launchBranch} is ${plan.behind} ` +
                     `commit${plan.behind === 1 ? '' : 's'} ahead)` :
@@ -397,6 +441,12 @@ async function runExecute (argv:{
             )
             // Ticket statuses live on the branch just checked out
             loaded = loadTickets(selections, () => {})
+            if (loaded.missing.length > 0) {
+                failStaleResume(plan, loaded.missing)
+            }
+            if (loaded.allTickets.length === 0) {
+                failStaleResume(plan, ['no tickets'])
+            }
         }
     }
 
