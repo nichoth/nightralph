@@ -1,5 +1,19 @@
-import { dirname } from 'node:path'
-import { NOTES_PATH, formatDate } from './learnings.js'
+import { writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import {
+    NOTES_PATH,
+    formatDate,
+    collectNotes,
+    ensureNotesIgnored,
+} from './learnings.js'
+import { runTestCmd } from './testcmd.js'
+import { runWithRetries, type EffortLevel } from './retry.js'
+import {
+    createNamedWorktree,
+    deleteBranch,
+    removeWorktree,
+} from './worktree.js'
+import type { AgentResult } from './orchestrator.js'
 import {
     readDocsRule,
     installRule,
@@ -421,4 +435,151 @@ export function renderReviewSummary (
             return _exhaustive
         }
     }
+}
+
+export type SpawnAgentFn = (opts:{
+    prompt:string
+    agentCmd:string
+    model:string|null
+    timeout:number
+    logPath:string
+    cwd?:string
+    label?:string
+    maxTurns?:number
+    effort?:EffortLevel
+    onLine?:(line:string) => void
+}) => Promise<AgentResult>
+
+export type ReviewDeps = {
+    spawnAgent:SpawnAgentFn
+    // running child pids, so SIGINT also kills installs and tests
+    registry?:Set<number>
+}
+
+export type ReviewPassOpts = {
+    repoRoot:string
+    repoName:string
+    // the branch the run merged into; the fix merges here too
+    baseBranch:string
+    reviewPath:string
+    // the default branch, when baseBranch is an integration branch
+    forkedFrom?:string
+    launchCommit:string
+    specBody:string
+    agentCmd:string
+    model:string|null
+    timeout:number
+    logsDir:string
+    testCmd:string
+    installCmd?:string
+    maxTurns?:number
+    effort?:EffortLevel
+    retries:number
+    retryDelay:number
+    log:(msg:string) => void
+    now?:() => Date
+}
+
+// Same naming as ticket logs: the first attempt keeps the plain
+// name, later attempts get their own file.
+function logPath (
+    logsDir:string,
+    stem:string,
+    attempt:number,
+    ext:string
+):string {
+    const suffix = attempt > 1 ? `.attempt${attempt}` : ''
+    return join(logsDir, `${stem}${suffix}${ext}`)
+}
+
+// Runs a shell step (install or tests) in a worktree, writing its
+// output to `path`; true only on exit 0.
+async function runStep (
+    opts:ReviewPassOpts,
+    deps:ReviewDeps,
+    cmd:string,
+    cwd:string,
+    path:string
+):Promise<boolean> {
+    const result = await runTestCmd({
+        cmd,
+        cwd,
+        timeout:opts.timeout,
+        registry:deps.registry,
+    })
+    writeFileSync(path, result.output)
+    return result.exitCode === 0
+}
+
+async function discardWorktree (
+    opts:ReviewPassOpts,
+    wt:{ worktreePath:string; branchName:string }
+):Promise<void> {
+    try {
+        await removeWorktree(wt.worktreePath, { force:true })
+        await deleteBranch(opts.repoRoot, wt.branchName)
+    } catch (err) {
+        opts.log(
+            `  Failed to remove ${wt.worktreePath}: ` +
+            (err instanceof Error ? err.message : String(err))
+        )
+    }
+}
+
+// Asks an agent to review from..to and returns its findings:
+// [] when clean, null when no attempt produced a usable findings
+// file. The worktree and anything the reviewer changed in it are
+// always discarded.
+export async function runReviewer (
+    opts:ReviewPassOpts,
+    deps:ReviewDeps,
+    range:{ from:string; to:string }
+):Promise<Finding[]|null> {
+    return runWithRetries({
+        maxAttempts:opts.retries + 1,
+        retryDelay:opts.retryDelay,
+        agentCmd:opts.agentCmd,
+        effort:opts.effort,
+        label:'review',
+        log:opts.log,
+    }, async (attempt, effort) => {
+        const wt = await createNamedWorktree({
+            repoRoot:opts.repoRoot,
+            repoName:opts.repoName,
+            baseBranch:opts.baseBranch,
+            name:'review',
+        })
+        try {
+            if (opts.installCmd && !(await runStep(
+                opts, deps, opts.installCmd, wt.worktreePath,
+                logPath(opts.logsDir, 'review', attempt, '.install.log')
+            ))) {
+                opts.log('  review: install failed')
+                return { result:null, stop:false }
+            }
+            ensureNotesIgnored(wt.worktreePath)
+            await deps.spawnAgent({
+                prompt:renderReviewPrompt({
+                    specBody:opts.specBody, ...range,
+                }),
+                agentCmd:opts.agentCmd,
+                model:opts.model,
+                timeout:opts.timeout,
+                logPath:logPath(opts.logsDir, 'review', attempt, '.log'),
+                cwd:wt.worktreePath,
+                label:'review',
+                maxTurns:opts.maxTurns,
+                effort,
+                onLine:opts.log,
+            })
+            const text = collectNotes(wt.worktreePath, FINDINGS_FILE)
+            const findings = text === null ? null : parseFindings(text)
+            if (findings === null) {
+                opts.log('  review: no usable findings file')
+            }
+            return { result:findings, stop:findings !== null }
+        } finally {
+            await discardWorktree(opts, wt)
+        }
+    })
 }

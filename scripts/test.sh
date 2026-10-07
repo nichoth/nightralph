@@ -18,6 +18,7 @@ TESTS=(
     progress
     learnings
     review
+    review-pass
     merge
     display
     testcmd
