@@ -17,6 +17,7 @@ TESTS=(
     worktree
     progress
     learnings
+    review
     merge
     display
     testcmd
