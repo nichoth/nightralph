@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-10-06
+Last verified: 2026-10-07
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -21,12 +21,17 @@ Small orchestrator that runs a single-agent session per issue.
 - `src/index.ts` -- CLI entry point (yargs commands)
 - `src/setup.ts` -- project scaffolding module
 - `src/orchestrator.ts` -- ticket scanning and wave execution
-- `src/worktree.ts` -- git worktree management
+- `src/worktree.ts` -- git worktree management, integration
+  branch planning
 - `src/progress.ts` -- run progress tracking
 - `src/learnings.ts` -- attempt learnings log (render, parse,
   select, notes collection)
 - `src/display.ts` -- terminal status UI (Display interface, StatusDisplay, PlainDisplay)
 - `src/merge.ts` -- branch merging after wave completion
+- `src/retry.ts` -- shared retry loop and effort ladders
+- `src/rules.ts` -- prompt rule lines shared by the ticket,
+  fix and review prompts
+- `src/review.ts` -- review log, reviewer, fixer, review pass
 - `src/testcmd.ts` -- test command detection and execution
 - `src/skills/` -- bundled skill definitions
 - `src/docs-templates/` -- doc templates copied to target projects
@@ -92,9 +97,29 @@ Small orchestrator that runs a single-agent session per issue.
   `DEFAULT_RETRY_DELAY` (30); `0` disables the wait
 - `--concurrency <n>` -- max agents running at once
   within a wave; default `DEFAULT_CONCURRENCY` (5)
+- `--no-review` -- skips the review and fix pass at the
+  end of a run (yargs boolean `review`, default `true`)
 - `--dry-run` -- shows wave order without running;
   auto-detects git repo and shows worktree/branch
-  layout when inside one
+  layout when inside one; also prints the branch
+  decision (`describeIntegrationBranch`) and whether
+  review is on or off
+- **Integration branch**: in a git repo, outside
+  `--dry-run`, the CLI calls `prepareIntegrationBranch`
+  after its first ticket scan (so a run with no tickets
+  creates nothing). Only a run launched from the default
+  branch gets one: it creates or resumes
+  `nightralph--<feature>` (`nightralph--all` for several
+  or no features) and is left on it; launched from any
+  other branch it merges into that branch as before. A
+  dirty tree exits with code 2 before anything is
+  checked out. On resume the CLI logs how far the launch
+  branch is ahead and scans tickets again, silently, so
+  they carry that branch's statuses. It logs
+  `Created branch ...` or `Resumed ...`. The review log
+  is `.scratch/<feature>/review.md` for one feature,
+  `.scratch/review.md` for several; unless `--no-review`
+  it is passed as `review:{ reviewPath, forkedFrom }`
 - **Git auto-detection**: when run inside a git repo,
   the CLI uses isolated worktree execution
   (`runWavesIsolated`) instead of in-place
@@ -103,7 +128,9 @@ Small orchestrator that runs a single-agent session per issue.
 ### orchestrator (`src/orchestrator.ts`)
 - **Exposes**: `Ticket`, `AgentResult`,
   `COMPLETED_RE`, `EFFORT_LADDERS`, `ProviderName`,
-  `EffortLevel`, `ALL_EFFORT_LEVELS`,
+  `EffortLevel`, `ALL_EFFORT_LEVELS` (these effort
+  symbols, `escalateEffort` and `retryDelayFor` live in
+  `src/retry.ts` and are re-exported unchanged),
   `DEFAULT_RETRIES`, `DEFAULT_RETRY_DELAY`,
   `DEFAULT_CONCURRENCY`, `runPool(items, limit, fn)`,
   `escalateEffort(provider, level?)`, `retryDelayFor(base, attempt)`,
@@ -192,10 +219,7 @@ Small orchestrator that runs a single-agent session per issue.
   `agentRun:AgentRunRecord`
   (`{ exitCode, completedItems, timedOut, notes }`):
   `'ready'`, `'failed'` with reason `'exit'` or
-  `'tests'`, and `'no-commits'` (typed
-  `AgentRunRecord|null`; `null` only for the
-  placeholder outcome inside `runTicketAttempts`, which
-  no agent produced). `'failed'` with reason
+  `'tests'`, and `'no-commits'`. `'failed'` with reason
   `'install'` has no `agentRun`, and `'error'` never
   carries one, even when the throw came after the
   agent ran (that attempt's notes are dropped). The
@@ -331,6 +355,8 @@ Small orchestrator that runs a single-agent session per issue.
   retried like any failure), `display`, `effort`,
   `retries`,
   `retryDelay`, `concurrency`,
+  `review` (`{ reviewPath, forkedFrom? }`; unset means
+  no review, so existing callers are unaffected),
   `specBodies` (`Map<string, string>`), and
   `progressPaths` (`Map<string, string>`) in opts;
   when `specBodies` and `progressPaths` are provided,
@@ -352,6 +378,28 @@ Small orchestrator that runs a single-agent session per issue.
   report them. The `progress` passed to `startWave`
   counts only the session set (`completed` = session
   tickets now `done`, `total` = session size)
+- **Integration branch and review**: `runWavesIsolated`
+  returns `{ allDone, branch }`, `branch` being the
+  branch it merged into (the current branch; the CLI
+  has already entered the integration branch). It
+  records the launch commit (`HEAD`) after its
+  dirty-tree check, as the last-resort start of the
+  review range. After each wave's merges it commits the
+  ticket files it marked done (`commitTicketFiles`,
+  before an `-X` stop is acted on), so a finished run
+  leaves no uncommitted ticket statuses. When `review`
+  is set it calls `runReviewPass` after the wave loop
+  (also after an `-X` stop), with `spawnAgent` and the
+  running-process registry injected, and for a
+  multi-feature run pastes every spec under a
+  `# Feature: <name>` heading. After the finish summary
+  it logs the review line (`renderReviewSummary`, from
+  the review outcome; nothing when the review was
+  skipped or threw) and `Work is on <branch>`. The
+  review is advisory: any throw in it is caught,
+  logged through the display as `Review failed: ...`,
+  and never changes `allDone`. In-place `runWaves` has
+  no review
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; a failed attempt
   (non-zero exit, exit 0 with no new commits, or a red
@@ -582,10 +630,60 @@ Small orchestrator that runs a single-agent session per issue.
 
 ### worktree module (`src/worktree.ts`)
 - **Exposes**: `getRepoRoot()`, `getRepoName()`,
-  `getCurrentBranch()`, `buildBranchName(repoRoot,
-  repoName, ticket)`, `createWorktree(opts)`,
+  `getCurrentBranch(cwd?)`, `localBranchExists(repoRoot,
+  name)`, `getDefaultBranch(repoRoot)`,
+  `integrationBranchName(features)`,
+  `planIntegrationBranch(current, defaultBranch,
+  features)`, `IntegrationPlan`,
+  `prepareIntegrationBranch(repoRoot, features)`,
+  `describeIntegrationBranch(repoRoot, features)`,
+  `buildBranchName(repoName, ticket)`,
+  `createWorktree(opts)`, `createNamedWorktree(opts)`,
   `removeWorktree(path, opts?)`,
-  `listWorktrees(repoRoot)`
+  `deleteBranch(repoRoot, name)`,
+  `listWorktrees(repoRoot)`, `headCommit(cwd)`,
+  `mergeBase(cwd, a, b)`, `isAncestor(cwd, ancestor, of)`,
+  `hasChangesOutside(cwd, from, to, excludeDir)`
+- **getDefaultBranch(repoRoot)**: `origin/HEAD` with
+  `origin/` stripped when it exists, else `main` or
+  `master`, whichever exists locally, else `null`
+- **integrationBranchName(features)**: pure;
+  `nightralph--<feature>` for exactly one distinct
+  feature, else `nightralph--all`
+- **planIntegrationBranch(current, defaultBranch,
+  features)**: pure; the name when `current` is the
+  default branch, else `null`; also `null` when the
+  default branch is unknown or HEAD is detached
+- **prepareIntegrationBranch(repoRoot, features)**:
+  returns `IntegrationPlan` `{ branch, created, resumed,
+  behind, launchBranch, forkedFrom }`. When a name is
+  planned it throws on a dirty tree before checking
+  anything out, then checks out the existing branch
+  (`resumed`, `behind` = commits the launch branch has
+  that it lacks) or creates it from the current branch
+  (`created`). Otherwise nothing is checked out and
+  `branch` is the current branch. `forkedFrom` is the
+  default branch whenever the resulting branch is the
+  integration branch (even one checked out by hand),
+  else `null`
+- **describeIntegrationBranch(repoRoot, features)**: the
+  same decision as one line for `--dry-run`, checking
+  nothing out
+- **createNamedWorktree(opts)**: `{ repoRoot, repoName,
+  baseBranch, name }`; creates `<repo>.<name>` on branch
+  `<repo>--<name>` with the same stale cleanup as
+  `createWorktree`, which delegates to the shared
+  creation code. Ticket branches always carry a number,
+  so names cannot collide
+- **deleteBranch(repoRoot, name)**: `git branch -D`; a
+  missing branch is not an error. Runs on the same
+  `worktreeQueue` as `createWorktree`, `createNamedWorktree`
+  and `removeWorktree`
+- **isAncestor / mergeBase / hasChangesOutside**: read
+  only. `isAncestor` is false for an unknown commit;
+  `mergeBase` is `null` on failure; `hasChangesOutside`
+  is true when `from..to` changes any path outside
+  `excludeDir`
 - **buildBranchName**: returns the branch name for a
   ticket as `<repo>--<num>-<slug>`; uses `--`
   instead of `/` to avoid the git ref hierarchy
@@ -610,8 +708,8 @@ Small orchestrator that runs a single-agent session per issue.
   create + remove calls cannot race on `.git/worktrees`
   metadata
 - **Guarantees**: all functions are synchronous except
-  `createWorktree`, `removeWorktree`, and
-  `listWorktrees`
+  `createWorktree`, `createNamedWorktree`,
+  `removeWorktree`, `deleteBranch`, and `listWorktrees`
 
 ### progress module (`src/progress.ts`)
 - **Exposes**: `TicketProgress`, `ProgressData`,
@@ -670,8 +768,8 @@ Small orchestrator that runs a single-agent session per issue.
   `renderHistory(selection)`, `tailLines(text, n)`,
   `learningsPathFor(progressPath)`,
   `readEntries(path)`, `appendEntry(path, text)`,
-  `collectNotes(worktreePath)`,
-  `ensureNotesIgnored(worktreePath)`
+  `collectNotes(worktreePath, file?)`,
+  `ensureNotesIgnored(worktreePath)`, `formatDate(date)`
 - **Imports no values from `src/orchestrator.ts`**:
   callers pass the ticket key (`ticketKey`) and label
   (`ticketLabel`) in. Its only imports are `node:fs`
@@ -735,8 +833,10 @@ Small orchestrator that runs a single-agent session per issue.
   an entry cannot forge another. `appendEntry` is
   synchronous, so concurrent tickets in one Node
   thread never interleave appends, and creates the
-  parent directory. `collectNotes` returns the trimmed
-  notes (blank counts as `null`) and removes the whole
+  parent directory. `collectNotes` reads `file` (default
+  `notes.md`; the reviewer passes `findings.md`) from
+  the `.nightralph/` directory, returns it trimmed
+  (blank counts as `null`) and removes the whole
   `.nightralph/` directory, also when there are no
   notes. `ensureNotesIgnored` writes
   `.nightralph/.gitignore` containing `*` inside the
@@ -745,6 +845,151 @@ Small orchestrator that runs a single-agent session per issue.
   `info/exclude` (which can be a symlink shared by
   every repo on the machine, e.g. via
   `init.templateDir`)
+
+### retry module (`src/retry.ts`)
+- **Exposes**: `EFFORT_LADDERS`, `ProviderName`,
+  `EffortLevel`, `ALL_EFFORT_LEVELS`, `escalateEffort`,
+  `retryDelayFor`, `sleep`, `AttemptStep`, `RetryOpts`,
+  `runWithRetries(opts, run)`; imports nothing from
+  `src/orchestrator.ts`
+- **runWithRetries(opts, run)**: `opts` is `{ maxAttempts,
+  retryDelay, agentCmd, effort?, label, log, wait? }`;
+  `run(attempt, effort)` resolves with `{ result, stop }`.
+  Calls `run` until a step says `stop` or the attempt cap
+  is hit, and returns the last step's `result`. The cap
+  is clamped to at least 1, so there is always one
+  attempt. Before each retry, for a known provider
+  (`basename(agentCmd)` in `EFFORT_LADDERS`) the effort
+  goes through `escalateEffort`, then it waits
+  `retryDelayFor(retryDelay, attempt)` seconds (no wait
+  at 0; `wait` is a test seam, default `sleep`). Logs
+  `Starting <label>` and then `<label>: retrying
+  (attempt n/m[, effort x][, waiting ys])`.
+  `runTicketAttempts`, the reviewer and the fixer all
+  run on it
+
+### rules module (`src/rules.ts`)
+- **Exposes**: `readDocsRule`, `installRule`,
+  `testGateRule`, `LINT_RULE`, `integrityRule`,
+  `CONFINEMENT_RULES`, `commitRule`, `notesRule`,
+  `agentsMdRule`
+- **Guarantees**: the rule lines `renderPrompt` and
+  `renderFixPrompt` share, parameterized by the unit of
+  work (`checklist item` or `finding`) and the subject
+  the orchestrator accepts or rejects (`ticket` or
+  `fix`), so the prompts cannot drift. The ticket prompt
+  text is unchanged by the move
+
+### review module (`src/review.ts`)
+- **Exposes**: `FINDINGS_FILE`, `FINDINGS_PATH`,
+  `NO_FINDINGS`, `REVIEW_EXCLUDE`, `REVIEW_STATUSES`,
+  types `ReviewStatus`, `Finding`, `FixRecord`,
+  `ReviewEntryInput`, `ReviewEntry`, `ReviewOutcome`,
+  `FixFailure`, `FixResult`, `ReviewDeps`,
+  `ReviewPassOpts`; pure `reviewDiffCommand`,
+  `renderReviewPrompt`, `renderFixPrompt`,
+  `parseFindings`, `markFixed`, `renderReviewEntry`,
+  `parseReviewEntries`, `selectReviewBase`,
+  `renderReviewSummary`; effectful `readReviewEntries`,
+  `runReviewer`, `runFixer`, `runReviewPass(opts, deps)`
+- **Imports no values from `src/orchestrator.ts`**
+  (only the `AgentResult` type): it calls `runTestCmd`,
+  the worktree helpers, `mergeBranch`, `commitProgress`
+  and `appendEntry` directly. The orchestrator injects
+  `deps` `{ spawnAgent, registry? }`; `registry` is the
+  running-process set, so SIGINT kills review installs
+  and test gates too
+- **Review log**: `review.md`, append-only, one entry per
+  pass. Each starts with a sentinel
+  `<!-- nightralph:review from=<sha> to=<sha>
+  status=<status> -->`, then a
+  `## <date> -- review <from>..<to> -- <result>` heading,
+  the findings as `- [ ]`/`- [x]` lines with indented
+  detail, an optional `### Fix` section (attempts,
+  effort, agent exit code, result, the fixer's notes),
+  and a `---` line. `status` is `clean`, `fixed`,
+  `unresolved` or `review-failed`. Sentinel text inside
+  findings and notes is neutralized, so an entry cannot
+  forge another. `parseReviewEntries` drops malformed
+  entries (missing or non-hex `from`/`to`, unknown
+  status) instead of throwing, accepts CRLF, and ignores
+  text before the first sentinel
+- **Marker rule**: `to` is the integration tip after the
+  fix merged, else the tip at review time, so the next
+  run reviews only newer work. `selectReviewBase` is
+  pure: the `to` of the latest entry whose status is not
+  `review-failed`, when `isAncestor(to)` holds; else
+  `forkPoint` (the merge-base of `forkedFrom` and the
+  tip, when the run is on an integration branch); else
+  `launchCommit`. A `review-failed` entry never moves
+  the marker
+- **Skip rule**: `runReviewPass` returns
+  `{ status:'skipped' }` without running an agent or
+  writing an entry when `from..tip` changes nothing
+  outside `.scratch/` (`REVIEW_EXCLUDE`), because
+  tickets, progress, learnings and `review.md` are
+  bookkeeping; this keeps the commit that records a
+  review from making the next range look non-empty. The
+  diff the reviewer is told to read excludes `.scratch/`
+  too
+- **runReviewer**: per attempt, a named worktree `review`
+  (`<repo>.review` on `<repo>--review`) off the base
+  branch, `ensureNotesIgnored`, optional `installCmd`
+  (an install failure fails the attempt), then the agent
+  with `renderReviewPrompt`. Success is decided by
+  `.nightralph/findings.md` alone, collected with
+  `collectNotes(wt, 'findings.md')`: `parseFindings`
+  gives the checklist, `[]` for an explicit
+  `No findings.`, and `null` (a failed attempt) for a
+  missing, blank or unparseable file. A file written
+  before a timeout kill still counts. The worktree and
+  its branch are always removed (`finally`), so nothing
+  the reviewer changed or committed reaches the base
+  branch. Returns the findings, or `null` after the last
+  attempt
+- **runFixer**: runs only when there are findings. Per
+  attempt, a named worktree `review-fix`
+  (`<repo>.review-fix`) off the base branch, install,
+  then the agent with `renderFixPrompt`. After it: notes
+  are collected before any auto-commit; a non-zero exit
+  (a timeout is not one) fails the attempt; dirty
+  changes are auto-committed; no new commits fails; a
+  red test gate (`review-fix.test.log`) fails; only then
+  is the branch merged into the base branch from the main
+  checkout, and a merge conflict fails the attempt with
+  git's stderr appended to the notes. A failure is one of
+  `install`, `exit`, `no-commits`, `tests`, `merge`, and
+  the next attempt's prompt carries that reason and the
+  failed attempt's notes. After the last attempt nothing
+  is merged and every finding stays unchecked. On a
+  merge, findings are checked per the fixer's `[x]`
+  lines (`markFixed`: whitespace-collapsed,
+  case-insensitive). Worktrees are removed in `finally`
+- **Retry behavior**: reviewer and fixer each get
+  `retries + 1` attempts through `runWithRetries`, so
+  they escalate effort and back off like a ticket; logs
+  are `review.log`, `review.attempt<n>.log`,
+  `review.install.log`, `review-fix.log`,
+  `review-fix.attempt<n>.log`, `review-fix.test.log`
+  and their attempt variants in `logsDir`. Review
+  attempts are not written to `learnings.md`
+- **runReviewPass(opts, deps)**: reviews everything since
+  `selectReviewBase`, runs the fixer when there are
+  findings, appends one entry (`clean` for none, `fixed`
+  when the fix merged, `unresolved` when it did not,
+  `review-failed` when the reviewer never produced a
+  usable file) and commits `review.md`
+  (`nightralph: record review`). Returns `ReviewOutcome`
+  `{ status, findings, fixed }`
+- **renderReviewSummary(outcome, reviewPath)**: pure; one
+  line naming the finding count, the fixed count and the
+  file, e.g. `Review: 3 findings, 2 fixed -- see <path>`;
+  `null` for `skipped`
+- **Guarantees**: advisory. This module lets errors
+  propagate; `runWavesIsolated` catches them (see
+  orchestrator). SIGINT kills the agent through
+  `killRunningAgents` as for tickets and no entry is
+  written
 
 ### merge module (`src/merge.ts`)
 - **Exposes**: `GitOpResult`, `MergeConflictStrategy`,

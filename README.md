@@ -32,6 +32,8 @@ so they can't drift as long as you install the skills with this package.
   * [Select a ticket](#select-a-ticket)
   * [Worktrees](#worktrees)
   * [Progress](#progress)
+  * [Integration branch](#integration-branch)
+  * [Review](#review)
   * [Status display](#status-display)
 - [Keep Your Machine Awake](#keep-your-machine-awake)
   * [Mac OS](#mac-os)
@@ -161,6 +163,7 @@ Flags:
 | `-m`, `--model` | no | -- | Model flag passed to the agent |
 | `--spec <name>` | no | auto | Feature name (resolves `.scratch/<name>/`) |
 | `--dry-run` | no | -- | Show wave order and prompt without running |
+| `--no-review` | no | review on | Skip the review and fix pass at the end of a run |
 | `-X` | no | -- | Stop on merge conflict instead of re-spawning |
 | `--timeout` | no | `3600` | Kill the agent after N seconds. A killed agent is not a failure: its work is kept (see Notes) |
 | `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable. Shares the agent's `--timeout`. Dependencies are already installed by `--install-cmd` |
@@ -317,6 +320,23 @@ the run stops immediately.
 A file `progress.md` is written to the `.scratch/<feature>/` directory
 and committed after each ticket completes, so you can monitor the run from
 another terminal by reading the file.
+
+### Integration branch
+
+Launched from your default branch (`main`), nightralph does not merge
+into it. It creates `nightralph--<feature>` (or `nightralph--all` for
+several features), merges every ticket there, and leaves you on that
+branch. Running again from `main` resumes the same branch, so finished
+tickets stay finished. Launched from any other branch, it merges into
+that branch.
+
+### Review
+
+After the last wave, an agent reviews everything merged since the last
+review and writes its findings to `review.md` next to `progress.md`. A
+second agent fixes them test-first; its work merges only if the test
+command passes. Findings it could not fix stay unchecked in
+`review.md`. Skip this with `--no-review`.
 
 ### Status display
 
