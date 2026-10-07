@@ -52,12 +52,14 @@ containing that record.
 
 ### attempt-learnings-design.AC3: Learnings IO
 - **attempt-learnings-design.AC3.1 Success:** `collectNotes` returns
-  the notes file's contents and removes the file.
+  the notes file's contents and removes the `.nightralph/` directory,
+  also when there is no notes file.
 - **attempt-learnings-design.AC3.2 Edge:** `collectNotes` returns
   `null` when there is no notes file.
-- **attempt-learnings-design.AC3.3 Success:** `ensureExcluded` run
-  twice leaves exactly one `.nightralph/` line in the repo's
-  `info/exclude`.
+- **attempt-learnings-design.AC3.3 Success:** After
+  `ensureNotesIgnored(worktreePath)`, git ignores everything under
+  `.nightralph/` in that worktree (including its own `.gitignore`), and
+  nothing under the repo's git dir is written.
 - **attempt-learnings-design.AC3.4 Edge:** `readEntries` on a missing
   file returns `[]`.
 
@@ -95,7 +97,7 @@ containing that record.
 - **attempt-learnings-design.AC7.1 Success:** No commit on any ref
   contains a `.nightralph/` path.
 - **attempt-learnings-design.AC7.2 Success:** `learnings.md` is
-  committed and the base working tree is clean when the run ends.
+  committed and has no uncommitted changes when the run ends.
 - **attempt-learnings-design.AC7.3 Failure:** When `learnings.md`
   cannot be read or written, the ticket still finishes `done` and
   `progress.md` is still committed.
@@ -234,24 +236,33 @@ no history and writes no notes.
 
 Pure functions:
 
-- `renderEntry(opts):string` -- builds one entry. Takes ticket,
-  attempt, outcome, optional `timedOut`, `effort`, `exitCode`,
-  `completedItems`, `logName` + `logTail`, `error`, `stderr`, `notes`,
-  and `now:Date` (passed in, so the function stays pure).
+- `renderEntry(input:EntryInput):string` -- builds one entry.
+  `EntryInput` is a union discriminated by `outcome`; every variant has
+  `key` (from `ticketKey`), `label` (from `ticketLabel`), `attempt`,
+  and `now:Date` (passed in, so the function stays pure). Variants
+  where an agent ran carry `run:AgentRunRecord`
+  (`{ exitCode, completedItems, timedOut, notes }`) and optional
+  `effort`; `tests` and `install` carry `logName` + `logTail`; `error`
+  carries `error`; `merge` carries `stderr`. The module takes keys and
+  labels from the caller rather than importing values from
+  `src/orchestrator.ts`, which imports it.
 - `parseEntries(text):LearningEntry[]` -- splits on sentinel lines;
-  `LearningEntry` is `{ ticketKey, attempt, outcome, timedOut, body }`.
+  `LearningEntry` is `{ key, attempt, outcome, timedOut, body }`.
   Text before the first sentinel is ignored.
-- `selectHistory(entries, ticket):{ own, blockers }` -- `own` is the
-  last `MAX_OWN_ENTRIES` entries for `ticketKey(ticket.feature,
-  ticket.num)`; `blockers` is the latest `done` entry per direct
-  blocker, in blocker order.
+- `selectHistory(entries, { key, blockerKeys }):{ own, blockers }` --
+  `own` is the last `MAX_OWN_ENTRIES` entries for `key`; `blockers` is
+  the latest `done` entry for each of `blockerKeys` (the direct
+  blockers' keys, computed by the caller), in blocker order.
 - `renderHistory(selection):string` -- the two prompt sections plus
   framing line, applying the per-entry cap; `''` when both lists are
   empty.
 - `tailLines(text, n):string`.
+- `learningsPathFor(progressPath):string` -- `learnings.md` in the
+  same directory as `progressPath`.
 
 Exported constants: `MAX_OWN_ENTRIES`, `MAX_ENTRY_CHARS`,
-`LOG_TAIL_LINES`, `NOTES_PATH` (`.nightralph/notes.md`).
+`LOG_TAIL_LINES`, `NOTES_PATH` (`.nightralph/notes.md`),
+`TRUNCATED_MARKER`, `LEARNING_OUTCOMES` (the valid outcome values).
 
 IO functions:
 
@@ -259,12 +270,16 @@ IO functions:
 - `appendEntry(path, text):void` -- synchronous append, creating the
   parent directory. Parallel tickets share one Node thread, so
   synchronous appends cannot interleave.
-- `collectNotes(worktreePath):string|null` -- reads and deletes
-  `<worktree>/.nightralph/notes.md` (and the then-empty directory);
-  `null` when absent.
-- `ensureExcluded(repoRoot):void` -- appends `.nightralph/` to
-  `<git rev-parse --git-common-dir>/info/exclude` unless a line with
-  that exact content is already there; creates `info/` if missing.
+- `collectNotes(worktreePath):string|null` -- reads
+  `<worktree>/.nightralph/notes.md` and deletes the whole
+  `.nightralph/` directory (whether or not the file exists); `null`
+  when absent or blank.
+- `ensureNotesIgnored(worktreePath):void` -- creates
+  `<worktree>/.nightralph/` and writes a `.gitignore` containing `*`
+  into it, so git ignores the directory and everything in it. It
+  never writes `info/exclude`: that file can be a symlink shared by
+  every repo on the machine (e.g. via `init.templateDir`), so writing
+  it would leak outside the repo.
 
 ### Orchestrator changes
 
@@ -275,8 +290,14 @@ IO functions:
    `commitDirty` and before any `removeWorktreeQuietly` -- it calls
    `collectNotes`. Collecting first keeps the notes out of the
    auto-commit (`git add -A`) on the timeout path.
-3. `TicketOutcome` variants that come from an agent run gain optional
-   `notes?:string` and `timedOut?:boolean`.
+3. `TicketOutcome` variants that come from an agent run (`ready`,
+   `no-commits`, and `failed` with reason `exit` or `tests`) carry
+   `agentRun:AgentRunRecord` (`no-commits` allows `null` only for the
+   internal placeholder outcome in `runTicketAttempts`); `failed` with
+   reason `install` has none, since no agent ran. Entries read the
+   agent's real exit code from
+   `agentRun.exitCode`, not the top-level `exitCode` that feeds
+   progress.md.
 4. `runTicketAttempts` appends an entry after every attempt, including
    the `'error'` path (notes are lost there; the error message is
    recorded). It is the one place that knows attempt number, effort,
@@ -288,8 +309,17 @@ IO functions:
    bad path cannot make `git add` fail and take the `progress.md`
    commit down with it). `commitProgress` accepts
    `path:string|string[]`.
-7. `runWavesIsolated` calls `ensureExcluded(repoRoot)` once at start,
-   after the dirty-tree check.
+7. `runTicketAttempt` calls `ensureNotesIgnored(worktreePath)` before
+   spawning the agent, on every attempt (each attempt has a fresh
+   worktree).
+8. Right after each wave's `runPool` settles (attempt entries are
+   appended while the pool runs), `runWavesIsolated` commits each
+   touched feature's `learnings.md`, sequentially, before processing
+   outcomes. A wave where every ticket succeeds saves progress only
+   after merging, so without this the log would sit modified through
+   `mergeWave`; committing here keeps it committed at every terminal
+   point and the base tree free of modified tracked files before
+   merging.
 
 ### Error handling
 
@@ -297,8 +327,8 @@ Learnings are advisory and never fail a ticket. Every learnings IO call
 in the orchestrator is wrapped; a failure is reported via `d.log` and
 the run continues. An unreadable log yields an empty history; a failed
 append is logged and skipped; a failed `collectNotes` yields no notes;
-a failed `ensureExcluded` is logged (the prompt still tells the agent
-not to commit the file).
+a failed `ensureNotesIgnored` is logged (the prompt still tells the
+agent not to commit the file).
 
 ### Docs
 
@@ -327,19 +357,22 @@ parsed entry, the log).
 4. `renderHistory` of an empty selection is `''`; an oversized entry
    renders within `MAX_ENTRY_CHARS` plus the marker.
 5. `tailLines` with fewer than `n` lines returns the input.
-6. `collectNotes` returns contents and deletes the file; `null` when
-   absent.
-7. `ensureExcluded` run twice on a temp repo leaves exactly one line.
+6. `collectNotes` returns contents and deletes the directory; `null`
+   when absent.
+7. After `ensureNotesIgnored`, `git add -A` in a temp repo stages
+   nothing under `.nightralph/`.
 
-`test/orchestrator.test.ts` integration tests, with new mock agents:
+`test/integration.test.ts` integration tests (where the `runWavesIsolated`
+tests live), with one env-driven mock agent, `test/mock-agent-notes.js`
+(`MOCK_MODE` = `pass`, `fail`, `fail-once`, or `hang`):
 
-1. **Retry sees history.** `mock-agent-notes-fail-then-pass.js` saves
+1. **Retry sees history.** The mock in `fail-once` mode saves
    its stdin prompt to a file, writes a token to `.nightralph/notes.md`,
-   fails unless escalated. Assert: attempt 2's prompt contains attempt
+   fails on its first attempt only. Assert: attempt 2's prompt contains attempt
    1's token; `learnings.md` parses to two entries for the ticket
    (`exit`, then `done`); no commit on any ref touches `.nightralph/`;
-   `learnings.md` is tracked and the base tree is clean at the end.
-2. **Notes survive a timeout.** `mock-agent-notes-then-hang.js` writes
+   `learnings.md` is tracked and has no uncommitted changes at the end.
+2. **Notes survive a timeout.** The mock in `hang` mode writes
    a token then hangs; the entry is `timedOut` and contains the token.
 3. **Red test gate.** A test command that prints a token and exits 1;
    the entry's outcome is `tests` and its body contains the token.
@@ -349,8 +382,10 @@ parsed entry, the log).
    the first run's token in attempt 1's prompt.
 6. **Advisory.** A directory occupies the `learnings.md` path; the
    ticket still finishes `done` and `progress.md` is still committed.
-7. **Merge failure.** Two tickets in one wave edit the same line, run
-   with `-X`; the stopped ticket gets a `merge` entry.
+7. **Merge failure.** One ticket whose merge is forced to fail by the
+   existing `installMergeFailingGit` fake-git helper, run with
+   `conflictStrategy:'stop'` (the `-X` behavior); the ticket gets a
+   `merge` entry.
 
 `renderPrompt` unit tests: a passed history string appears in the
 prompt; a prompt with no history equals one with `history:''`.
@@ -373,7 +408,7 @@ Done when: unit tests pass for AC1.1-AC1.3 and AC2.1-AC2.5.
 ### Phase 2: Learnings IO
 
 Add `readEntries`, `appendEntry`, `collectNotes`, and
-`ensureExcluded` to `src/learnings.ts`.
+`ensureNotesIgnored` to `src/learnings.ts`.
 
 Done when: tests pass for AC3.1-AC3.4.
 <!-- END_PHASE_2 -->
@@ -394,7 +429,7 @@ rendered prompt.
 Collect notes after each agent run, append an entry per attempt and
 per unrecovered merge failure, feed history into the prompt,
 `commitProgress` accepts a path list, `saveProgress` stages the log,
-`runWavesIsolated` calls `ensureExcluded`. New mock agents for the
+`runTicketAttempt` calls `ensureNotesIgnored`. New mock agents for the
 integration tests.
 
 Done when: integration tests pass for AC5.1-AC5.4, AC6.1-AC6.3, and
