@@ -235,7 +235,8 @@ test('review pass - AC7.2 a broken review does not change the ' +
         }
         const result = await h.run(true, display)
         t.ok(result.allDone, 'still all done')
-        t.ok(logs.length > 0, 'the run logged through the display')
+        t.ok(logs.some(m => m.includes('EISDIR')),
+            'the review failure was logged')
     })
 })
 
