@@ -33,6 +33,73 @@ export function getCurrentBranch ():string {
     return stdout.trim()
 }
 
+export function localBranchExists (
+    repoRoot:string,
+    name:string
+):boolean {
+    try {
+        execFileSync(
+            'git',
+            ['show-ref', '--verify', '--quiet', `refs/heads/${name}`],
+            { cwd:repoRoot, stdio:'ignore' }
+        )
+        return true
+    } catch {
+        return false
+    }
+}
+
+// The repo's default branch: what origin/HEAD points at, else a
+// local main or master, else null.
+export function getDefaultBranch (repoRoot:string):string|null {
+    try {
+        const ref = execFileSync(
+            'git',
+            [
+                'symbolic-ref', '--quiet', '--short',
+                'refs/remotes/origin/HEAD',
+            ],
+            {
+                cwd:repoRoot,
+                encoding:'utf8',
+                stdio:['ignore', 'pipe', 'ignore'],
+            }
+        ).trim()
+        if (ref) return ref.replace(/^origin\//, '')
+    } catch {
+        // no origin/HEAD
+    }
+    for (const name of ['main', 'master']) {
+        if (localBranchExists(repoRoot, name)) return name
+    }
+    return null
+}
+
+// Uses `--` rather than `/` for the same reason as
+// buildBranchName: refs/heads/X/Y cannot coexist with
+// refs/heads/X.
+export function integrationBranchName (
+    features:ReadonlyArray<string>
+):string {
+    const distinct = [...new Set(features.filter(Boolean))]
+    return distinct.length === 1 ?
+        `nightralph--${distinct[0]}` :
+        'nightralph--all'
+}
+
+// The integration branch to use, or null to merge into the
+// current branch as before. Only a run launched from the default
+// branch gets one.
+export function planIntegrationBranch (
+    current:string,
+    defaultBranch:string|null,
+    features:ReadonlyArray<string>
+):string|null {
+    if (!defaultBranch || current === 'HEAD') return null
+    if (current !== defaultBranch) return null
+    return integrationBranchName(features)
+}
+
 async function branchExists (
     repoRoot:string,
     branchName:string

@@ -18,6 +18,9 @@ import {
     hasNewCommits,
     isDirty,
     commitDirty,
+    integrationBranchName,
+    planIntegrationBranch,
+    getDefaultBranch as detectDefaultBranch,
 } from '../src/worktree.js'
 import type { Ticket } from '../src/orchestrator.js'
 
@@ -883,4 +886,53 @@ test('commitDirty uses custom message', async t => {
         'nightralph: auto-commit test',
         'commit message matches'
     )
+})
+
+// -- integration branch planning --
+
+test('integrationBranchName - one feature, several, none', t => {
+    t.equal(integrationBranchName(['auth']), 'nightralph--auth',
+        'one feature')
+    t.equal(integrationBranchName(['auth', 'auth']),
+        'nightralph--auth', 'duplicates count once')
+    t.equal(integrationBranchName(['auth', 'billing']),
+        'nightralph--all', 'several features')
+    t.equal(integrationBranchName([]), 'nightralph--all', 'none')
+    t.equal(integrationBranchName(['']), 'nightralph--all',
+        'an empty feature name counts as none')
+})
+
+test('planIntegrationBranch - only on the default branch', t => {
+    t.equal(planIntegrationBranch('main', 'main', ['auth']),
+        'nightralph--auth', 'on the default branch')
+    t.equal(planIntegrationBranch('my-work', 'main', ['auth']),
+        null, 'on another branch')
+    t.equal(planIntegrationBranch('main', null, ['auth']),
+        null, 'default branch unknown')
+    t.equal(planIntegrationBranch('HEAD', 'HEAD', ['auth']),
+        null, 'detached HEAD')
+})
+
+test('getDefaultBranch - reads origin/HEAD', t => {
+    const dir = initTempRepo()
+    execSync('git branch -M main', { cwd:dir })
+    execSync('git update-ref refs/remotes/origin/trunk HEAD',
+        { cwd:dir })
+    execSync(
+        'git symbolic-ref refs/remotes/origin/HEAD ' +
+        'refs/remotes/origin/trunk',
+        { cwd:dir }
+    )
+    t.equal(detectDefaultBranch(dir), 'trunk',
+        'origin/HEAD wins over a local main')
+})
+
+test('getDefaultBranch - falls back to main, master, or null', t => {
+    const dir = initTempRepo()
+    execSync('git branch -M main', { cwd:dir })
+    t.equal(detectDefaultBranch(dir), 'main', 'local main')
+    execSync('git branch -M master', { cwd:dir })
+    t.equal(detectDefaultBranch(dir), 'master', 'local master')
+    execSync('git branch -M trunk', { cwd:dir })
+    t.equal(detectDefaultBranch(dir), null, 'neither exists')
 })
