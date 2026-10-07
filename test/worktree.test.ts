@@ -4,6 +4,7 @@ import {
     existsSync,
     realpathSync,
     writeFileSync,
+    mkdirSync,
 } from 'node:fs'
 import { join, basename } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -21,8 +22,17 @@ import {
     integrationBranchName,
     planIntegrationBranch,
     getDefaultBranch as detectDefaultBranch,
+    localBranchExists,
+    prepareIntegrationBranch,
+    describeIntegrationBranch,
+    createNamedWorktree,
+    deleteBranch,
+    headCommit,
+    mergeBase,
+    isAncestor,
+    hasChangesOutside,
 } from '../src/worktree.js'
-import type { Ticket } from '../src/orchestrator.js'
+import { scanTickets, type Ticket } from '../src/orchestrator.js'
 
 // -- helpers --
 
@@ -936,3 +946,175 @@ test('getDefaultBranch - falls back to main, master, or null', t => {
     execSync('git branch -M trunk', { cwd:dir })
     t.equal(detectDefaultBranch(dir), null, 'neither exists')
 })
+
+// -- prepareIntegrationBranch --
+
+const GIT_ENV = {
+    ...process.env,
+    GIT_COMMITTER_NAME:'Test',
+    GIT_COMMITTER_EMAIL:'test@example.com',
+    GIT_AUTHOR_NAME:'Test',
+    GIT_AUTHOR_EMAIL:'test@example.com',
+}
+
+function git (dir:string, cmd:string):string {
+    return execSync(`git ${cmd}`, {
+        cwd:dir, env:GIT_ENV, encoding:'utf8',
+    }).trim()
+}
+
+function commitFile (dir:string, path:string, body:string):void {
+    mkdirSync(join(dir, path, '..'), { recursive:true })
+    writeFileSync(join(dir, path), body)
+    git(dir, `add ${path}`)
+    git(dir, `commit -m "add ${path}" --no-verify`)
+}
+
+function ticketBody (status:string):string {
+    return `# Ticket\n\n**Status:** ${status}\n`
+}
+
+test('prepareIntegrationBranch - AC2.1 creates and checks out ' +
+    'the branch from the default branch', t => {
+    const dir = initTempRepo()
+    git(dir, 'branch -M main')
+    const mainBefore = git(dir, 'rev-parse main')
+
+    const plan = prepareIntegrationBranch(dir, ['auth'])
+
+    t.equal(plan.branch, 'nightralph--auth', 'names the branch')
+    t.ok(plan.created, 'created')
+    t.ok(!plan.resumed, 'not resumed')
+    t.equal(plan.launchBranch, 'main', 'launched from main')
+    t.equal(plan.forkedFrom, 'main', 'forked from main')
+    t.equal(getCurrentBranch(dir), 'nightralph--auth',
+        'checked out')
+    t.equal(git(dir, 'rev-parse main'), mainBefore,
+        'main did not move')
+})
+
+test('prepareIntegrationBranch - AC2.2 resumes an existing ' +
+    'branch and keeps its ticket statuses', t => {
+    const dir = initTempRepo()
+    git(dir, 'branch -M main')
+    const ticket = '.scratch/auth/issues/01-login.md'
+    commitFile(dir, ticket, ticketBody('ready-for-agent'))
+    git(dir, 'checkout -b nightralph--auth')
+    writeFileSync(join(dir, ticket), ticketBody('done'))
+    git(dir, 'commit -am "done" --no-verify')
+    git(dir, 'checkout main')
+    commitFile(dir, 'README.md', 'moved on')
+
+    const plan = prepareIntegrationBranch(dir, ['auth'])
+
+    t.ok(plan.resumed, 'resumed')
+    t.ok(!plan.created, 'not created')
+    t.equal(plan.behind, 1, 'main is one commit ahead')
+    t.equal(getCurrentBranch(dir), 'nightralph--auth',
+        'checked out')
+    const tickets = scanTickets(
+        join(dir, '.scratch', 'auth', 'issues'), 'auth'
+    )
+    t.equal(tickets[0].status, 'done',
+        'a scan after preparing sees the branch\'s status')
+})
+
+test('prepareIntegrationBranch - AC2.3 leaves another branch ' +
+    'alone', t => {
+    const dir = initTempRepo()
+    git(dir, 'branch -M main')
+    git(dir, 'checkout -b my-work')
+
+    const plan = prepareIntegrationBranch(dir, ['auth'])
+
+    t.equal(plan.branch, 'my-work', 'merges into the current branch')
+    t.ok(!plan.created && !plan.resumed, 'nothing checked out')
+    t.equal(plan.forkedFrom, null, 'not an integration branch')
+    t.ok(!localBranchExists(dir, 'nightralph--auth'),
+        'no integration branch created')
+})
+
+test('prepareIntegrationBranch - a hand-resumed integration ' +
+    'branch reports its fork point', t => {
+    const dir = initTempRepo()
+    git(dir, 'branch -M main')
+    git(dir, 'checkout -b nightralph--auth')
+
+    const plan = prepareIntegrationBranch(dir, ['auth'])
+
+    t.equal(plan.branch, 'nightralph--auth', 'stays put')
+    t.equal(plan.forkedFrom, 'main', 'knows it came from main')
+})
+
+test('prepareIntegrationBranch - AC2.5 a dirty tree throws ' +
+    'before any branch exists', t => {
+    const dir = initTempRepo()
+    git(dir, 'branch -M main')
+    writeFileSync(join(dir, 'stray.txt'), 'dirty')
+
+    t.throws(() => prepareIntegrationBranch(dir, ['auth']),
+        'throws on a dirty tree')
+    t.ok(!localBranchExists(dir, 'nightralph--auth'),
+        'no branch created')
+    t.equal(getCurrentBranch(dir), 'main', 'still on main')
+})
+
+test('describeIntegrationBranch - checks nothing out', t => {
+    const dir = initTempRepo()
+    git(dir, 'branch -M main')
+    const line = describeIntegrationBranch(dir, ['auth'])
+    t.ok(line.includes('nightralph--auth'), 'names the branch')
+    t.equal(getCurrentBranch(dir), 'main', 'still on main')
+    t.ok(!localBranchExists(dir, 'nightralph--auth'),
+        'creates nothing')
+})
+
+// -- named worktrees and git queries --
+
+test('createNamedWorktree - creates, replaces a stale one, and ' +
+    'deleteBranch removes the branch', async t => {
+    const dir = realpathSync(initTempRepo())
+    git(dir, 'branch -M main')
+    const repoName = basename(dir)
+
+    const first = await createNamedWorktree({
+        repoRoot:dir, repoName, baseBranch:'main', name:'review',
+    })
+    t.equal(first.branchName, `${repoName}--review`, 'branch name')
+    t.ok(existsSync(first.worktreePath), 'worktree exists')
+
+    const second = await createNamedWorktree({
+        repoRoot:dir, repoName, baseBranch:'main', name:'review',
+    })
+    t.equal(second.worktreePath, first.worktreePath,
+        'same path, stale one replaced')
+
+    await removeWorktree(second.worktreePath, { force:true })
+    await deleteBranch(dir, second.branchName)
+    t.ok(!localBranchExists(dir, second.branchName),
+        'branch deleted')
+    await deleteBranch(dir, second.branchName)
+    t.ok(true, 'deleting a missing branch does not throw')
+})
+
+test('git queries - ancestry, merge-base, changes outside a dir',
+    t => {
+        const dir = initTempRepo()
+        git(dir, 'branch -M main')
+        const base = headCommit(dir)
+        commitFile(dir, '.scratch/auth/progress.md', 'progress')
+        const afterBookkeeping = headCommit(dir)
+        t.ok(!hasChangesOutside(dir, base, afterBookkeeping, '.scratch'),
+            'bookkeeping only')
+        commitFile(dir, 'src/a.ts', 'code')
+        const tip = headCommit(dir)
+        t.ok(hasChangesOutside(dir, base, tip, '.scratch'),
+            'code change')
+        t.ok(isAncestor(dir, base, tip), 'base is an ancestor')
+        t.ok(!isAncestor(dir, tip, base), 'tip is not')
+        t.ok(!isAncestor(dir, 'deadbeef', tip),
+            'an unknown commit is not an ancestor')
+        git(dir, `checkout -b side ${base}`)
+        commitFile(dir, 'side.txt', 'side')
+        t.equal(mergeBase(dir, 'main', 'side'), base, 'merge-base')
+    })
