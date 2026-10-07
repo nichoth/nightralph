@@ -24,6 +24,7 @@ import {
     hasNewCommits,
     isDirty,
     commitDirty,
+    headCommit,
 } from './worktree.js'
 import {
     generateProgress,
@@ -2468,7 +2469,7 @@ export async function runWavesIsolated (opts:{
     concurrency?:number
     // per-feature progress paths for multi-feature runs
     progressPaths?:Map<string, string>
-}):Promise<{ allDone:boolean }> {
+}):Promise<{ allDone:boolean; branch:string }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
     const d = opts.display ?? createDisplay()
@@ -2488,6 +2489,11 @@ export async function runWavesIsolated (opts:{
             'changes before running'
         )
     }
+
+    // The review falls back to this when no earlier review or
+    // fork point applies. Unused (hence the underscore) until
+    // Task 10 wires the review; rename it there.
+    const _launchCommit = headCommit(repoRoot)
 
     const features = new Set(
         opts.tickets.map(t => t.feature).filter(Boolean)
@@ -3014,7 +3020,8 @@ export async function runWavesIsolated (opts:{
     d.log('\n' + renderFinishSummary(
         opts.tickets, totalCompleted, failedKeys
     ))
+    d.log(`Work is on ${baseBranch}`)
     d.cleanup()
 
-    return { allDone:remaining.length === 0 }
+    return { allDone:remaining.length === 0, branch:baseBranch }
 }

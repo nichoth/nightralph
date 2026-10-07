@@ -18,13 +18,25 @@ import {
     DEFAULT_RETRY_DELAY,
     DEFAULT_CONCURRENCY,
     killRunningAgents,
+    formatErrorMessage,
     type EffortLevel,
     type Ticket,
 } from './orchestrator.js'
 import { detectTestCmd, detectInstallCmd } from './testcmd.js'
 import { createDisplay } from './display.js'
-import { findFeatureDirs, resolveIssuesDir, getScriptDir } from './resolve.js'
-import { getRepoRoot, getRepoName } from './worktree.js'
+import {
+    findFeatureDirs,
+    resolveIssuesDir,
+    getScriptDir,
+    type FeatureSelection,
+} from './resolve.js'
+import {
+    getRepoRoot,
+    getRepoName,
+    prepareIntegrationBranch,
+    describeIntegrationBranch,
+    type IntegrationPlan,
+} from './worktree.js'
 
 export { findFeatureDirs, resolveIssuesDir }
 
@@ -166,6 +178,12 @@ yargs(hideBin(process.argv))
                 default:DEFAULT_CONCURRENCY,
                 describe:'Max agents running at once ' +
                     'within a wave.',
+            })
+            .option('review', {
+                type:'boolean',
+                default:true,
+                describe:'Review the merged work and run one ' +
+                    'fix pass at the end. --no-review skips it.',
             }),
         async argv => {
             await runExecute({
@@ -190,6 +208,7 @@ yargs(hideBin(process.argv))
                     number|undefined,
                 concurrency:argv.concurrency as
                     number|undefined,
+                review:argv.review as boolean|undefined,
             })
         }
     )
@@ -219,28 +238,26 @@ function extractFeatureName (spec:string):string {
         parts[parts.length - 1] ?? 'feature'
 }
 
-async function runExecute (argv:{
-    provider:string
-    model?:string
-    spec?:string
-    dryRun?:boolean
-    timeout?:number
-    testCmd?:string
-    installCmd?:string
-    stopOnConflict?:boolean
-    maxTurns?:number
-    effort?:EffortLevel
-    retries?:number
-    retryDelay?:number
-    concurrency?:number
-}):Promise<void> {
-    const selections = await resolveIssuesDir(
-        argv.spec
-    )
+type LoadedTickets = {
+    allTickets:Ticket[]
+    specBodies:Map<string, string>
+    progressPaths:Map<string, string>
+    issuesDirs:string[]
+    firstFeatureName:string
+    firstLogsDir:string
+}
 
+// Scans every selected feature's tickets from the working tree.
+// `log` is a no-op for the silent re-scan after resuming an
+// integration branch.
+function loadTickets (
+    selections:FeatureSelection[],
+    log:(msg:string) => void
+):LoadedTickets {
     const allTickets:Ticket[] = []
     const specBodies = new Map<string, string>()
     const progressPaths = new Map<string, string>()
+    const issuesDirs:string[] = []
     let firstFeatureName = ''
     let firstLogsDir = ''
 
@@ -267,14 +284,14 @@ async function runExecute (argv:{
         const tickets = scanTickets(dir, name)
 
         if (tickets.length === 0) {
-            console.log(
+            log(
                 'No ticket files found for ' +
                 `${name}. Skipping.`
             )
             continue
         }
 
-        console.log(
+        log(
             `[${name}] Found ${tickets.length} tickets`
         )
 
@@ -286,7 +303,7 @@ async function runExecute (argv:{
                 b => !knownNums.has(b)
             )
             if (unknown.length > 0) {
-                console.warn(
+                log(
                     `${t.filename}: blockers ` +
                     `[${unknown.join(', ')}] ` +
                     'not found in directory'
@@ -301,6 +318,7 @@ async function runExecute (argv:{
         progressPaths.set(
             name, join(dirname(dir), 'progress.md')
         )
+        issuesDirs.push(dir)
         allTickets.push(...tickets)
 
         if (!firstFeatureName) {
@@ -309,18 +327,84 @@ async function runExecute (argv:{
         }
     }
 
-    if (allTickets.length === 0) return
+    return {
+        allTickets,
+        specBodies,
+        progressPaths,
+        issuesDirs,
+        firstFeatureName,
+        firstLogsDir,
+    }
+}
+
+async function runExecute (argv:{
+    provider:string
+    model?:string
+    spec?:string
+    dryRun?:boolean
+    timeout?:number
+    testCmd?:string
+    installCmd?:string
+    stopOnConflict?:boolean
+    maxTurns?:number
+    effort?:EffortLevel
+    retries?:number
+    retryDelay?:number
+    concurrency?:number
+    review?:boolean
+}):Promise<void> {
+    const selections = await resolveIssuesDir(
+        argv.spec
+    )
+
+    let loaded = loadTickets(selections, console.log)
+    if (loaded.allTickets.length === 0) return
+
+    const isolated = isGitRepo()
+    const featureNames = [...loaded.specBodies.keys()]
+    let plan:IntegrationPlan|null = null
+    if (isolated && !argv.dryRun) {
+        try {
+            plan = prepareIntegrationBranch(
+                getRepoRoot(), featureNames
+            )
+        } catch (err) {
+            console.error(formatErrorMessage(err))
+            process.exit(2)
+        }
+        if (plan.created) {
+            console.log(
+                `Created branch ${plan.branch} ` +
+                `from ${plan.launchBranch}`
+            )
+        } else if (plan.resumed) {
+            console.log(
+                `Resumed ${plan.branch}` +
+                (plan.behind > 0 ?
+                    ` (${plan.launchBranch} is ${plan.behind} ` +
+                    `commit${plan.behind === 1 ? '' : 's'} ahead)` :
+                    '')
+            )
+            // Ticket statuses live on the branch just checked out
+            loaded = loadTickets(selections, () => {})
+        }
+    }
+
+    const {
+        allTickets, specBodies, progressPaths,
+        firstFeatureName, firstLogsDir,
+    } = loaded
 
     const timeout = argv.timeout ?? 900
     const testCmd = argv.testCmd || detectTestCmd(
-        isGitRepo() ?
+        isolated ?
             getRepoRoot() :
             process.cwd()
     ) || 'npm test'
     // Only worktrees start without dependencies, so only an
     // isolated run installs. An explicit "" disables it.
     const installCmd = argv.installCmd ??
-        (isGitRepo() ?
+        (isolated ?
             detectInstallCmd(getRepoRoot()) ?? undefined :
             undefined)
     const conflictStrategy = argv.stopOnConflict ?
@@ -330,7 +414,7 @@ async function runExecute (argv:{
     const fallbackSpec = specBodies.values().next().value!
 
     if (argv.dryRun) {
-        if (isGitRepo()) {
+        if (isolated) {
             const repoName = getRepoName()
             dryRunIsolated({
                 tickets:allTickets,
@@ -346,6 +430,14 @@ async function runExecute (argv:{
                 retryDelay:argv.retryDelay,
                 concurrency:argv.concurrency,
             })
+            console.log(
+                describeIntegrationBranch(
+                    getRepoRoot(), featureNames
+                )
+            )
+            console.log(
+                `Review:       ${argv.review === false ? 'off' : 'on'}`
+            )
         } else {
             dryRun(allTickets, fallbackSpec, testCmd)
         }
@@ -362,9 +454,9 @@ async function runExecute (argv:{
     process.on('SIGINT', () => onSignal(130))
     process.on('SIGTERM', () => onSignal(143))
 
-    let result:{ allDone:boolean }
+    let result:{ allDone:boolean; branch?:string }
 
-    if (isGitRepo()) {
+    if (isolated) {
         result = await runWavesIsolated({
             tickets:allTickets,
             specBody:fallbackSpec,

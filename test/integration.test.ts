@@ -210,7 +210,7 @@ const MOCK_AGENT_FAIL = join(
 
 function spawnCli (
     args:string[],
-    opts?:{ cwd?:string },
+    opts?:{ cwd?:string; env?:NodeJS.ProcessEnv },
 ):Promise<{
     code:number
     stdout:string
@@ -220,7 +220,7 @@ function spawnCli (
         execFile(
             process.execPath,
             [CLI, ...args],
-            { timeout:30_000, cwd:opts?.cwd },
+            { timeout:30_000, cwd:opts?.cwd, env:opts?.env },
             (err, stdout, stderr) => {
                 const code = err && 'code' in err ?
                     (err as { code:number }).code :
@@ -4832,4 +4832,107 @@ test('runWavesIsolated - AC6: an attempt with no commits ' +
             'the entry holds the notes the agent left'
         )
     })
+})
+
+// A git repo on `main` with the scratch layout and its logs
+// ignored, ready for CLI runs that use worktrees.
+function cliGitRepo ():{
+    projectDir:string
+    issuesDir:string
+    templateDir:string
+} {
+    const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+    const projectDir = initTempGitRepo({ templateDir })
+    execSync('git branch -M main', { cwd:projectDir })
+    writeFileSync(
+        join(projectDir, '.gitignore'), '.scratch/*/logs/\n'
+    )
+    const { issuesDir } = scratchDirs(projectDir)
+    return { projectDir, issuesDir, templateDir }
+}
+
+test('CLI subprocess - AC2.1 a run from main lands on the ' +
+    'integration branch', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writeFileSync(
+            join(issuesDir, '01-pass.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        const mainBefore = gitOut(projectDir, ['rev-parse', 'main'])
+
+        const { code } = await spawnCli([
+            MOCK_AGENT,
+            '--spec', FEAT,
+            '--timeout', '10',
+            '--retry-delay', '0',
+            '--test-cmd', 'true',
+            '--no-review',
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.equal(
+            gitOut(projectDir, ['rev-parse', '--abbrev-ref', 'HEAD'])
+                .trim(),
+            `nightralph--${FEAT}`,
+            'left on the integration branch'
+        )
+        t.equal(gitOut(projectDir, ['rev-parse', 'main']), mainBefore,
+            'main did not move')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC2.2 a run from main resumes the ' +
+    'integration branch without redoing done tickets', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    const recordDir = mkdtempSync(join(tmpdir(), 'nightralph-rec-'))
+    try {
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-second.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        execSync(`git checkout -b nightralph--${FEAT}`,
+            { cwd:projectDir })
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'done' })
+        )
+        commitAll(projectDir, 'first is done')
+        execSync('git checkout main', { cwd:projectDir })
+
+        const { code } = await spawnCli([
+            MOCK_NOTES,
+            '--spec', FEAT,
+            '--timeout', '10',
+            '--retry-delay', '0',
+            '--test-cmd', 'true',
+            '--no-review',
+        ], {
+            cwd:projectDir,
+            env:{
+                ...process.env,
+                MOCK_RECORD_DIR:recordDir,
+                MOCK_MODE:'pass',
+            },
+        })
+
+        t.equal(code, 0, 'exit 0')
+        const records = readNotesRecords(recordDir)
+        t.equal(records.length, 1, 'only one agent ran')
+        t.ok(records[0].prompt.includes('02-second.md'),
+            'it ran the ticket that was not done')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(recordDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive:true, force:true })
+    }
 })
