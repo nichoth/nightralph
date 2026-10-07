@@ -6,6 +6,12 @@ import {
     parseReviewEntries,
     selectReviewBase,
     renderReviewSummary,
+    REVIEW_MARKER,
+    FIX_MARKER,
+    reviewDiffCommand,
+    renderReviewPrompt,
+    FIX_FAILURE_TEXT,
+    renderFixPrompt,
     type Finding,
     type ReviewEntry,
 } from '../src/review.js'
@@ -202,4 +208,64 @@ test('renderReviewSummary - null only when skipped', t => {
         t.ok(line && line.includes('r.md'),
             `${status} names the file`)
     }
+})
+
+// -- prompts --
+
+test('renderReviewPrompt - carries the spec, range, and output ' +
+    'contract', t => {
+    const prompt = renderReviewPrompt({
+        specBody:'SPEC-BODY',
+        from:A,
+        to:B,
+    })
+    t.ok(prompt.includes('SPEC-BODY'), 'spec pasted')
+    t.ok(prompt.includes(REVIEW_MARKER), 'marked as a review')
+    t.ok(prompt.includes(reviewDiffCommand(A, B)),
+        'exact diff command')
+    t.ok(reviewDiffCommand(A, B).includes(':(exclude).scratch'),
+        'diff excludes bookkeeping')
+    t.ok(prompt.includes('.nightralph/findings.md'),
+        'names the findings file')
+    t.ok(prompt.includes('No findings.'), 'names the clean marker')
+})
+
+test('renderFixPrompt - carries findings, test command, and the ' +
+    'previous attempt only on a retry', t => {
+    const findings = [
+        {
+            summary:'first thing',
+            detail:'src/a.ts:1',
+            checked:false,
+        },
+        {
+            summary:'second thing',
+            detail:'',
+            checked:false,
+        },
+    ]
+    const first = renderFixPrompt({
+        specBody:'SPEC-BODY',
+        findings,
+        testCmd:'npm run t',
+    })
+    t.ok(first.includes(FIX_MARKER), 'marked as a fix')
+    t.ok(first.includes('first thing') &&
+            first.includes('second thing'), 'every finding')
+    t.ok(first.includes('src/a.ts:1'), 'finding detail')
+    t.ok(first.includes('npm run t'), 'test command')
+    t.ok(first.includes('[x]'), 'asks for [x] echoes')
+    t.ok(!first.includes('NOTES-TOKEN'), 'no previous notes')
+
+    const retry = renderFixPrompt({
+        specBody:'SPEC-BODY',
+        findings,
+        testCmd:'npm run t',
+        installCmd:'npm ci',
+        previous:{ reason:'tests', notes:'NOTES-TOKEN' },
+    })
+    t.ok(retry.includes('NOTES-TOKEN'), 'previous notes')
+    t.ok(retry.includes(FIX_FAILURE_TEXT.tests),
+        'previous failure reason')
+    t.ok(retry.includes('npm ci'), 'install rule')
 })

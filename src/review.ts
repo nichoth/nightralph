@@ -1,5 +1,16 @@
 import { dirname } from 'node:path'
 import { NOTES_PATH, formatDate } from './learnings.js'
+import {
+    readDocsRule,
+    installRule,
+    testGateRule,
+    LINT_RULE,
+    integrityRule,
+    CONFINEMENT_RULES,
+    commitRule,
+    notesRule,
+    agentsMdRule,
+} from './rules.js'
 
 export const FINDINGS_FILE = 'findings.md'
 export const FINDINGS_PATH = `${dirname(NOTES_PATH)}/${FINDINGS_FILE}`
@@ -7,6 +18,137 @@ export const NO_FINDINGS = 'No findings.'
 // Bookkeeping lives here (tickets, progress, learnings, the
 // review log), so the review never looks at it.
 export const REVIEW_EXCLUDE = '.scratch'
+
+export const REVIEW_MARKER = '---- REVIEW INSTRUCTIONS ----'
+export const FIX_MARKER = '---- REVIEW FINDINGS ----'
+
+export function reviewDiffCommand (from:string, to:string):string {
+    return `git diff ${from}..${to} -- . ':(exclude)${REVIEW_EXCLUDE}'`
+}
+
+export function renderReviewPrompt (opts:{
+    specBody:string
+    from:string
+    to:string
+}):string {
+    return [
+        '---- SPEC CONTEXT ----',
+        opts.specBody,
+        '',
+        REVIEW_MARKER,
+        'You are reviewing work that autonomous agents merged ' +
+            'into this branch, one ticket at a time. Review the ' +
+            'combined change as a whole.',
+        '',
+        'The change to review:',
+        '',
+        `    ${reviewDiffCommand(opts.from, opts.to)}`,
+        '',
+        'Follow these rules:',
+        '- Read any AGENTS.md in or above the directories the ' +
+            'change touches, plus CONTEXT.md and the relevant ' +
+            'docs/adr/ entries if they exist. Treat their ' +
+            'contracts and the spec above as the standard the ' +
+            'code must meet.',
+        '- Look for correctness bugs, missing or weak tests, ' +
+            'and code that breaks a documented contract. Ignore ' +
+            'style preferences.',
+        '- You may run the tests or the type checker to confirm ' +
+            'a suspicion.',
+        '- Do NOT edit, stage, or commit code. Anything you ' +
+            'change here is discarded.',
+        ...CONFINEMENT_RULES,
+        '',
+        `Write your findings to \`${FINDINGS_PATH}\` (create the ` +
+            'directory), most severe first, in exactly this form:',
+        '',
+        '- [ ] <one-line summary of the finding>',
+        '    <file:line, and a concrete input or state that goes ' +
+            'wrong>',
+        '',
+        'If you find nothing worth fixing, write the single line: ' +
+            NO_FINDINGS,
+        'Never git add or commit that file; the orchestrator ' +
+            'collects it.',
+        '',
+    ].join('\n')
+}
+
+export type FixFailure =
+    'install'|'exit'|'no-commits'|'tests'|'merge'
+
+export const FIX_FAILURE_TEXT:Record<FixFailure, string> = {
+    install:'dependency install failed',
+    exit:'the agent exited with an error',
+    'no-commits':'the agent made no commits',
+    tests:'the test command failed after the agent finished',
+    merge:'the fix branch did not merge cleanly',
+}
+
+function findingLines (findings:ReadonlyArray<Finding>):string[] {
+    return findings.flatMap(f => [
+        `- [ ] ${f.summary}`,
+        ...(f.detail ?
+            f.detail.split('\n').map(l => `    ${l}`) :
+            []),
+    ])
+}
+
+function previousBlock (
+    previous?:{ reason:FixFailure; notes:string|null }
+):string[] {
+    if (!previous) return []
+    return [
+        '---- PREVIOUS FIX ATTEMPT ----',
+        `It failed: ${FIX_FAILURE_TEXT[previous.reason]}.`,
+        previous.notes ?? 'It left no notes.',
+        '',
+    ]
+}
+
+export function renderFixPrompt (opts:{
+    specBody:string
+    findings:ReadonlyArray<Finding>
+    testCmd:string
+    installCmd?:string
+    previous?:{ reason:FixFailure; notes:string|null }
+}):string {
+    return [
+        '---- SPEC CONTEXT ----',
+        opts.specBody,
+        '',
+        FIX_MARKER,
+        ...findingLines(opts.findings),
+        '',
+        ...previousBlock(opts.previous),
+        '---- AGENT INSTRUCTIONS ----',
+        'You are an autonomous coding agent. Fix the review ' +
+            'findings above using /tdd.',
+        '',
+        'Follow these rules:',
+        readDocsRule('findings'),
+        '- Fix ONLY the listed findings. Do not fix unrelated ' +
+            'problems you notice.',
+        ...installRule(opts.installCmd),
+        '- Use /tdd for every finding: write a failing test that ' +
+            'shows the problem, then write only enough code to ' +
+            'make it pass, then refactor.',
+        testGateRule(opts.testCmd, 'fix'),
+        LINT_RULE,
+        integrityRule('finding'),
+        ...CONFINEMENT_RULES,
+        commitRule('finding'),
+        notesRule('finding', 'fix'),
+        '- After fixing each finding, print a line: ' +
+            '[x] <finding summary> (matching the summary ' +
+            'text exactly).',
+        '- If a finding is wrong or cannot be fixed honestly, ' +
+            'leave it unchecked and explain why in your notes ' +
+            'file.',
+        agentsMdRule('fix'),
+        '',
+    ].join('\n')
+}
 
 const SENTINEL_PREFIX = '<!-- nightralph:review'
 const SENTINEL_RE = /^<!-- nightralph:review (.*) -->$/
@@ -131,7 +273,8 @@ function headline (input:ReviewEntryInput):string {
     switch (input.status) {
         case 'clean': return 'no findings'
         case 'fixed': return `${fixed} of ${n} fixed`
-        case 'unresolved': return `${n} findings, fix failed`
+        case 'unresolved':
+            return `${n} finding${n === 1 ? '' : 's'}, fix failed`
         case 'review-failed': return 'review failed'
         default: {
             const _exhaustive:never = input.status
