@@ -107,6 +107,9 @@ export type IntegrationPlan = {
     resumed:boolean
     // commits on the launch branch that `branch` lacks
     behind:number
+    // true when a resumed branch that was already contained in the
+    // launch branch was moved up to it
+    fastForwarded:boolean
     launchBranch:string
     // the default branch when `branch` is an integration branch,
     // else null; the review falls back to its merge-base
@@ -138,6 +141,7 @@ export function prepareIntegrationBranch (
             created:false,
             resumed:false,
             behind:0,
+            fastForwarded:false,
             launchBranch:current,
             forkedFrom:onIntegration ? defaultBranch : null,
         }
@@ -149,15 +153,24 @@ export function prepareIntegrationBranch (
         )
     }
     if (localBranchExists(repoRoot, name)) {
+        // Merged into the launch branch already: nothing of its own
+        // to lose, so bring it up to date
+        const contained = isAncestor(repoRoot, name, current)
         gitText(repoRoot, ['checkout', '--quiet', name])
-        const behind = Number(gitText(
+        let behind = Number(gitText(
             repoRoot, ['rev-list', '--count', `${name}..${current}`]
         ))
+        const fastForwarded = contained && behind > 0
+        if (fastForwarded) {
+            gitText(repoRoot, ['merge', '--ff-only', '--quiet', current])
+            behind = 0
+        }
         return {
             branch:name,
             created:false,
             resumed:true,
             behind,
+            fastForwarded,
             launchBranch:current,
             forkedFrom:defaultBranch,
         }
@@ -168,6 +181,7 @@ export function prepareIntegrationBranch (
         created:true,
         resumed:false,
         behind:0,
+        fastForwarded:false,
         launchBranch:current,
         forkedFrom:defaultBranch,
     }

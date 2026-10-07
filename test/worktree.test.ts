@@ -1019,6 +1019,43 @@ test('prepareIntegrationBranch - AC2.2 resumes an existing ' +
         'a scan after preparing sees the branch\'s status')
 })
 
+test('prepareIntegrationBranch - an integration branch already in ' +
+    'the launch branch is fast-forwarded', t => {
+    const dir = initTempRepo()
+    git(dir, 'branch -M main')
+    git(dir, 'checkout -b nightralph--auth')
+    commitFile(dir, 'a.txt', 'work')
+    git(dir, 'checkout main')
+    git(dir, 'merge --no-ff nightralph--auth -m merged --no-verify')
+    commitFile(dir, 'README.md', 'moved on')
+
+    const plan = prepareIntegrationBranch(dir, ['auth'])
+
+    t.ok(plan.resumed, 'resumed')
+    t.ok(plan.fastForwarded, 'fast-forwarded')
+    t.equal(plan.behind, 0, 'no longer behind')
+    t.equal(getCurrentBranch(dir), 'nightralph--auth', 'checked out')
+    t.equal(git(dir, 'rev-parse nightralph--auth'),
+        git(dir, 'rev-parse main'), 'tip equals main')
+})
+
+test('prepareIntegrationBranch - a diverged branch is not ' +
+    'fast-forwarded', t => {
+    const dir = initTempRepo()
+    git(dir, 'branch -M main')
+    git(dir, 'checkout -b nightralph--auth')
+    commitFile(dir, 'a.txt', 'work')
+    git(dir, 'checkout main')
+    commitFile(dir, 'README.md', 'moved on')
+    const before = git(dir, 'rev-parse nightralph--auth')
+
+    const plan = prepareIntegrationBranch(dir, ['auth'])
+
+    t.ok(!plan.fastForwarded, 'not fast-forwarded')
+    t.equal(git(dir, 'rev-parse nightralph--auth'), before,
+        'branch tip untouched')
+})
+
 test('prepareIntegrationBranch - AC2.3 leaves another branch ' +
     'alone', t => {
     const dir = initTempRepo()
