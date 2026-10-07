@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-10-04
+Last verified: 2026-10-06
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -23,6 +23,8 @@ Small orchestrator that runs a single-agent session per issue.
 - `src/orchestrator.ts` -- ticket scanning and wave execution
 - `src/worktree.ts` -- git worktree management
 - `src/progress.ts` -- run progress tracking
+- `src/learnings.ts` -- attempt learnings log (render, parse,
+  select, notes collection)
 - `src/display.ts` -- terminal status UI (Display interface, StatusDisplay, PlainDisplay)
 - `src/merge.ts` -- branch merging after wave completion
 - `src/testcmd.ts` -- test command detection and execution
@@ -110,7 +112,7 @@ Small orchestrator that runs a single-agent session per issue.
   `findBlockedTickets(tickets, failedKeys)`,
   `checkItems(ticket, items)`,
   `markDone(ticket)`,
-  `renderPrompt(specBody, ticket, opts?)`,
+  `renderPrompt(specBody, ticket, opts)`,
   `stripSpecSection(specBody, heading)`,
   `renderMergePrompt(specBody, ticket)`,
   `spawnAgent(opts)`, `createPiStreamFormatter()`,
@@ -185,7 +187,18 @@ Small orchestrator that runs a single-agent session per issue.
   `'error'` carries optional `worktreePath?:string`
   and `branchName?:string`; `'worktree-error'`
   carries only `error:unknown`; `'failed'` carries
-  `reason:'exit'|'tests'|'install'`
+  `reason:'exit'|'tests'|'install'`. Every variant where
+  an agent ran carries `agentRun:AgentRunRecord`
+  (`{ exitCode, completedItems, timedOut, notes }`):
+  `'ready'`, `'failed'` with reason `'exit'` or
+  `'tests'`, and `'no-commits'` (typed
+  `AgentRunRecord|null`; `null` only for the
+  placeholder outcome inside `runTicketAttempts`, which
+  no agent produced). `'failed'` with reason
+  `'install'` has no `agentRun`. The top-level
+  `exitCode` on `'failed'` is the value written to
+  progress.md (a placeholder `1` for `'tests'`), while
+  `agentRun.exitCode` is the agent's real exit code
 - **DEFAULT_RETRY_DELAY**: exported as `30` (seconds)
 - **DEFAULT_CONCURRENCY**: exported as `5`
 - **runPool(items, limit, fn)**: runs `fn` over `items`
@@ -243,11 +256,27 @@ Small orchestrator that runs a single-agent session per issue.
   orchestrator will run after the agent exits; it
   also tells the agent to read nearby AGENTS.md,
   CONTEXT.md and docs/adr/ first, to commit after
-  each checklist item, to never weaken tests or
-  fake `[x]` lines (leave the item unchecked and
-  say what blocked it), and to record reusable
-  learnings in the nearest AGENTS.md before the
-  final commit; optional `opts.installCmd` adds a rule
+  each checklist item and have everything committed
+  at the end except its notes file, to never weaken
+  tests or fake `[x]` lines (leave the item unchecked
+  and record what blocked it in the notes file), and
+  to record reusable learnings in the nearest
+  AGENTS.md before the final commit. A checklist item
+  that is pure scaffolding, config, or docs may skip
+  test-first, and the agent records that decision in
+  its notes file. Notes rule: the agent keeps notes
+  for the attempt in `NOTES_PATH`
+  (`.nightralph/notes.md`, creating the directory),
+  updates it after each checklist item and as soon as
+  it hits a blocker (not only at the end), and never
+  commits, stages, or deletes it; the orchestrator
+  collects it. Reusable patterns go in AGENTS.md;
+  anything specific to this ticket goes in the notes
+  file. Optional `opts.history` (the text from
+  `renderHistory`) is placed between the ticket and
+  the agent instructions, and the block is omitted
+  when it is empty or undefined. Optional
+  `opts.installCmd` adds a rule
   that dependencies are installed with that command,
   the agent must not reinstall with any other command,
   and new dependencies use the same package manager
@@ -360,6 +389,38 @@ Small orchestrator that runs a single-agent session per issue.
   `renderPrompt` and `renderMergePrompt` confine the
   agent to its worktree directory and prohibit
   `git push`
+- **Learnings (`runWavesIsolated` only)**: each
+  attempt calls `ensureNotesIgnored` on its worktree
+  before the agent runs, and `collectNotes` right
+  after the agent exits, before any auto-commit or
+  worktree removal; the notes become
+  `agentRun.notes`. Each attempt then appends one
+  entry to `learnings.md` next to the feature's
+  `progress.md` (`learningsPathFor`): `ready` ->
+  `done`, `failed` -> its reason (`exit`, `tests` or
+  `install`, the last two with the last
+  `LOG_TAIL_LINES` lines of the attempt's
+  `.test.log` or `.install.log`), `no-commits` ->
+  `no-commits`, `error` and `worktree-error` ->
+  `error`. The entry's exit code always comes from
+  `agentRun`, never from the outcome's top-level
+  `exitCode`. Every attempt rebuilds the prompt
+  history from the log, so a retry sees the entry its
+  previous attempt just wrote: the ticket's last
+  `MAX_OWN_ENTRIES` entries, plus the latest `done`
+  entry of each direct blocker in the same feature.
+  Right after each wave's pool settles, every touched
+  learnings file that is a regular file is committed
+  (`nightralph: record attempt learnings`), so the
+  base tree has no modified tracked files before
+  `mergeWave`; `saveProgress` also stages it with
+  `progress.md`, so the log is committed at every
+  terminal point. An unrecovered merge failure
+  appends a `merge` entry (git's stderr), committed
+  by the `saveProgress` that follows. Learnings are
+  advisory: a failure to read, append, set up or
+  collect notes, or commit is logged through the
+  display and never fails a ticket
 - **HUMAN_STATUS**: `'ready-for-human'`, the ticket status
   that means an agent must not pick the ticket up
 - **ticketKey(feature, num)**: returns `${feature}:${num}`,
@@ -551,14 +612,18 @@ Small orchestrator that runs a single-agent session per issue.
   `createProgressTracker(opts)`,
   `renderProgress(data)`, `checkTicket(data, num, result)`,
   `writeProgress(path, data)`,
-  `commitProgress(repoRoot, path, message)`,
+  `commitProgress(repoRoot, paths, message)`,
   `readProgress(progressPath)`,
   `mergeProgress(fresh, existing)`
-- **commitProgress**: returns `Promise<boolean>` --
+- **commitProgress**: `paths` is `string|string[]`;
+  stages and commits only those paths. Returns
+  `Promise<boolean>` --
   `true` when a commit was made, `false` when the
-  staged file matched HEAD (no-op). Uses `git add
+  staged files matched HEAD (no-op). Uses `git add
   --force` so gitignored paths (e.g. under `.scratch/`)
-  are staged regardless
+  are staged regardless. The orchestrator's
+  `saveProgress` passes `learnings.md` along with
+  `progress.md` when `learnings.md` is a regular file
 - **readProgress(progressPath)**: parses an existing
   progress.md back into a `ProgressData` object, or
   returns `null` if the file does not exist
@@ -581,6 +646,93 @@ Small orchestrator that runs a single-agent session per issue.
 - **Guarantees**: `renderProgress` produces a markdown
   checklist; `commitProgress` never throws on a no-op
   (identical content)
+
+### learnings module (`src/learnings.ts`)
+- **Exposes**: constants `MAX_OWN_ENTRIES` (4),
+  `MAX_ENTRY_CHARS` (4000), `LOG_TAIL_LINES` (40),
+  `NOTES_PATH` (`.nightralph/notes.md`),
+  `TRUNCATED_MARKER`, `LEARNING_OUTCOMES`; types
+  `LearningOutcome`, `LearningEntry`,
+  `AgentRunRecord`, `EntryInput`,
+  `HistorySelection`; functions
+  `isLearningOutcome(value)`, `renderEntry(input)`,
+  `parseEntries(text)`,
+  `selectHistory(entries, { key, blockerKeys })`,
+  `renderHistory(selection)`, `tailLines(text, n)`,
+  `learningsPathFor(progressPath)`,
+  `readEntries(path)`, `appendEntry(path, text)`,
+  `collectNotes(worktreePath)`,
+  `ensureNotesIgnored(worktreePath)`
+- **Imports no values from `src/orchestrator.ts`**:
+  callers pass the ticket key (`ticketKey`) and label
+  (`ticketLabel`) in. Its only imports are `node:fs`
+  and `node:path`
+- **LearningOutcome**: `done`, `exit`, `tests`,
+  `install`, `no-commits`, `error`, `merge`
+- **LearningEntry**:
+  `{ key, attempt, outcome, timedOut, body }`; `key`
+  is the ticket identity (`ticketKey`); `body` is
+  everything after the sentinel line, trimmed, without
+  the trailing `---` separator
+- **AgentRunRecord**:
+  `{ exitCode, completedItems, timedOut, notes }` --
+  what one agent process did; `notes` is
+  `string|null`
+- **EntryInput**: `key`, `label`, `attempt`, `now`,
+  plus per-outcome fields: `done`, `exit` and
+  `no-commits` carry `run` (and optional `effort`);
+  `tests` carries `run` plus `logName` and `logTail`;
+  `install` carries only `logName` and `logTail`;
+  `error` carries `error`; `merge` carries `stderr`
+- **Entry format**: each entry starts with a sentinel
+  line, `<!-- nightralph:entry ticket=<key>
+  attempt=<n> outcome=<o> [timedout=true] -->`, then
+  a `## <date> -- <label> attempt <n> -- <result>`
+  heading (no `attempt <n>` for `merge`), the body,
+  and a `---` line. Only `%` and
+  whitespace in the key are percent-escaped, so
+  `ticket=my-feature:4` stays readable. `attempt` is
+  `0` for `merge` entries
+- **renderEntry(input)**: pure; agent outcomes list
+  effort (when set), the agent's exit code, the checked items,
+  and the agent's notes (or a line saying it left
+  none); `tests` and `install` add the log tail in a
+  fence; `error` and `merge` show the error text or
+  git stderr in a fence
+- **selectHistory(entries, { key, blockerKeys })**:
+  pure; `own` is the last `MAX_OWN_ENTRIES` entries
+  for `key`; `blockers` is the latest `done` entry
+  for each blocker key that has one
+- **renderHistory(selection)**: pure; `''` when both
+  lists are empty, else a framing paragraph (the
+  ticket and spec win over these records) and up to
+  two sections, `PREVIOUS ATTEMPTS AT THIS TICKET` and
+  `WHAT THE BLOCKING TICKETS DID`; an entry body over
+  `MAX_ENTRY_CHARS` is cut and ends with
+  `TRUNCATED_MARKER`
+- **learningsPathFor(progressPath)**: `learnings.md`
+  in the same directory as `progressPath`
+- **readEntries(path)**: `[]` when the file does not
+  exist; any other read error is thrown for the caller
+- **Guarantees**: `parseEntries` drops malformed
+  entries (missing or undecodable ticket, non-numeric
+  attempt, unknown outcome) instead of throwing, and
+  accepts CRLF; text before the first sentinel is
+  ignored. Sentinel text inside free-text fields
+  (notes, items, log tails, errors) is neutralized, so
+  an entry cannot forge another. `appendEntry` is
+  synchronous, so concurrent tickets in one Node
+  thread never interleave appends, and creates the
+  parent directory. `collectNotes` returns the trimmed
+  notes (blank counts as `null`) and removes the whole
+  `.nightralph/` directory, also when there are no
+  notes. `ensureNotesIgnored` writes
+  `.nightralph/.gitignore` containing `*` inside the
+  worktree, so an agent's `git add -A` cannot stage
+  its notes; it writes only inside the worktree, never
+  `info/exclude` (which can be a symlink shared by
+  every repo on the machine, e.g. via
+  `init.templateDir`)
 
 ### merge module (`src/merge.ts`)
 - **Exposes**: `GitOpResult`, `MergeConflictStrategy`,

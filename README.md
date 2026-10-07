@@ -209,6 +209,20 @@ Flags:
   logs are written to `<dir>/../logs/<ticket>.attempt<n>.log`
   (and `.attempt<n>.test.log` for the test command) so the first
   attempt's log is kept.
+* Each attempt at a ticket appends an entry to
+  `.scratch/<feature>/learnings.md`, next to `progress.md`. The
+  entry records what the orchestrator saw (the outcome, the agent's
+  exit code, the checklist items it reported, and the last lines of
+  the test or install log when one of those failed) and, when an
+  agent ran, the agent's own notes. The file is committed along with
+  `progress.md` and persists across runs. Each agent's prompt
+  includes the most
+  recent entries for its own ticket and the last successful entry of
+  each ticket that directly blocks it, so a retry can see why the
+  previous attempt failed. Agents keep their notes in
+  `.nightralph/notes.md` inside the worktree. nightralph collects
+  that file when the agent exits, and a self-ignoring
+  `.nightralph/.gitignore` keeps it out of the agent's commits.
 * A ticket that exhausts all its retry attempts is excluded from
   later waves in the same run. It stays `ready-for-agent` on disk
   so a future run can pick it up, but it will not be re-started
