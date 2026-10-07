@@ -114,8 +114,17 @@ Small orchestrator that runs a single-agent session per issue.
   other branch it merges into that branch as before. A
   dirty tree exits with code 2 before anything is
   checked out. On resume the CLI logs how far the launch
-  branch is ahead and scans tickets again, silently, so
-  they carry that branch's statuses. It logs
+  branch is ahead (or `fast-forwarded to <launch>` when
+  the branch was moved up, see `prepareIntegrationBranch`)
+  and scans tickets again, silently, so they carry that
+  branch's statuses. If the re-scan finds a selected
+  feature's issues dir or spec missing, or no tickets at
+  all, the CLI checks the launch branch back out, prints
+  one error naming the branch, the problem, how far
+  behind it is and the remedy (merge the launch branch
+  into it, or `git branch -D` it), and exits 2; only the
+  first scan exits from inside the scan (`loadTickets`
+  returns the missing paths, callers decide). It logs
   `Created branch ...` or `Resumed ...`. The review log
   is `.scratch/<feature>/review.md` for one feature,
   `.scratch/review.md` for several; unless `--no-review`
@@ -656,11 +665,17 @@ Small orchestrator that runs a single-agent session per issue.
   default branch is unknown or HEAD is detached
 - **prepareIntegrationBranch(repoRoot, features)**:
   returns `IntegrationPlan` `{ branch, created, resumed,
-  behind, launchBranch, forkedFrom }`. When a name is
-  planned it throws on a dirty tree before checking
-  anything out, then checks out the existing branch
-  (`resumed`, `behind` = commits the launch branch has
-  that it lacks) or creates it from the current branch
+  behind, fastForwarded, launchBranch, forkedFrom }`.
+  When a name is planned it throws on a dirty tree
+  before checking anything out, then checks out the
+  existing branch (`resumed`, `behind` = commits the
+  launch branch has that it lacks). If that branch is an
+  ancestor of the launch branch (already merged) and
+  behind, it is fast-forwarded with `merge --ff-only`:
+  `fastForwarded:true`, `behind:0`. `fastForwarded` is
+  false in every other path, and a branch with commits
+  of its own is never merged or rebased. Otherwise it
+  creates the branch from the current branch
   (`created`). Otherwise nothing is checked out and
   `branch` is the current branch. `forkedFrom` is the
   default branch whenever the resulting branch is the
@@ -886,7 +901,7 @@ Small orchestrator that runs a single-agent session per issue.
   types `ReviewStatus`, `Finding`, `FixRecord`,
   `ReviewEntryInput`, `ReviewEntry`, `ReviewOutcome`,
   `FixFailure`, `FixResult`, `ReviewDeps`,
-  `ReviewPassOpts`; pure `reviewDiffCommand`,
+  `ReviewPassOpts`; pure `reviewExcludeFor`, `reviewDiffCommand`,
   `renderReviewPrompt`, `renderFixPrompt`,
   `parseFindings`, `markFixed`, `renderReviewEntry`,
   `parseReviewEntries`, `selectReviewBase`,
@@ -926,12 +941,16 @@ Small orchestrator that runs a single-agent session per issue.
 - **Skip rule**: `runReviewPass` returns
   `{ status:'skipped' }` without running an agent or
   writing an entry when `from..tip` changes nothing
-  outside `.scratch/` (`REVIEW_EXCLUDE`), because
+  outside the exclude dir, because
   tickets, progress, learnings and `review.md` are
   bookkeeping; this keeps the commit that records a
   review from making the next range look non-empty. The
-  diff the reviewer is told to read excludes `.scratch/`
-  too
+  diff the reviewer is told to read excludes it too. The
+  exclude is `reviewExcludeFor(repoRoot, reviewPath)`:
+  the nearest ancestor of `reviewPath` named `.scratch`,
+  relative to the repo root (so a run launched from a
+  subdirectory excludes the right path), falling back to
+  `REVIEW_EXCLUDE` (`.scratch`) when there is none
 - **runReviewer**: per attempt, a named worktree `review`
   (`<repo>.review` on `<repo>--review`) off the base
   branch, `ensureNotesIgnored`, optional `installCmd`

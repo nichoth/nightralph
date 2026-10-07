@@ -141,7 +141,9 @@ whose changes pass the test gate before they merge.
    as `buildBranchName`.
 3. **Existing branch.** Resume it. Ticket status lives on the
    integration branch, so branching fresh from `main` would redo
-   finished work. Staleness is reported, not fixed.
+   finished work. An integration branch that is already an ancestor
+   of the launch branch (it was merged) is fast-forwarded to it; any
+   other staleness is reported, not fixed.
 4. **Policy in the CLI, mechanism in the library.** The CLI decides
    whether to use an integration branch and whether to review;
    `runWavesIsolated` only acts on what it is given. This keeps the 37

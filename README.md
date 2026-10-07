@@ -330,10 +330,20 @@ branch. Running again from `main` resumes the same branch, so finished
 tickets stay finished. Launched from any other branch, it merges into
 that branch.
 
+After you merge the integration branch into `main`, the next run
+fast-forwards it to `main` and resumes. If the branch has commits `main`
+lacks, nightralph reports how far behind it is; merge `main` into it or
+delete it with `git branch -D`.
+
+If `.scratch/` is gitignored, the bookkeeping files (tickets, progress,
+learnings, review) are force-added and live on the integration branch, so
+they disappear from disk when you check out `main`.
+
 ### Review
 
 After the last wave, an agent reviews everything merged since the last
-review and writes its findings to `review.md` next to `progress.md`. A
+review and writes its findings to `.scratch/<feature>/review.md` (`.scratch/review.md`
+for a multi-feature run). A
 second agent fixes them test-first; its work merges only if the test
 command passes. Findings it could not fix stay unchecked in
 `review.md`. Skip this with `--no-review`.
