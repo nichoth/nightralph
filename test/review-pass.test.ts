@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os'
 import { execFileSync, execSync } from 'node:child_process'
 import {
     runReviewer,
+    runFixer,
+    FIX_FAILURE_TEXT,
     FINDINGS_PATH,
     NO_FINDINGS,
     type ReviewDeps,
@@ -198,5 +200,109 @@ test('runReviewer - AC5.5 reviewer commits never reach main',
             )
             t.equal(git(repoRoot, ['rev-parse', 'main']), before,
                 'main unchanged')
+        })
+    })
+
+const FINDINGS = [
+    { summary:'first thing', detail:'', checked:false },
+    { summary:'second thing', detail:'', checked:false },
+]
+
+function commitIn (cwd:string, file:string):void {
+    writeFileSync(join(cwd, file), String(Date.now()))
+    git(cwd, ['add', file])
+    git(cwd, ['commit', '-m', `add ${file}`])
+}
+
+test('runFixer - AC6.1 a green fix merges and checks echoed ' +
+    'findings', async t => {
+    await withRepo(async repoRoot => {
+        const agent = fakeAgent(cwd => {
+            commitIn(cwd, 'fix.ts')
+            return { completedItems:['first thing'] }
+        })
+        const result = await runFixer(
+            passOpts(repoRoot), { spawnAgent:agent.spawnAgent },
+            FINDINGS
+        )
+        t.ok(result.merged, 'merged')
+        t.deepEqual(result.findings.map(f => f.checked),
+            [true, false], 'only the echoed finding is checked')
+        t.ok(existsSync(join(repoRoot, 'fix.ts')),
+            'the fix is on main')
+        t.ok(!existsSync(agent.calls[0].cwd), 'worktree removed')
+    })
+})
+
+test('runFixer - AC6.2 a red test gate is retried, then nothing ' +
+    'merges', async t => {
+    await withRepo(async repoRoot => {
+        const before = git(repoRoot, ['rev-parse', 'main'])
+        const agent = fakeAgent(cwd => {
+            commitIn(cwd, 'broken.txt')
+            return { completedItems:['first thing'] }
+        })
+        const result = await runFixer(
+            passOpts(repoRoot, {
+                retries:1, testCmd:'test ! -f broken.txt',
+            }),
+            { spawnAgent:agent.spawnAgent },
+            FINDINGS
+        )
+        t.equal(agent.calls.length, 2, 'retried once')
+        t.ok(!result.merged, 'not merged')
+        t.ok(result.findings.every(f => !f.checked),
+            'every finding unchecked')
+        t.equal(git(repoRoot, ['rev-parse', 'main']), before,
+            'main unchanged')
+    })
+})
+
+test('runFixer - non-zero exit and no commits both fail',
+    async t => {
+        await withRepo(async repoRoot => {
+            const exitAgent = fakeAgent(() => ({ exitCode:1 }))
+            const exited = await runFixer(
+                passOpts(repoRoot), { spawnAgent:exitAgent.spawnAgent },
+                FINDINGS
+            )
+            t.ok(!exited.merged, 'exit 1 does not merge')
+            t.equal(exited.result, FIX_FAILURE_TEXT.exit, 'exit reason')
+
+            const idleAgent = fakeAgent(() => {})
+            const idle = await runFixer(
+                passOpts(repoRoot), { spawnAgent:idleAgent.spawnAgent },
+                FINDINGS
+            )
+            t.ok(!idle.merged, 'no commits does not merge')
+            t.equal(idle.result, FIX_FAILURE_TEXT['no-commits'],
+                'no-commits reason')
+        })
+    })
+
+test('runFixer - AC6.4 a retry sees the previous attempt\'s notes',
+    async t => {
+        await withRepo(async repoRoot => {
+            const agent = fakeAgent((cwd, call) => {
+                if (call === 1) {
+                    mkdirSync(join(cwd, '.nightralph'),
+                        { recursive:true })
+                    writeFileSync(
+                        join(cwd, '.nightralph', 'notes.md'),
+                        'NOTES-TOKEN'
+                    )
+                    return { exitCode:1 }
+                }
+                commitIn(cwd, 'fix.ts')
+            })
+            await runFixer(
+                passOpts(repoRoot, { retries:1 }),
+                { spawnAgent:agent.spawnAgent },
+                FINDINGS
+            )
+            t.ok(!agent.calls[0].prompt.includes('NOTES-TOKEN'),
+                'first prompt has no notes')
+            t.ok(agent.calls[1].prompt.includes('NOTES-TOKEN'),
+                'retry prompt carries them')
         })
     })

@@ -12,7 +12,11 @@ import {
     createNamedWorktree,
     deleteBranch,
     removeWorktree,
+    commitDirty,
+    hasNewCommits,
+    isDirty,
 } from './worktree.js'
+import { mergeBranch } from './merge.js'
 import type { AgentResult } from './orchestrator.js'
 import {
     readDocsRule,
@@ -578,6 +582,151 @@ export async function runReviewer (
                 opts.log('  review: no usable findings file')
             }
             return { result:findings, stop:findings !== null }
+        } finally {
+            await discardWorktree(opts, wt)
+        }
+    })
+}
+
+export type FixResult = {
+    merged:boolean
+    // checked per the fixer's [x] lines when merged; all
+    // unchecked otherwise
+    findings:Finding[]
+    attempts:number
+    effort?:EffortLevel
+    exitCode:number|null
+    result:string
+    notes:string|null
+}
+
+// Asks an agent to fix the findings in a fresh worktree off the
+// branch tip. Its work merges only after a green test gate;
+// every failure is retried like a ticket.
+export async function runFixer (
+    opts:ReviewPassOpts,
+    deps:ReviewDeps,
+    findings:ReadonlyArray<Finding>
+):Promise<FixResult> {
+    const unchecked = findings.map(f => ({ ...f, checked:false }))
+    let previous:{ reason:FixFailure; notes:string|null }|undefined
+
+    return runWithRetries<FixResult>({
+        maxAttempts:opts.retries + 1,
+        retryDelay:opts.retryDelay,
+        agentCmd:opts.agentCmd,
+        effort:opts.effort,
+        label:'review fix',
+        log:opts.log,
+    }, async (attempt, effort) => {
+        const fail = (
+            reason:FixFailure,
+            exitCode:number|null,
+            notes:string|null
+        ) => {
+            previous = { reason, notes }
+            opts.log(`  review fix: ${FIX_FAILURE_TEXT[reason]}`)
+            return {
+                result:{
+                    merged:false,
+                    findings:unchecked,
+                    attempts:attempt,
+                    effort,
+                    exitCode,
+                    result:FIX_FAILURE_TEXT[reason],
+                    notes,
+                },
+                stop:false,
+            }
+        }
+
+        const wt = await createNamedWorktree({
+            repoRoot:opts.repoRoot,
+            repoName:opts.repoName,
+            baseBranch:opts.baseBranch,
+            name:'review-fix',
+        })
+        try {
+            if (opts.installCmd && !(await runStep(
+                opts, deps, opts.installCmd, wt.worktreePath,
+                logPath(
+                    opts.logsDir, 'review-fix', attempt,
+                    '.install.log'
+                )
+            ))) {
+                return fail('install', null, null)
+            }
+            ensureNotesIgnored(wt.worktreePath)
+            const agent = await deps.spawnAgent({
+                prompt:renderFixPrompt({
+                    specBody:opts.specBody,
+                    findings,
+                    testCmd:opts.testCmd,
+                    installCmd:opts.installCmd,
+                    previous,
+                }),
+                agentCmd:opts.agentCmd,
+                model:opts.model,
+                timeout:opts.timeout,
+                logPath:logPath(
+                    opts.logsDir, 'review-fix', attempt, '.log'
+                ),
+                cwd:wt.worktreePath,
+                label:'review-fix',
+                maxTurns:opts.maxTurns,
+                effort,
+                onLine:opts.log,
+            })
+            // Before any auto-commit, so notes never get committed
+            const notes = collectNotes(wt.worktreePath)
+
+            if (!agent.timedOut && agent.exitCode !== 0) {
+                return fail('exit', agent.exitCode, notes)
+            }
+            if (isDirty(wt.worktreePath)) {
+                await commitDirty(
+                    wt.worktreePath,
+                    'nightralph: auto-commit review fix ' +
+                    'remaining changes'
+                )
+            }
+            if (!hasNewCommits(
+                opts.repoRoot, opts.baseBranch, wt.branchName
+            )) {
+                return fail('no-commits', agent.exitCode, notes)
+            }
+            if (!(await runStep(
+                opts, deps, opts.testCmd, wt.worktreePath,
+                logPath(
+                    opts.logsDir, 'review-fix', attempt, '.test.log'
+                )
+            ))) {
+                return fail('tests', agent.exitCode, notes)
+            }
+            const merged = await mergeBranch(
+                opts.repoRoot, wt.branchName
+            )
+            if (!merged.success) {
+                return fail(
+                    'merge',
+                    agent.exitCode,
+                    [notes, merged.stderr].filter(Boolean)
+                        .join('\n\n') || null
+                )
+            }
+            opts.log('  review fix: merged')
+            return {
+                result:{
+                    merged:true,
+                    findings:markFixed(findings, agent.completedItems),
+                    attempts:attempt,
+                    effort,
+                    exitCode:agent.exitCode,
+                    result:'merged',
+                    notes,
+                },
+                stop:true,
+            }
         } finally {
             await discardWorktree(opts, wt)
         }
