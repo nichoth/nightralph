@@ -187,17 +187,21 @@ Small orchestrator that runs a single-agent session per issue.
   `'error'` carries optional `worktreePath?:string`
   and `branchName?:string`; `'worktree-error'`
   carries only `error:unknown`; `'failed'` carries
-  `reason:'exit'|'tests'|'install'`. Every variant where
-  an agent ran carries `agentRun:AgentRunRecord`
+  `reason:'exit'|'tests'|'install'`. The variants that
+  always follow an agent run carry
+  `agentRun:AgentRunRecord`
   (`{ exitCode, completedItems, timedOut, notes }`):
   `'ready'`, `'failed'` with reason `'exit'` or
   `'tests'`, and `'no-commits'` (typed
   `AgentRunRecord|null`; `null` only for the
   placeholder outcome inside `runTicketAttempts`, which
   no agent produced). `'failed'` with reason
-  `'install'` has no `agentRun`. The top-level
-  `exitCode` on `'failed'` is the value written to
-  progress.md (a placeholder `1` for `'tests'`), while
+  `'install'` has no `agentRun`, and `'error'` never
+  carries one, even when the throw came after the
+  agent ran (that attempt's notes are dropped). The
+  top-level `exitCode` on `'failed'` is the value
+  written to progress.md (a placeholder `1` for
+  `'tests'` and `'install'`), while
   `agentRun.exitCode` is the agent's real exit code
 - **DEFAULT_RETRY_DELAY**: exported as `30` (seconds)
 - **DEFAULT_CONCURRENCY**: exported as `5`
@@ -269,8 +273,9 @@ Small orchestrator that runs a single-agent session per issue.
   (`.nightralph/notes.md`, creating the directory),
   updates it after each checklist item and as soon as
   it hits a blocker (not only at the end), and never
-  commits, stages, or deletes it; the orchestrator
-  collects it. Reusable patterns go in AGENTS.md;
+  commits, stages, or deletes it; `runWavesIsolated`
+  collects it (in-place `runWaves` does not). Reusable
+  patterns go in AGENTS.md;
   anything specific to this ticket goes in the notes
   file. Optional `opts.history` (the text from
   `renderHistory`) is placed between the ticket and
@@ -297,7 +302,11 @@ Small orchestrator that runs a single-agent session per issue.
   (timeouts are not retried); a per-run `failedKeys`
   set (compound `ticketKey` strings) excludes tickets
   that exhausted their attempts or whose merge conflict
-  was not recovered from later waves
+  was not recovered from later waves. It records no
+  learnings and passes no history; the prompt still
+  asks for `.nightralph/notes.md`, which the in-place
+  runner neither ignores nor collects, so the file is
+  left in the project directory
 - **renderMergePrompt(specBody, ticket)**: prompt for
   a respawned agent resolving a merge conflict; tells
   the agent to resolve conflict markers, not
@@ -681,7 +690,8 @@ Small orchestrator that runs a single-agent session per issue.
 - **EntryInput**: `key`, `label`, `attempt`, `now`,
   plus per-outcome fields: `done`, `exit` and
   `no-commits` carry `run` (and optional `effort`);
-  `tests` carries `run` plus `logName` and `logTail`;
+  `tests` carries `run` (and optional `effort`) plus
+  `logName` and `logTail`;
   `install` carries only `logName` and `logTail`;
   `error` carries `error`; `merge` carries `stderr`
 - **Entry format**: each entry starts with a sentinel
@@ -693,12 +703,14 @@ Small orchestrator that runs a single-agent session per issue.
   whitespace in the key are percent-escaped, so
   `ticket=my-feature:4` stays readable. `attempt` is
   `0` for `merge` entries
-- **renderEntry(input)**: pure; agent outcomes list
-  effort (when set), the agent's exit code, the checked items,
-  and the agent's notes (or a line saying it left
-  none); `tests` and `install` add the log tail in a
-  fence; `error` and `merge` show the error text or
-  git stderr in a fence
+- **renderEntry(input)**: pure; agent outcomes
+  (`done`, `exit`, `no-commits`, `tests`) list effort
+  (when set), the agent's exit code, the checked
+  items, and the agent's notes (or a line saying it
+  left none); `tests` also adds the log tail in a
+  fence; `install` has no agent summary, only the log
+  tail in a fence; `error` and `merge` show the error
+  text or git stderr in a fence
 - **selectHistory(entries, { key, blockerKeys })**:
   pure; `own` is the last `MAX_OWN_ENTRIES` entries
   for `key`; `blockers` is the latest `done` entry
