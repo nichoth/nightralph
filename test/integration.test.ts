@@ -1055,21 +1055,7 @@ test('runWavesIsolated - an empty test command writes no test ' +
             process.chdir(originalCwd)
         }
     } finally {
-        try {
-            execSync(
-                'git worktree list --porcelain',
-                { cwd:projectDir }
-            ).toString()
-                .split('\n')
-                .filter(l => l.startsWith('worktree '))
-                .map(l => l.substring('worktree '.length))
-                .filter(p => p !== projectDir)
-                .forEach(p => rmSync(p, {
-                    recursive:true, force:true
-                }))
-        } catch {
-        }
-        rmSync(projectDir, { recursive:true, force:true })
+        removeWorktreesAndRepo(projectDir)
         rmSync(templateDir, { recursive:true, force:true })
     }
 })
@@ -5144,7 +5130,7 @@ test('CLI subprocess - AC2.4 --test-cmd "" completes a ticket ' +
             makeTicketBody({ status:'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
-        const { logsDir } = scratchDirs(projectDir)
+        const logsDir = join(projectDir, '.scratch', FEAT, 'logs')
 
         const { code } = await spawnCli([
             MOCK_AGENT, ...NO_GATE_RUN_ARGS, '--test-cmd', '',
@@ -5208,7 +5194,7 @@ test('CLI subprocess - AC2.6 a test script with no flag still ' +
             makeTicketBody({ status:'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
-        const { logsDir } = scratchDirs(projectDir)
+        const logsDir = join(projectDir, '.scratch', FEAT, 'logs')
 
         const { code, stdout } = await spawnCli([
             MOCK_AGENT, ...NO_GATE_RUN_ARGS,
@@ -5280,7 +5266,7 @@ test('CLI subprocess - AC2.8 --test-cmd "" on a project with a ' +
             makeTicketBody({ status:'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
-        const { logsDir } = scratchDirs(projectDir)
+        const logsDir = join(projectDir, '.scratch', FEAT, 'logs')
 
         const { code, stdout } = await spawnCli([
             MOCK_AGENT, ...NO_GATE_RUN_ARGS, '--test-cmd', '',
