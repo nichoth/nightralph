@@ -59,8 +59,11 @@ npm i -S nightralph
 
 - Node 24 or newer (see `engines` in `package.json`) and git.
 - The agent CLI you name on the command line (`claude`, `codex` or
-  `pi`) installed and on your `PATH`. nightralph checks this before
-  it touches git and exits with code 2 if the command is not found.
+  `pi`) installed and on your `PATH`. After it finds tickets,
+  nightralph checks for this command before it touches git, and
+  exits with code 2 if the command is not found. A run with no
+  tickets stops before the check. With `--dry-run` it prints the
+  problem and keeps going.
 - macOS or Linux. nightralph runs agents in their own process group
   and uses `sh -c` for test and install commands, so it does not
   run on Windows.

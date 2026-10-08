@@ -11,11 +11,15 @@ Small orchestrator that runs a single-agent session per issue.
 
 ## Commands
 - `npm run build` -- build to dist/
-- `npm test` -- bundle the suites in `test/` and run them via
-  `scripts/test.sh` (no build step; the tests import `src/`).
-  The script gives the run a private `TMPDIR` and deletes it
-  (plus any `mock-change-*.txt` in the repo root) when the run
-  ends, pass or fail
+- `npm test` -- bundles the suites listed in `scripts/test.sh`
+  into `dist/test` and runs them. It does not rebuild `dist/`:
+  the CLI subprocess and setup tests in
+  `test/integration.test.ts` run `dist/index.js` and read
+  `dist/skills` and `dist/docs-templates`, so run
+  `npm run build` first when `src/` changed. The script gives
+  the run a private `TMPDIR` and deletes it (plus any
+  `mock-change-*.txt` in the repo root) when the run ends, pass
+  or fail
 - `npm run lint` -- eslint
 - `npm publish` -- `prepublishOnly` runs `npm run build` and
   `npm test` first, so a red suite or a stale `dist/` cannot be
@@ -86,7 +90,8 @@ Small orchestrator that runs a single-agent session per issue.
 - `--test-cmd <cmd>` -- command run in each worktree
   after the agent exits; non-zero exit rejects the
   ticket. When the flag is absent the command is
-  `detectTestCmd(root)`, else `''` (no gate), and the CLI
+  `detectTestCmd` on the repo root (the current directory for
+  in-place runs), else `''` (no gate), and the CLI
   logs one line saying no test command was detected.
   `--test-cmd ""` is an explicit `''`. `''` is passed
   through unchanged to `runWaves`, `runWavesIsolated`,
@@ -134,8 +139,9 @@ Small orchestrator that runs a single-agent session per issue.
   rejected by a command handler (for example a dirty tree
   found by `runWavesIsolated`) prints `formatErrorMessage(err)`
   to stderr and exits 2, with no help text and no stack. A
-  usage error (a message from yargs, such as a parse or
-  `.check()` error) prints the help text and the message and
+  usage error (a message from yargs, such as an unknown
+  argument under `.strict()` or an `--effort` value outside
+  its choices) prints the help text and the message and
   exits 1. `runExecute` exits 2 on its own for a missing
   provider or feature path, and for a failed integration
   branch setup
@@ -768,13 +774,15 @@ Small orchestrator that runs a single-agent session per issue.
   is true when `from..to` changes any path outside
   `excludeDir`
 - **buildBranchName**: returns the branch name for a
-  ticket as `<repo>--<num>-<slug>`; uses `--`
-  instead of `/` to avoid the git ref hierarchy
+  ticket as `<repo>--<num>-<slug>`, with `<feature>-` before
+  the number when the ticket has a feature (every CLI run);
+  uses `--` instead of `/` to avoid the git ref hierarchy
   conflict that prevents creating
   `refs/heads/X/Y` when `refs/heads/X` exists
 - **createWorktree**: creates a git worktree in a
   sibling directory named
-  `<repo>.<num>-<slug>` on a branch named by
+  `<repo>.<feature>-<num>-<slug>` (the `<feature>-` segment is
+  omitted when the ticket has no feature) on a branch named by
   `buildBranchName`; calls are serialized
   module-wide via a promise chain so concurrent
   invocations do not race on shared git refs;
