@@ -41,6 +41,7 @@ so they can't drift as long as you install the skills with this package.
     + [Claude Opus 4.6](#claude-opus-46)
     + [Claude Opus 5.5](#claude-opus-55)
     + [Claude Sonnet 5](#claude-sonnet-5)
+    + [Claude Haiku 5.5](#claude-haiku-55)
     + [Claude Fable 5.1](#claude-fable-51)
     + [`pi` + OpenRouter model](#pi--openrouter-model)
     + [`codex` + Luna](#codex--luna)
@@ -440,7 +441,7 @@ caffeinate -i npx nightralph claude -m claude-opus-5-5 --effort low
 caffeinate -i npx nightralph claude -m claude-sonnet-5 --effort high
 ```
 
-### Claude Haiku 5.5
+#### Claude Haiku 5.5
 
 ```sh
 caffeinate -i npx nightralph claude -m claude-haiku-5-5 --effort high
