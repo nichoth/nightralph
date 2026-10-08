@@ -271,6 +271,28 @@ test('renderFixPrompt - carries findings, test command, and the ' +
     t.ok(retry.includes('npm ci'), 'install rule')
 })
 
+test('renderFixPrompt with an empty test command names no gate',
+    t => {
+        const findings = [{
+            summary:'first thing',
+            detail:'',
+            checked:false,
+        }]
+        const withCmd = renderFixPrompt({
+            specBody:'SPEC-BODY',
+            findings,
+            testCmd:'npm run t',
+        })
+        const without = renderFixPrompt({
+            specBody:'SPEC-BODY',
+            findings,
+            testCmd:'',
+        })
+        t.ok(withCmd.includes('npm run t'), 'command is named')
+        t.ok(!without.includes('``'),
+            'no empty code span for the command')
+    })
+
 // -- reviewExcludeFor --
 
 test('reviewExcludeFor - is relative to the repo root', t => {

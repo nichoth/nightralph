@@ -1657,6 +1657,34 @@ test('renderPrompt includes the test command',
         )
     })
 
+test('renderPrompt with an empty test command names no gate',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const withCmd = renderPrompt(
+            'spec body here', ticket,
+            { testCmd:'npm run check' }
+        )
+        const without = renderPrompt(
+            'spec body here', ticket,
+            { testCmd:'' }
+        )
+        t.ok(
+            withCmd.includes('npm run check'),
+            'non-empty command is named'
+        )
+        t.ok(
+            !without.includes('npm run check'),
+            'empty command is not named'
+        )
+        t.ok(
+            !without.includes('``'),
+            'no empty code span for the command'
+        )
+    })
+
 test('renderPrompt names the install command when given',
     t => {
         const ticket = makeTicket({

@@ -28,6 +28,12 @@ export function installRule (installCmd?:string):string[] {
 }
 
 export function testGateRule (testCmd:string, subject:string):string {
+    if (testCmd === '') {
+        return '- Before each commit, run the tests relevant ' +
+            'to what you changed. Do not commit with failing ' +
+            'tests. The orchestrator runs no test command ' +
+            `for this ${subject}.`
+    }
     return '- While iterating, run only the tests ' +
         'relevant to what you changed. Run ' +
         `\`${testCmd}\` in full once, as the ` +
