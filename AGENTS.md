@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-10-07
+Last verified: 2026-10-08
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -11,11 +11,19 @@ Small orchestrator that runs a single-agent session per issue.
 
 ## Commands
 - `npm run build` -- build to dist/
-- `npm test` -- build and run tests via `scripts/test.sh`,
-  which gives the run a private `TMPDIR` and deletes it (plus
-  any `mock-change-*.txt` in the repo root) when the run ends,
-  pass or fail
+- `npm test` -- bundle the suites in `test/` and run them via
+  `scripts/test.sh` (no build step; the tests import `src/`).
+  The script gives the run a private `TMPDIR` and deletes it
+  (plus any `mock-change-*.txt` in the repo root) when the run
+  ends, pass or fail
 - `npm run lint` -- eslint
+- `npm publish` -- `prepublishOnly` runs `npm run build` and
+  `npm test` first, so a red suite or a stale `dist/` cannot be
+  published
+- `npm version` -- `postversion` is `npm publish && git push
+  --follow-tags`, so the version tag is pushed only after the
+  build and tests pass. A red suite leaves the version commit
+  and tag local
 
 ## Project Structure
 - `src/index.ts` -- CLI entry point (yargs commands)
@@ -33,6 +41,9 @@ Small orchestrator that runs a single-agent session per issue.
   fix and review prompts
 - `src/review.ts` -- review log, reviewer, fixer, review pass
 - `src/testcmd.ts` -- test command detection and execution
+- `src/preflight.ts` -- provider executable lookup
+- `src/resolve.ts` -- feature selection (`.scratch/<feature>/`
+  discovery and the interactive picker)
 - `src/skills/` -- bundled skill definitions
 - `src/docs-templates/` -- doc templates copied to target projects
 
@@ -74,7 +85,12 @@ Small orchestrator that runs a single-agent session per issue.
   `'stop'`)
 - `--test-cmd <cmd>` -- command run in each worktree
   after the agent exits; non-zero exit rejects the
-  ticket. Defaults to `npm test`
+  ticket. When the flag is absent the command is
+  `detectTestCmd(root)`, else `''` (no gate), and the CLI
+  logs one line saying no test command was detected.
+  `--test-cmd ""` is an explicit `''`. `''` is passed
+  through unchanged to `runWaves`, `runWavesIsolated`,
+  `dryRun`, `dryRunIsolated` and the review pass
 - `--install-cmd <cmd>` -- command run in each fresh
   worktree before the agent (isolated runs only).
   Defaults to `detectInstallCmd(repoRoot)`; `""`
@@ -104,6 +120,25 @@ Small orchestrator that runs a single-agent session per issue.
   layout when inside one; also prints the branch
   decision (`describeIntegrationBranch`) and whether
   review is on or off
+- **Provider preflight**: after the first ticket scan (and
+  only when it found tickets) and before
+  `prepareIntegrationBranch`, `runExecute` calls
+  `resolveExecutable(provider)`. `null` prints
+  `Provider '<name>' not found on PATH` (or `Provider
+  '<name>' not found or not executable` when the name
+  contains `/`) and exits 2, so a bad name never creates or
+  checks out a branch. Under
+  `--dry-run` it prints a `Provider:` line with the resolved
+  path or the same not-found wording and continues
+- **Errors**: a yargs `.fail()` handler. An error thrown or
+  rejected by a command handler (for example a dirty tree
+  found by `runWavesIsolated`) prints `formatErrorMessage(err)`
+  to stderr and exits 2, with no help text and no stack. A
+  usage error (a message from yargs, such as a parse or
+  `.check()` error) prints the help text and the message and
+  exits 1. `runExecute` exits 2 on its own for a missing
+  provider or feature path, and for a failed integration
+  branch setup
 - **Integration branch**: in a git repo, outside
   `--dry-run`, the CLI calls `prepareIntegrationBranch`
   after its first ticket scan (so a run with no tickets
@@ -153,7 +188,7 @@ Small orchestrator that runs a single-agent session per issue.
   `renderMergePrompt(specBody, ticket)`,
   `spawnAgent(opts)`, `createPiStreamFormatter()`,
   `killProcessGroup(pid)`, `killRunningAgents()`,
-  `dryRun(tickets, specBody)`,
+  `dryRun(tickets, specBody, testCmd)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
   `runWavesIsolated(opts)`, `HUMAN_STATUS`,
   `renderFinishSummary(tickets, totalCompleted, failedKeys)`,
@@ -263,7 +298,11 @@ Small orchestrator that runs a single-agent session per issue.
   reports that through `onLine` (or `console.warn` when
   no `onLine`) and as a line in the ticket log, never
   only to the console, since `StatusDisplay` repaints
-  over bare console output; installs a `proc.stdin`
+  over bare console output; a spawn error (e.g. ENOENT)
+  is reported through `onLine` (or `console.error` when no
+  `onLine`) and as a `nightralph:` line in the ticket log,
+  and resolves with `exitCode:1` once the log has flushed;
+  installs a `proc.stdin`
   error listener so an agent that exits before reading
   its prompt (EPIPE) does not crash the run; collects
   `[x] <text>` lines from agent stdout via
@@ -290,7 +329,9 @@ Small orchestrator that runs a single-agent session per issue.
 - **renderPrompt(specBody, ticket, opts)**: `opts.testCmd`
   is required; the prompt always includes /tdd
   instructions and names the test command the
-  orchestrator will run after the agent exits; it
+  orchestrator will run after the agent exits (when
+  `opts.testCmd` is `''` it names no command and says the
+  orchestrator runs none); it
   also tells the agent to read nearby AGENTS.md,
   CONTEXT.md and docs/adr/ first, to commit after
   each checklist item and have everything committed
@@ -322,7 +363,11 @@ Small orchestrator that runs a single-agent session per issue.
   markdown section from a spec, ignoring headings
   inside code fences; the CLI uses it to omit
   `User Stories` from the per-ticket prompt
-- **runWaves(...)**: requires `testCmd` (string);
+- **runWaves(...)**: requires `testCmd` (string; `''`
+  means no test gate: in-place runs never run one, so the
+  value only shapes the prompt, and a non-empty value makes
+  the prompt promise a gate that in-place runs do not
+  perform);
   accepts optional `display` parameter (`Display`
   interface), defaults to `createDisplay()` when
   omitted; trailing optional
@@ -355,7 +400,10 @@ Small orchestrator that runs a single-agent session per issue.
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
-  updates; requires `testCmd` (string); accepts
+  updates; requires `testCmd` (string; `''` skips the test
+  gate: `runTestGate` returns true without spawning or
+  writing a `.test.log`, and the branch goes straight to the
+  merge queue); accepts
   optional `installCmd` (run in each fresh worktree
   before the agent and again after a merge-conflict
   rebase, output in `<logsDir>/<ticket>.install.log`;
@@ -508,9 +556,13 @@ Small orchestrator that runs a single-agent session per issue.
   the status to done. This is why a run whose only
   open tickets are human ones exits 0 with an
   explanation instead of silently
+- **dryRun(tickets, specBody, testCmd)**: in-place dry run;
+  prints the wave order, `Test command: <cmd>` (`(none)` for
+  `''`) and the first ready ticket's prompt
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; requires
-  `testCmd`; accepts `installCmd`, `effort`, `retries`,
+  `testCmd` (prints `Test command: (none)` for `''`); accepts
+  `installCmd`, `effort`, `retries`,
   `retryDelay`, and `concurrency` in opts and prints
   them
 
@@ -542,6 +594,22 @@ Small orchestrator that runs a single-agent session per issue.
   error resolves with `exitCode:1` and the error text
   in `output`; the timeout kills the whole process
   group so child processes cannot outlive the run
+
+### preflight module (`src/preflight.ts`)
+- **Exposes**: `ResolveExecutableOpts`,
+  `resolveExecutable(cmd, opts?)`
+- **resolveExecutable(cmd, opts?)**: `opts` is
+  `{ path?, cwd? }` (default `process.env.PATH` and
+  `process.cwd()`). A `cmd` containing `/` is resolved
+  against `cwd`; it returns the absolute path when that is
+  an executable file. A bare name is looked up in each
+  `path` entry in order (empty entries are skipped); the
+  first executable file wins. Everything else (including
+  `''`) is `null`
+- **Guarantees**: synchronous, no side effects, imports only
+  `node:fs` and `node:path`, spawns nothing, never throws.
+  It checks that the path is a file with the execute bit,
+  not that the command runs
 
 ### display module (`src/display.ts`)
 - **Exposes**: `Display` (type), `StatusDisplay` (class),
@@ -893,7 +961,12 @@ Small orchestrator that runs a single-agent session per issue.
   work (`checklist item` or `finding`) and the subject
   the orchestrator accepts or rejects (`ticket` or
   `fix`), so the prompts cannot drift. The ticket prompt
-  text is unchanged by the move
+  text is unchanged by the move. `testGateRule(testCmd,
+  subject)` returns the full gate rule naming the command for
+  a non-empty `testCmd`; for `''` it returns a shorter rule
+  (run the relevant tests before each commit, do not commit
+  with failing tests, and the orchestrator runs no test
+  command for this `<subject>`)
 
 ### review module (`src/review.ts`)
 - **Exposes**: `FINDINGS_FILE`, `FINDINGS_PATH`,
@@ -973,7 +1046,8 @@ Small orchestrator that runs a single-agent session per issue.
   are collected before any auto-commit; a non-zero exit
   (a timeout is not one) fails the attempt; dirty
   changes are auto-committed; no new commits fails; a
-  red test gate (`review-fix.test.log`) fails; only then
+  red test gate (`review-fix.test.log`) fails, and
+  `testCmd:''` skips the gate and writes no log; only then
   is the branch merged into the base branch from the main
   checkout, and a merge conflict fails the attempt with
   git's stderr appended to the notes. A failure is one of
@@ -983,7 +1057,9 @@ Small orchestrator that runs a single-agent session per issue.
   is merged and every finding stays unchecked. On a
   merge, findings are checked per the fixer's `[x]`
   lines (`markFixed`: whitespace-collapsed,
-  case-insensitive). Worktrees are removed in `finally`
+  case-insensitive). Worktrees are removed in `finally`.
+  `renderFixPrompt` shares `testGateRule` with `renderPrompt`,
+  so `testCmd:''` yields the no-gate rule
 - **Retry behavior**: reviewer and fixer each get
   `retries + 1` attempts through `runWithRetries`, so
   they escalate effort and back off like a ticket; logs
@@ -999,7 +1075,8 @@ Small orchestrator that runs a single-agent session per issue.
   `review-failed` when the reviewer never produced a
   usable file) and commits `review.md`
   (`nightralph: record review`). Returns `ReviewOutcome`
-  `{ status, findings, fixed }`
+  `{ status, findings, fixed }`. `opts.testCmd` is required;
+  `''` means the fixer runs without a test gate
 - **renderReviewSummary(outcome, reviewPath)**: pure; one
   line naming the finding count, the fixed count and the
   file, e.g. `Review: 3 findings, 2 fixed -- see <path>`;
