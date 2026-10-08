@@ -1374,10 +1374,10 @@ async function runInstall (opts:{
     return true
 }
 
-// Runs the project's test command in a ticket's worktree.
-// Writes the output to a per-ticket log either way (unless
-// testCmd is '', which is no gate and no log), and returns
-// true only when the suite is green.
+// Runs the project's test command in a ticket's worktree,
+// writes the output to a per-ticket log, and returns true
+// only when the suite is green. A testCmd of '' is no gate:
+// nothing runs, no log is written, and it returns true.
 async function runTestGate (opts:{
     testCmd:string
     ticket:Ticket
