@@ -7,6 +7,7 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
     generateProgress,
     generateMultiFeatureProgress,
@@ -570,6 +571,139 @@ test(
             countAfter,
             countBefore,
             'should not create a new commit'
+        )
+    }
+)
+
+test(
+    'commitProgress accepts an array of paths and commits both',
+    async t => {
+        const repoRoot = initTempRepo()
+        const progressPath = 'progress.md'
+        const learningsPath = 'learnings.md'
+        const fullProgressPath = join(repoRoot, progressPath)
+        const fullLearningsPath = join(repoRoot, learningsPath)
+
+        const tickets = [
+            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+        ]
+
+        const data = generateProgress('multi-file-feature', tickets)
+        writeProgress(fullProgressPath, data)
+        writeFileSync(fullLearningsPath, '# Learnings\n\n')
+
+        await commitProgress(
+            repoRoot,
+            [progressPath, learningsPath],
+            'Track progress and learnings'
+        )
+
+        // Verify both files are in the commit
+        const showOutput = execSync(
+            'git show HEAD --name-only --format=',
+            { cwd:repoRoot }
+        ).toString().trim()
+        const files = showOutput.split('\n').filter(f => f.length > 0)
+
+        t.ok(
+            files.includes('progress.md'),
+            'commit should contain progress.md'
+        )
+        t.ok(
+            files.includes('learnings.md'),
+            'commit should contain learnings.md'
+        )
+    }
+)
+
+test(
+    'commitProgress with array returns false when files unchanged',
+    async t => {
+        const repoRoot = initTempRepo()
+        const progressPath = 'progress.md'
+        const learningsPath = 'learnings.md'
+        const fullProgressPath = join(repoRoot, progressPath)
+        const fullLearningsPath = join(repoRoot, learningsPath)
+
+        const tickets = [
+            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+        ]
+
+        const data = generateProgress('array-unchanged-feature', tickets)
+        writeProgress(fullProgressPath, data)
+        writeFileSync(fullLearningsPath, '# Learnings\n\n')
+
+        const first = await commitProgress(
+            repoRoot,
+            [progressPath, learningsPath],
+            'Initial commit'
+        )
+        t.equal(first, true, 'first call should return true')
+
+        const countBefore = execSync('git rev-list --count HEAD', {
+            cwd:repoRoot,
+        }).toString().trim()
+
+        const second = await commitProgress(
+            repoRoot,
+            [progressPath, learningsPath],
+            'Should not commit'
+        )
+        t.equal(second, false, 'second call should return false')
+
+        const countAfter = execSync('git rev-list --count HEAD', {
+            cwd:repoRoot,
+        }).toString().trim()
+        t.equal(
+            countAfter,
+            countBefore,
+            'should not create a new commit'
+        )
+    }
+)
+
+test(
+    'commitProgress with array commits when only a later path changed',
+    async t => {
+        const repoRoot = initTempRepo()
+        const progressPath = 'progress.md'
+        const learningsPath = 'learnings.md'
+        const fullLearningsPath = join(repoRoot, learningsPath)
+
+        const data = generateProgress('later-path-feature', [
+            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+        ])
+        writeProgress(join(repoRoot, progressPath), data)
+        writeFileSync(fullLearningsPath, '# Learnings\n\n')
+        await commitProgress(
+            repoRoot,
+            [progressPath, learningsPath],
+            'Initial commit'
+        )
+        const headBefore = execSync('git rev-parse HEAD', {
+            cwd:repoRoot,
+        }).toString().trim()
+
+        const updated = `# Learnings\n\n${randomUUID()}\n`
+        writeFileSync(fullLearningsPath, updated)
+
+        const committed = await commitProgress(
+            repoRoot,
+            [progressPath, learningsPath],
+            'Only learnings changed'
+        )
+        t.equal(committed, true, 'reports that it committed')
+
+        const headAfter = execSync('git rev-parse HEAD', {
+            cwd:repoRoot,
+        }).toString().trim()
+        t.notEqual(headAfter, headBefore, 'HEAD moved')
+        t.equal(
+            execSync(`git show HEAD:${learningsPath}`, {
+                cwd:repoRoot,
+            }).toString(),
+            updated,
+            'the new commit holds the changed second file'
         )
     }
 )

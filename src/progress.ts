@@ -234,19 +234,22 @@ export function writeProgress (
 
 export async function commitProgress (
     repoRoot:string,
-    progressPath:string,
+    paths:string|string[],
     message:string
 ):Promise<boolean> {
+    const list = typeof paths === 'string' ?
+        [paths] :
+        paths
     await execFileAsync(
         'git',
-        ['add', '--force', progressPath],
+        ['add', '--force', '--', ...list],
         { cwd:repoRoot }
     )
 
     try {
         await execFileAsync(
             'git',
-            ['diff', '--cached', '--quiet', '--', progressPath],
+            ['diff', '--cached', '--quiet', '--', ...list],
             { cwd:repoRoot }
         )
         return false
@@ -256,7 +259,7 @@ export async function commitProgress (
 
     await execFileAsync(
         'git',
-        ['commit', '-m', message, '--', progressPath],
+        ['commit', '-m', message, '--', ...list],
         { cwd:repoRoot }
     )
     return true

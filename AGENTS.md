@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-10-04
+Last verified: 2026-10-08
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -11,21 +11,56 @@ Small orchestrator that runs a single-agent session per issue.
 
 ## Commands
 - `npm run build` -- build to dist/
-- `npm test` -- build and run tests via `scripts/test.sh`,
-  which gives the run a private `TMPDIR` and deletes it (plus
-  any `mock-change-*.txt` in the repo root) when the run ends,
-  pass or fail
+- `npm test` -- bundles the suites listed in `scripts/test.sh`
+  into `dist/test` and runs them. It does not rebuild `dist/`:
+  the CLI subprocess and setup tests in
+  `test/integration.test.ts` run `dist/index.js` and read
+  `dist/skills` and `dist/docs-templates`, so run
+  `npm run build` first when `src/` changed. The script gives
+  the run a private `TMPDIR` and deletes it (plus any
+  `mock-change-*.txt` in the repo root) when the run ends, pass
+  or fail
 - `npm run lint` -- eslint
+- Both file lists are explicit: a new `src/` module must be
+  added to the second esbuild call in `build-esm`
+  (`package.json`) or no standalone `dist/<name>.js` is
+  emitted (the CLI bundle still inlines it), and a new
+  `test/<name>.test.ts` must be added to `TESTS` in
+  `scripts/test.sh` or it never runs
+- CLI subprocess tests in `test/integration.test.ts` use
+  `spawnCli(args, { cwd?, env?, closeStdin? })`, which runs
+  `dist/index.js` with a 30s timeout. stdin stays open unless
+  `closeStdin:true`, so a run that reaches the interactive
+  feature picker waits until the timeout; closing stdin makes
+  the prompt reject, which the `.fail()` handler turns into
+  exit 2
+- `npm publish` -- `prepublishOnly` runs `npm run build` and
+  `npm test` first, so a red suite or a stale `dist/` cannot be
+  published
+- `npm version` -- `postversion` is `npm publish && git push
+  --follow-tags`, so the version tag is pushed only after the
+  build and tests pass. A red suite leaves the version commit
+  and tag local
 
 ## Project Structure
 - `src/index.ts` -- CLI entry point (yargs commands)
 - `src/setup.ts` -- project scaffolding module
 - `src/orchestrator.ts` -- ticket scanning and wave execution
-- `src/worktree.ts` -- git worktree management
+- `src/worktree.ts` -- git worktree management, integration
+  branch planning
 - `src/progress.ts` -- run progress tracking
+- `src/learnings.ts` -- attempt learnings log (render, parse,
+  select, notes collection)
 - `src/display.ts` -- terminal status UI (Display interface, StatusDisplay, PlainDisplay)
 - `src/merge.ts` -- branch merging after wave completion
+- `src/retry.ts` -- shared retry loop and effort ladders
+- `src/rules.ts` -- prompt rule lines shared by the ticket,
+  fix and review prompts
+- `src/review.ts` -- review log, reviewer, fixer, review pass
 - `src/testcmd.ts` -- test command detection and execution
+- `src/preflight.ts` -- provider executable lookup
+- `src/resolve.ts` -- feature selection (`.scratch/<feature>/`
+  discovery and the interactive picker)
 - `src/skills/` -- bundled skill definitions
 - `src/docs-templates/` -- doc templates copied to target projects
 
@@ -67,7 +102,13 @@ Small orchestrator that runs a single-agent session per issue.
   `'stop'`)
 - `--test-cmd <cmd>` -- command run in each worktree
   after the agent exits; non-zero exit rejects the
-  ticket. Defaults to `npm test`
+  ticket. When the flag is absent the command is
+  `detectTestCmd` on the repo root (the current directory for
+  in-place runs), else `''` (no gate), and the CLI
+  logs one line saying no test command was detected.
+  `--test-cmd ""` is an explicit `''`. `''` is passed
+  through unchanged to `runWaves`, `runWavesIsolated`,
+  `dryRun`, `dryRunIsolated` and the review pass
 - `--install-cmd <cmd>` -- command run in each fresh
   worktree before the agent (isolated runs only).
   Defaults to `detectInstallCmd(repoRoot)`; `""`
@@ -90,9 +131,63 @@ Small orchestrator that runs a single-agent session per issue.
   `DEFAULT_RETRY_DELAY` (30); `0` disables the wait
 - `--concurrency <n>` -- max agents running at once
   within a wave; default `DEFAULT_CONCURRENCY` (5)
+- `--no-review` -- skips the review and fix pass at the
+  end of a run (yargs boolean `review`, default `true`)
 - `--dry-run` -- shows wave order without running;
   auto-detects git repo and shows worktree/branch
-  layout when inside one
+  layout when inside one; also prints the branch
+  decision (`describeIntegrationBranch`) and whether
+  review is on or off
+- **Provider preflight**: after the first ticket scan (and
+  only when it found tickets) and before
+  `prepareIntegrationBranch`, `runExecute` calls
+  `resolveExecutable(provider)`. `null` prints
+  `Provider '<name>' not found on PATH` (or `Provider
+  '<name>' not found or not executable` when the name
+  contains `/`) and exits 2, so a bad name never creates or
+  checks out a branch. Under
+  `--dry-run` it prints a `Provider:` line with the resolved
+  path or the same not-found wording and continues. A
+  provider containing `/` is resolved against the launch
+  directory, and the resolved absolute path is the agent
+  command the runners spawn (worktrees have their own cwd, so
+  a relative path would not resolve there); a bare name is
+  still looked up on PATH at spawn time
+- **Errors**: a yargs `.fail()` handler. An error thrown or
+  rejected by a command handler (for example a dirty tree
+  found by `runWavesIsolated`) prints `formatErrorMessage(err)`
+  to stderr and exits 2, with no help text and no stack. A
+  usage error (a message from yargs, such as an unknown
+  argument under `.strict()` or an `--effort` value outside
+  its choices) prints the help text and the message and
+  exits 1. `runExecute` exits 2 on its own for a missing
+  provider or feature path, and for a failed integration
+  branch setup
+- **Integration branch**: in a git repo, outside
+  `--dry-run`, the CLI calls `prepareIntegrationBranch`
+  after its first ticket scan (so a run with no tickets
+  creates nothing). Only a run launched from the default
+  branch gets one: it creates or resumes
+  `nightralph--<feature>` (`nightralph--all` for several
+  or no features) and is left on it; launched from any
+  other branch it merges into that branch as before. A
+  dirty tree exits with code 2 before anything is
+  checked out. On resume the CLI logs how far the launch
+  branch is ahead (or `fast-forwarded to <launch>` when
+  the branch was moved up, see `prepareIntegrationBranch`)
+  and scans tickets again, silently, so they carry that
+  branch's statuses. If the re-scan finds a selected
+  feature's issues dir or spec missing, or no tickets at
+  all, the CLI checks the launch branch back out, prints
+  one error naming the branch, the problem, how far
+  behind it is and the remedy (merge the launch branch
+  into it, or `git branch -D` it), and exits 2; only the
+  first scan exits from inside the scan (`loadTickets`
+  returns the missing paths, callers decide). It logs
+  `Created branch ...` or `Resumed ...`. The review log
+  is `.scratch/<feature>/review.md` for one feature,
+  `.scratch/review.md` for several; unless `--no-review`
+  it is passed as `review:{ reviewPath, forkedFrom }`
 - **Git auto-detection**: when run inside a git repo,
   the CLI uses isolated worktree execution
   (`runWavesIsolated`) instead of in-place
@@ -101,7 +196,9 @@ Small orchestrator that runs a single-agent session per issue.
 ### orchestrator (`src/orchestrator.ts`)
 - **Exposes**: `Ticket`, `AgentResult`,
   `COMPLETED_RE`, `EFFORT_LADDERS`, `ProviderName`,
-  `EffortLevel`, `ALL_EFFORT_LEVELS`,
+  `EffortLevel`, `ALL_EFFORT_LEVELS` (these effort
+  symbols, `escalateEffort` and `retryDelayFor` live in
+  `src/retry.ts` and are re-exported unchanged),
   `DEFAULT_RETRIES`, `DEFAULT_RETRY_DELAY`,
   `DEFAULT_CONCURRENCY`, `runPool(items, limit, fn)`,
   `escalateEffort(provider, level?)`, `retryDelayFor(base, attempt)`,
@@ -110,17 +207,20 @@ Small orchestrator that runs a single-agent session per issue.
   `findBlockedTickets(tickets, failedKeys)`,
   `checkItems(ticket, items)`,
   `markDone(ticket)`,
-  `renderPrompt(specBody, ticket, opts?)`,
+  `renderPrompt(specBody, ticket, opts)`,
   `stripSpecSection(specBody, heading)`,
   `renderMergePrompt(specBody, ticket)`,
   `spawnAgent(opts)`, `createPiStreamFormatter()`,
   `killProcessGroup(pid)`, `killRunningAgents()`,
-  `dryRun(tickets, specBody)`,
+  `dryRun(tickets, specBody, testCmd)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
   `runWavesIsolated(opts)`, `HUMAN_STATUS`,
   `renderFinishSummary(tickets, totalCompleted, failedKeys)`,
   `lookupSpec(specBodies, fallback, feature)`,
-  `ticketKey(feature, num)`
+  `ticketKey(feature, num)`, `formatErrorMessage(error)`
+- **formatErrorMessage(error)**: an `Error`'s `message`, else
+  `String(error)`; no stack. The CLI's `.fail()` handler and
+  `spawnAgent`'s spawn-error report use it
 - **Supported providers**: `claude` (stdin prompt,
   stream-json output), `codex` (stdin prompt),
   `pi` (file-based prompt via `@tmpfile`, JSON
@@ -185,7 +285,19 @@ Small orchestrator that runs a single-agent session per issue.
   `'error'` carries optional `worktreePath?:string`
   and `branchName?:string`; `'worktree-error'`
   carries only `error:unknown`; `'failed'` carries
-  `reason:'exit'|'tests'|'install'`
+  `reason:'exit'|'tests'|'install'`. The variants that
+  always follow an agent run carry
+  `agentRun:AgentRunRecord`
+  (`{ exitCode, completedItems, timedOut, notes }`):
+  `'ready'`, `'failed'` with reason `'exit'` or
+  `'tests'`, and `'no-commits'`. `'failed'` with reason
+  `'install'` has no `agentRun`, and `'error'` never
+  carries one, even when the throw came after the
+  agent ran (that attempt's notes are dropped). The
+  top-level `exitCode` on `'failed'` is the value
+  written to progress.md (a placeholder `1` for
+  `'tests'` and `'install'`), while
+  `agentRun.exitCode` is the agent's real exit code
 - **DEFAULT_RETRY_DELAY**: exported as `30` (seconds)
 - **DEFAULT_CONCURRENCY**: exported as `5`
 - **runPool(items, limit, fn)**: runs `fn` over `items`
@@ -213,7 +325,11 @@ Small orchestrator that runs a single-agent session per issue.
   reports that through `onLine` (or `console.warn` when
   no `onLine`) and as a line in the ticket log, never
   only to the console, since `StatusDisplay` repaints
-  over bare console output; installs a `proc.stdin`
+  over bare console output; a spawn error (e.g. ENOENT)
+  is reported through `onLine` (or `console.error` when no
+  `onLine`) and as a `nightralph:` line in the ticket log,
+  and resolves with `exitCode:1` once the log has flushed;
+  installs a `proc.stdin`
   error listener so an agent that exits before reading
   its prompt (EPIPE) does not crash the run; collects
   `[x] <text>` lines from agent stdout via
@@ -240,14 +356,33 @@ Small orchestrator that runs a single-agent session per issue.
 - **renderPrompt(specBody, ticket, opts)**: `opts.testCmd`
   is required; the prompt always includes /tdd
   instructions and names the test command the
-  orchestrator will run after the agent exits; it
+  orchestrator will run after the agent exits (when
+  `opts.testCmd` is `''` it names no command and says the
+  orchestrator runs none); it
   also tells the agent to read nearby AGENTS.md,
   CONTEXT.md and docs/adr/ first, to commit after
-  each checklist item, to never weaken tests or
-  fake `[x]` lines (leave the item unchecked and
-  say what blocked it), and to record reusable
-  learnings in the nearest AGENTS.md before the
-  final commit; optional `opts.installCmd` adds a rule
+  each checklist item and have everything committed
+  at the end except its notes file, to never weaken
+  tests or fake `[x]` lines (leave the item unchecked
+  and record what blocked it in the notes file), and
+  to record reusable learnings in the nearest
+  AGENTS.md before the final commit. A checklist item
+  that is pure scaffolding, config, or docs may skip
+  test-first, and the agent records that decision in
+  its notes file. Notes rule: the agent keeps notes
+  for the attempt in `NOTES_PATH`
+  (`.nightralph/notes.md`, creating the directory),
+  updates it after each checklist item and as soon as
+  it hits a blocker (not only at the end), and never
+  commits, stages, or deletes it; `runWavesIsolated`
+  collects it (in-place `runWaves` does not). Reusable
+  patterns go in AGENTS.md;
+  anything specific to this ticket goes in the notes
+  file. Optional `opts.history` (the text from
+  `renderHistory`) is placed between the ticket and
+  the agent instructions, and the block is omitted
+  when it is empty or undefined. Optional
+  `opts.installCmd` adds a rule
   that dependencies are installed with that command,
   the agent must not reinstall with any other command,
   and new dependencies use the same package manager
@@ -255,7 +390,11 @@ Small orchestrator that runs a single-agent session per issue.
   markdown section from a spec, ignoring headings
   inside code fences; the CLI uses it to omit
   `User Stories` from the per-ticket prompt
-- **runWaves(...)**: requires `testCmd` (string);
+- **runWaves(...)**: requires `testCmd` (string; `''`
+  means no test gate: in-place runs never run one, so the
+  value only shapes the prompt, and a non-empty value makes
+  the prompt promise a gate that in-place runs do not
+  perform);
   accepts optional `display` parameter (`Display`
   interface), defaults to `createDisplay()` when
   omitted; trailing optional
@@ -268,7 +407,11 @@ Small orchestrator that runs a single-agent session per issue.
   (timeouts are not retried); a per-run `failedKeys`
   set (compound `ticketKey` strings) excludes tickets
   that exhausted their attempts or whose merge conflict
-  was not recovered from later waves
+  was not recovered from later waves. It records no
+  learnings and passes no history; the prompt still
+  asks for `.nightralph/notes.md`, which the in-place
+  runner neither ignores nor collects, so the file is
+  left in the project directory
 - **renderMergePrompt(specBody, ticket)**: prompt for
   a respawned agent resolving a merge conflict; tells
   the agent to resolve conflict markers, not
@@ -284,7 +427,10 @@ Small orchestrator that runs a single-agent session per issue.
 - **runWavesIsolated(opts)**: creates a worktree per
   ticket, runs agents in parallel per wave, merges
   branches back, tracks progress, and commits progress
-  updates; requires `testCmd` (string); accepts
+  updates; requires `testCmd` (string; `''` skips the test
+  gate: `runTestGate` returns true without spawning or
+  writing a `.test.log`, and the branch goes straight to the
+  merge queue); accepts
   optional `installCmd` (run in each fresh worktree
   before the agent and again after a merge-conflict
   rebase, output in `<logsDir>/<ticket>.install.log`;
@@ -293,6 +439,8 @@ Small orchestrator that runs a single-agent session per issue.
   retried like any failure), `display`, `effort`,
   `retries`,
   `retryDelay`, `concurrency`,
+  `review` (`{ reviewPath, forkedFrom? }`; unset means
+  no review, so existing callers are unaffected),
   `specBodies` (`Map<string, string>`), and
   `progressPaths` (`Map<string, string>`) in opts;
   when `specBodies` and `progressPaths` are provided,
@@ -314,6 +462,28 @@ Small orchestrator that runs a single-agent session per issue.
   report them. The `progress` passed to `startWave`
   counts only the session set (`completed` = session
   tickets now `done`, `total` = session size)
+- **Integration branch and review**: `runWavesIsolated`
+  returns `{ allDone, branch }`, `branch` being the
+  branch it merged into (the current branch; the CLI
+  has already entered the integration branch). It
+  records the launch commit (`HEAD`) after its
+  dirty-tree check, as the last-resort start of the
+  review range. After each wave's merges it commits the
+  ticket files it marked done (`commitTicketFiles`,
+  before an `-X` stop is acted on), so a finished run
+  leaves no uncommitted ticket statuses. When `review`
+  is set it calls `runReviewPass` after the wave loop
+  (also after an `-X` stop), with `spawnAgent` and the
+  running-process registry injected, and for a
+  multi-feature run pastes every spec under a
+  `# Feature: <name>` heading. After the finish summary
+  it logs the review line (`renderReviewSummary`, from
+  the review outcome; nothing when the review was
+  skipped or threw) and `Work is on <branch>`. The
+  review is advisory: any throw in it is caught,
+  logged through the display as `Review failed: ...`,
+  and never changes `allDone`. In-place `runWaves` has
+  no review
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; a failed attempt
   (non-zero exit, exit 0 with no new commits, or a red
@@ -360,6 +530,38 @@ Small orchestrator that runs a single-agent session per issue.
   `renderPrompt` and `renderMergePrompt` confine the
   agent to its worktree directory and prohibit
   `git push`
+- **Learnings (`runWavesIsolated` only)**: each
+  attempt calls `ensureNotesIgnored` on its worktree
+  before the agent runs, and `collectNotes` right
+  after the agent exits, before any auto-commit or
+  worktree removal; the notes become
+  `agentRun.notes`. Each attempt then appends one
+  entry to `learnings.md` next to the feature's
+  `progress.md` (`learningsPathFor`): `ready` ->
+  `done`, `failed` -> its reason (`exit`, `tests` or
+  `install`, the last two with the last
+  `LOG_TAIL_LINES` lines of the attempt's
+  `.test.log` or `.install.log`), `no-commits` ->
+  `no-commits`, `error` and `worktree-error` ->
+  `error`. The entry's exit code always comes from
+  `agentRun`, never from the outcome's top-level
+  `exitCode`. Every attempt rebuilds the prompt
+  history from the log, so a retry sees the entry its
+  previous attempt just wrote: the ticket's last
+  `MAX_OWN_ENTRIES` entries, plus the latest `done`
+  entry of each direct blocker in the same feature.
+  Right after each wave's pool settles, every touched
+  learnings file that is a regular file is committed
+  (`nightralph: record attempt learnings`), so the
+  base tree has no modified tracked files before
+  `mergeWave`; `saveProgress` also stages it with
+  `progress.md`, so the log is committed at every
+  terminal point. An unrecovered merge failure
+  appends a `merge` entry (git's stderr), committed
+  by the `saveProgress` that follows. Learnings are
+  advisory: a failure to read, append, set up or
+  collect notes, or commit is logged through the
+  display and never fails a ticket
 - **HUMAN_STATUS**: `'ready-for-human'`, the ticket status
   that means an agent must not pick the ticket up
 - **ticketKey(feature, num)**: returns `${feature}:${num}`,
@@ -381,9 +583,13 @@ Small orchestrator that runs a single-agent session per issue.
   the status to done. This is why a run whose only
   open tickets are human ones exits 0 with an
   explanation instead of silently
+- **dryRun(tickets, specBody, testCmd)**: in-place dry run;
+  prints the wave order, `Test command: <cmd>` (`(none)` for
+  `''`) and the first ready ticket's prompt
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; requires
-  `testCmd`; accepts `installCmd`, `effort`, `retries`,
+  `testCmd` (prints `Test command: (none)` for `''`); accepts
+  `installCmd`, `effort`, `retries`,
   `retryDelay`, and `concurrency` in opts and prints
   them
 
@@ -415,6 +621,22 @@ Small orchestrator that runs a single-agent session per issue.
   error resolves with `exitCode:1` and the error text
   in `output`; the timeout kills the whole process
   group so child processes cannot outlive the run
+
+### preflight module (`src/preflight.ts`)
+- **Exposes**: `ResolveExecutableOpts`,
+  `resolveExecutable(cmd, opts?)`
+- **resolveExecutable(cmd, opts?)**: `opts` is
+  `{ path?, cwd? }` (default `process.env.PATH` and
+  `process.cwd()`). A `cmd` containing `/` is resolved
+  against `cwd`; it returns the absolute path when that is
+  an executable file. A bare name is looked up in each
+  `path` entry in order (empty entries are skipped); the
+  first executable file wins. Everything else (including
+  `''`) is `null`
+- **Guarantees**: synchronous, no side effects, imports only
+  `node:fs` and `node:path`, spawns nothing, never throws.
+  It checks that the path is a file with the execute bit,
+  not that the command runs
 
 ### display module (`src/display.ts`)
 - **Exposes**: `Display` (type), `StatusDisplay` (class),
@@ -512,18 +734,76 @@ Small orchestrator that runs a single-agent session per issue.
 
 ### worktree module (`src/worktree.ts`)
 - **Exposes**: `getRepoRoot()`, `getRepoName()`,
-  `getCurrentBranch()`, `buildBranchName(repoRoot,
-  repoName, ticket)`, `createWorktree(opts)`,
+  `getCurrentBranch(cwd?)`, `localBranchExists(repoRoot,
+  name)`, `getDefaultBranch(repoRoot)`,
+  `integrationBranchName(features)`,
+  `planIntegrationBranch(current, defaultBranch,
+  features)`, `IntegrationPlan`,
+  `prepareIntegrationBranch(repoRoot, features)`,
+  `describeIntegrationBranch(repoRoot, features)`,
+  `buildBranchName(repoName, ticket)`,
+  `createWorktree(opts)`, `createNamedWorktree(opts)`,
   `removeWorktree(path, opts?)`,
-  `listWorktrees(repoRoot)`
+  `deleteBranch(repoRoot, name)`,
+  `listWorktrees(repoRoot)`, `headCommit(cwd)`,
+  `mergeBase(cwd, a, b)`, `isAncestor(cwd, ancestor, of)`,
+  `hasChangesOutside(cwd, from, to, excludeDir)`
+- **getDefaultBranch(repoRoot)**: `origin/HEAD` with
+  `origin/` stripped when it exists, else `main` or
+  `master`, whichever exists locally, else `null`
+- **integrationBranchName(features)**: pure;
+  `nightralph--<feature>` for exactly one distinct
+  feature, else `nightralph--all`
+- **planIntegrationBranch(current, defaultBranch,
+  features)**: pure; the name when `current` is the
+  default branch, else `null`; also `null` when the
+  default branch is unknown or HEAD is detached
+- **prepareIntegrationBranch(repoRoot, features)**:
+  returns `IntegrationPlan` `{ branch, created, resumed,
+  behind, fastForwarded, launchBranch, forkedFrom }`.
+  When a name is planned it throws on a dirty tree
+  before checking anything out, then checks out the
+  existing branch (`resumed`, `behind` = commits the
+  launch branch has that it lacks). If that branch is an
+  ancestor of the launch branch (already merged) and
+  behind, it is fast-forwarded with `merge --ff-only`:
+  `fastForwarded:true`, `behind:0`. `fastForwarded` is
+  false in every other path, and a branch with commits
+  of its own is never merged or rebased. Otherwise it
+  creates the branch from the current branch
+  (`created`). Otherwise nothing is checked out and
+  `branch` is the current branch. `forkedFrom` is the
+  default branch whenever the resulting branch is the
+  integration branch (even one checked out by hand),
+  else `null`
+- **describeIntegrationBranch(repoRoot, features)**: the
+  same decision as one line for `--dry-run`, checking
+  nothing out
+- **createNamedWorktree(opts)**: `{ repoRoot, repoName,
+  baseBranch, name }`; creates `<repo>.<name>` on branch
+  `<repo>--<name>` with the same stale cleanup as
+  `createWorktree`, which delegates to the shared
+  creation code. Ticket branches always carry a number,
+  so names cannot collide
+- **deleteBranch(repoRoot, name)**: `git branch -D`; a
+  missing branch is not an error. Runs on the same
+  `worktreeQueue` as `createWorktree`, `createNamedWorktree`
+  and `removeWorktree`
+- **isAncestor / mergeBase / hasChangesOutside**: read
+  only. `isAncestor` is false for an unknown commit;
+  `mergeBase` is `null` on failure; `hasChangesOutside`
+  is true when `from..to` changes any path outside
+  `excludeDir`
 - **buildBranchName**: returns the branch name for a
-  ticket as `<repo>--<num>-<slug>`; uses `--`
-  instead of `/` to avoid the git ref hierarchy
+  ticket as `<repo>--<num>-<slug>`, with `<feature>-` before
+  the number when the ticket has a feature (every CLI run);
+  uses `--` instead of `/` to avoid the git ref hierarchy
   conflict that prevents creating
   `refs/heads/X/Y` when `refs/heads/X` exists
 - **createWorktree**: creates a git worktree in a
   sibling directory named
-  `<repo>.<num>-<slug>` on a branch named by
+  `<repo>.<feature>-<num>-<slug>` (the `<feature>-` segment is
+  omitted when the ticket has no feature) on a branch named by
   `buildBranchName`; calls are serialized
   module-wide via a promise chain so concurrent
   invocations do not race on shared git refs;
@@ -540,8 +820,8 @@ Small orchestrator that runs a single-agent session per issue.
   create + remove calls cannot race on `.git/worktrees`
   metadata
 - **Guarantees**: all functions are synchronous except
-  `createWorktree`, `removeWorktree`, and
-  `listWorktrees`
+  `createWorktree`, `createNamedWorktree`,
+  `removeWorktree`, `deleteBranch`, and `listWorktrees`
 
 ### progress module (`src/progress.ts`)
 - **Exposes**: `TicketProgress`, `ProgressData`,
@@ -551,14 +831,18 @@ Small orchestrator that runs a single-agent session per issue.
   `createProgressTracker(opts)`,
   `renderProgress(data)`, `checkTicket(data, num, result)`,
   `writeProgress(path, data)`,
-  `commitProgress(repoRoot, path, message)`,
+  `commitProgress(repoRoot, paths, message)`,
   `readProgress(progressPath)`,
   `mergeProgress(fresh, existing)`
-- **commitProgress**: returns `Promise<boolean>` --
+- **commitProgress**: `paths` is `string|string[]`;
+  stages and commits only those paths. Returns
+  `Promise<boolean>` --
   `true` when a commit was made, `false` when the
-  staged file matched HEAD (no-op). Uses `git add
+  staged files matched HEAD (no-op). Uses `git add
   --force` so gitignored paths (e.g. under `.scratch/`)
-  are staged regardless
+  are staged regardless. The orchestrator's
+  `saveProgress` passes `learnings.md` along with
+  `progress.md` when `learnings.md` is a regular file
 - **readProgress(progressPath)**: parses an existing
   progress.md back into a `ProgressData` object, or
   returns `null` if the file does not exist
@@ -581,6 +865,257 @@ Small orchestrator that runs a single-agent session per issue.
 - **Guarantees**: `renderProgress` produces a markdown
   checklist; `commitProgress` never throws on a no-op
   (identical content)
+
+### learnings module (`src/learnings.ts`)
+- **Exposes**: constants `MAX_OWN_ENTRIES` (4),
+  `MAX_ENTRY_CHARS` (4000), `LOG_TAIL_LINES` (40),
+  `NOTES_PATH` (`.nightralph/notes.md`),
+  `TRUNCATED_MARKER`, `LEARNING_OUTCOMES`; types
+  `LearningOutcome`, `LearningEntry`,
+  `AgentRunRecord`, `EntryInput`,
+  `HistorySelection`; functions
+  `isLearningOutcome(value)`, `renderEntry(input)`,
+  `parseEntries(text)`,
+  `selectHistory(entries, { key, blockerKeys })`,
+  `renderHistory(selection)`, `tailLines(text, n)`,
+  `learningsPathFor(progressPath)`,
+  `readEntries(path)`, `appendEntry(path, text)`,
+  `collectNotes(worktreePath, file?)`,
+  `ensureNotesIgnored(worktreePath)`, `formatDate(date)`
+- **Imports no values from `src/orchestrator.ts`**:
+  callers pass the ticket key (`ticketKey`) and label
+  (`ticketLabel`) in. Its only imports are `node:fs`
+  and `node:path`
+- **LearningOutcome**: `done`, `exit`, `tests`,
+  `install`, `no-commits`, `error`, `merge`
+- **LearningEntry**:
+  `{ key, attempt, outcome, timedOut, body }`; `key`
+  is the ticket identity (`ticketKey`); `body` is
+  everything after the sentinel line, trimmed, without
+  the trailing `---` separator
+- **AgentRunRecord**:
+  `{ exitCode, completedItems, timedOut, notes }` --
+  what one agent process did; `notes` is
+  `string|null`
+- **EntryInput**: `key`, `label`, `attempt`, `now`,
+  plus per-outcome fields: `done`, `exit` and
+  `no-commits` carry `run` (and optional `effort`);
+  `tests` carries `run` (and optional `effort`) plus
+  `logName` and `logTail`;
+  `install` carries only `logName` and `logTail`;
+  `error` carries `error`; `merge` carries `stderr`
+- **Entry format**: each entry starts with a sentinel
+  line, `<!-- nightralph:entry ticket=<key>
+  attempt=<n> outcome=<o> [timedout=true] -->`, then
+  a `## <date> -- <label> attempt <n> -- <result>`
+  heading (no `attempt <n>` for `merge`), the body,
+  and a `---` line. Only `%` and
+  whitespace in the key are percent-escaped, so
+  `ticket=my-feature:4` stays readable. `attempt` is
+  `0` for `merge` entries
+- **renderEntry(input)**: pure; agent outcomes
+  (`done`, `exit`, `no-commits`, `tests`) list effort
+  (when set), the agent's exit code, the checked
+  items, and the agent's notes (or a line saying it
+  left none); `tests` also adds the log tail in a
+  fence; `install` has no agent summary, only the log
+  tail in a fence; `error` and `merge` show the error
+  text or git stderr in a fence
+- **selectHistory(entries, { key, blockerKeys })**:
+  pure; `own` is the last `MAX_OWN_ENTRIES` entries
+  for `key`; `blockers` is the latest `done` entry
+  for each blocker key that has one
+- **renderHistory(selection)**: pure; `''` when both
+  lists are empty, else a framing paragraph (the
+  ticket and spec win over these records) and up to
+  two sections, `PREVIOUS ATTEMPTS AT THIS TICKET` and
+  `WHAT THE BLOCKING TICKETS DID`; an entry body over
+  `MAX_ENTRY_CHARS` is cut and ends with
+  `TRUNCATED_MARKER`
+- **learningsPathFor(progressPath)**: `learnings.md`
+  in the same directory as `progressPath`
+- **readEntries(path)**: `[]` when the file does not
+  exist; any other read error is thrown for the caller
+- **Guarantees**: `parseEntries` drops malformed
+  entries (missing or undecodable ticket, non-numeric
+  attempt, unknown outcome) instead of throwing, and
+  accepts CRLF; text before the first sentinel is
+  ignored. Sentinel text inside free-text fields
+  (notes, items, log tails, errors) is neutralized, so
+  an entry cannot forge another. `appendEntry` is
+  synchronous, so concurrent tickets in one Node
+  thread never interleave appends, and creates the
+  parent directory. `collectNotes` reads `file` (default
+  `notes.md`; the reviewer passes `findings.md`) from
+  the `.nightralph/` directory, returns it trimmed
+  (blank counts as `null`) and removes the whole
+  `.nightralph/` directory, also when there are no
+  notes. `ensureNotesIgnored` writes
+  `.nightralph/.gitignore` containing `*` inside the
+  worktree, so an agent's `git add -A` cannot stage
+  its notes; it writes only inside the worktree, never
+  `info/exclude` (which can be a symlink shared by
+  every repo on the machine, e.g. via
+  `init.templateDir`)
+
+### retry module (`src/retry.ts`)
+- **Exposes**: `EFFORT_LADDERS`, `ProviderName`,
+  `EffortLevel`, `ALL_EFFORT_LEVELS`, `escalateEffort`,
+  `retryDelayFor`, `sleep`, `AttemptStep`, `RetryOpts`,
+  `runWithRetries(opts, run)`; imports nothing from
+  `src/orchestrator.ts`
+- **runWithRetries(opts, run)**: `opts` is `{ maxAttempts,
+  retryDelay, agentCmd, effort?, label, log, wait? }`;
+  `run(attempt, effort)` resolves with `{ result, stop }`.
+  Calls `run` until a step says `stop` or the attempt cap
+  is hit, and returns the last step's `result`. The cap
+  is clamped to at least 1, so there is always one
+  attempt. Before each retry, for a known provider
+  (`basename(agentCmd)` in `EFFORT_LADDERS`) the effort
+  goes through `escalateEffort`, then it waits
+  `retryDelayFor(retryDelay, attempt)` seconds (no wait
+  at 0; `wait` is a test seam, default `sleep`). Logs
+  `Starting <label>` and then `<label>: retrying
+  (attempt n/m[, effort x][, waiting ys])`.
+  `runTicketAttempts`, the reviewer and the fixer all
+  run on it
+
+### rules module (`src/rules.ts`)
+- **Exposes**: `readDocsRule`, `installRule`,
+  `testGateRule`, `LINT_RULE`, `integrityRule`,
+  `CONFINEMENT_RULES`, `commitRule`, `notesRule`,
+  `agentsMdRule`
+- **Guarantees**: the rule lines `renderPrompt` and
+  `renderFixPrompt` share, parameterized by the unit of
+  work (`checklist item` or `finding`) and the subject
+  the orchestrator accepts or rejects (`ticket` or
+  `fix`), so the prompts cannot drift. The ticket prompt
+  text is unchanged by the move. `testGateRule(testCmd,
+  subject)` returns the full gate rule naming the command for
+  a non-empty `testCmd`; for `''` it returns a shorter rule
+  (run the relevant tests before each commit, do not commit
+  with failing tests, and the orchestrator runs no test
+  command for this `<subject>`)
+
+### review module (`src/review.ts`)
+- **Exposes**: `FINDINGS_FILE`, `FINDINGS_PATH`,
+  `NO_FINDINGS`, `REVIEW_EXCLUDE`, `REVIEW_STATUSES`,
+  types `ReviewStatus`, `Finding`, `FixRecord`,
+  `ReviewEntryInput`, `ReviewEntry`, `ReviewOutcome`,
+  `FixFailure`, `FixResult`, `ReviewDeps`,
+  `ReviewPassOpts`; pure `reviewExcludeFor`, `reviewDiffCommand`,
+  `renderReviewPrompt`, `renderFixPrompt`,
+  `parseFindings`, `markFixed`, `renderReviewEntry`,
+  `parseReviewEntries`, `selectReviewBase`,
+  `renderReviewSummary`; effectful `readReviewEntries`,
+  `runReviewer`, `runFixer`, `runReviewPass(opts, deps)`
+- **Imports no values from `src/orchestrator.ts`**
+  (only the `AgentResult` type): it calls `runTestCmd`,
+  the worktree helpers, `mergeBranch`, `commitProgress`
+  and `appendEntry` directly. The orchestrator injects
+  `deps` `{ spawnAgent, registry? }`; `registry` is the
+  running-process set, so SIGINT kills review installs
+  and test gates too
+- **Review log**: `review.md`, append-only, one entry per
+  pass. Each starts with a sentinel
+  `<!-- nightralph:review from=<sha> to=<sha>
+  status=<status> -->`, then a
+  `## <date> -- review <from>..<to> -- <result>` heading,
+  the findings as `- [ ]`/`- [x]` lines with indented
+  detail, an optional `### Fix` section (attempts,
+  effort, agent exit code, result, the fixer's notes),
+  and a `---` line. `status` is `clean`, `fixed`,
+  `unresolved` or `review-failed`. Sentinel text inside
+  findings and notes is neutralized, so an entry cannot
+  forge another. `parseReviewEntries` drops malformed
+  entries (missing or non-hex `from`/`to`, unknown
+  status) instead of throwing, accepts CRLF, and ignores
+  text before the first sentinel
+- **Marker rule**: `to` is the integration tip after the
+  fix merged, else the tip at review time, so the next
+  run reviews only newer work. `selectReviewBase` is
+  pure: the `to` of the latest entry whose status is not
+  `review-failed`, when `isAncestor(to)` holds; else
+  `forkPoint` (the merge-base of `forkedFrom` and the
+  tip, when the run is on an integration branch); else
+  `launchCommit`. A `review-failed` entry never moves
+  the marker
+- **Skip rule**: `runReviewPass` returns
+  `{ status:'skipped' }` without running an agent or
+  writing an entry when `from..tip` changes nothing
+  outside the exclude dir, because
+  tickets, progress, learnings and `review.md` are
+  bookkeeping; this keeps the commit that records a
+  review from making the next range look non-empty. The
+  diff the reviewer is told to read excludes it too. The
+  exclude is `reviewExcludeFor(repoRoot, reviewPath)`:
+  the nearest ancestor of `reviewPath` named `.scratch`,
+  relative to the repo root (so a run launched from a
+  subdirectory excludes the right path), falling back to
+  `REVIEW_EXCLUDE` (`.scratch`) when there is none
+- **runReviewer**: per attempt, a named worktree `review`
+  (`<repo>.review` on `<repo>--review`) off the base
+  branch, `ensureNotesIgnored`, optional `installCmd`
+  (an install failure fails the attempt), then the agent
+  with `renderReviewPrompt`. Success is decided by
+  `.nightralph/findings.md` alone, collected with
+  `collectNotes(wt, 'findings.md')`: `parseFindings`
+  gives the checklist, `[]` for an explicit
+  `No findings.`, and `null` (a failed attempt) for a
+  missing, blank or unparseable file. A file written
+  before a timeout kill still counts. The worktree and
+  its branch are always removed (`finally`), so nothing
+  the reviewer changed or committed reaches the base
+  branch. Returns the findings, or `null` after the last
+  attempt
+- **runFixer**: runs only when there are findings. Per
+  attempt, a named worktree `review-fix`
+  (`<repo>.review-fix`) off the base branch, install,
+  then the agent with `renderFixPrompt`. After it: notes
+  are collected before any auto-commit; a non-zero exit
+  (a timeout is not one) fails the attempt; dirty
+  changes are auto-committed; no new commits fails; a
+  red test gate (`review-fix.test.log`) fails, and
+  `testCmd:''` skips the gate, writes no test log and logs
+  `review fix: no test gate`; only then
+  is the branch merged into the base branch from the main
+  checkout, and a merge conflict fails the attempt with
+  git's stderr appended to the notes. A failure is one of
+  `install`, `exit`, `no-commits`, `tests`, `merge`, and
+  the next attempt's prompt carries that reason and the
+  failed attempt's notes. After the last attempt nothing
+  is merged and every finding stays unchecked. On a
+  merge, findings are checked per the fixer's `[x]`
+  lines (`markFixed`: whitespace-collapsed,
+  case-insensitive). Worktrees are removed in `finally`.
+  `renderFixPrompt` shares `testGateRule` with `renderPrompt`,
+  so `testCmd:''` yields the no-gate rule
+- **Retry behavior**: reviewer and fixer each get
+  `retries + 1` attempts through `runWithRetries`, so
+  they escalate effort and back off like a ticket; logs
+  are `review.log`, `review.attempt<n>.log`,
+  `review.install.log`, `review-fix.log`,
+  `review-fix.attempt<n>.log`, `review-fix.test.log`
+  and their attempt variants in `logsDir`. Review
+  attempts are not written to `learnings.md`
+- **runReviewPass(opts, deps)**: reviews everything since
+  `selectReviewBase`, runs the fixer when there are
+  findings, appends one entry (`clean` for none, `fixed`
+  when the fix merged, `unresolved` when it did not,
+  `review-failed` when the reviewer never produced a
+  usable file) and commits `review.md`
+  (`nightralph: record review`). Returns `ReviewOutcome`
+  `{ status, findings, fixed }`. `opts.testCmd` is required;
+  `''` means the fixer runs without a test gate
+- **renderReviewSummary(outcome, reviewPath)**: pure; one
+  line naming the finding count, the fixed count and the
+  file, e.g. `Review: 3 findings, 2 fixed -- see <path>`;
+  `null` for `skipped`
+- **Guarantees**: advisory. This module lets errors
+  propagate; `runWavesIsolated` catches them (see
+  orchestrator). SIGINT kills the agent through
+  `killRunningAgents` as for tickets and no entry is
+  written
 
 ### merge module (`src/merge.ts`)
 - **Exposes**: `GitOpResult`, `MergeConflictStrategy`,

@@ -13,13 +13,19 @@ PATH="$PWD/node_modules/.bin:$PATH"
 TESTS=(
     setup
     orchestrator
+    retry
     worktree
     progress
+    learnings
+    review
+    review-pass
     merge
     display
     testcmd
+    preflight
     resolve
     integration
+    review-integration
 )
 
 RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/nightralph-testrun-XXXXXX")

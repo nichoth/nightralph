@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import yargs from 'yargs'
@@ -18,13 +19,26 @@ import {
     DEFAULT_RETRY_DELAY,
     DEFAULT_CONCURRENCY,
     killRunningAgents,
+    formatErrorMessage,
     type EffortLevel,
     type Ticket,
 } from './orchestrator.js'
 import { detectTestCmd, detectInstallCmd } from './testcmd.js'
+import { resolveExecutable } from './preflight.js'
 import { createDisplay } from './display.js'
-import { findFeatureDirs, resolveIssuesDir, getScriptDir } from './resolve.js'
-import { getRepoRoot, getRepoName } from './worktree.js'
+import {
+    findFeatureDirs,
+    resolveIssuesDir,
+    getScriptDir,
+    type FeatureSelection,
+} from './resolve.js'
+import {
+    getRepoRoot,
+    getRepoName,
+    prepareIntegrationBranch,
+    describeIntegrationBranch,
+    type IntegrationPlan,
+} from './worktree.js'
 
 export { findFeatureDirs, resolveIssuesDir }
 
@@ -118,7 +132,9 @@ yargs(hideBin(process.argv))
                 describe:'Command run in each worktree ' +
                     'after the agent exits; non-zero ' +
                     'exit rejects the ticket. Defaults ' +
-                    'to "npm test".',
+                    'to "npm test" when package.json has ' +
+                    'a test script; otherwise the run ' +
+                    'has no test gate. "" disables it.',
             })
             .option('install-cmd', {
                 type:'string',
@@ -166,6 +182,12 @@ yargs(hideBin(process.argv))
                 default:DEFAULT_CONCURRENCY,
                 describe:'Max agents running at once ' +
                     'within a wave.',
+            })
+            .option('review', {
+                type:'boolean',
+                default:true,
+                describe:'Review the merged work and run one ' +
+                    'fix pass at the end. --no-review skips it.',
             }),
         async argv => {
             await runExecute({
@@ -190,12 +212,32 @@ yargs(hideBin(process.argv))
                     number|undefined,
                 concurrency:argv.concurrency as
                     number|undefined,
+                review:argv.review as boolean|undefined,
             })
         }
     )
     .strict()
     .demandCommand(1, 'Specify a command or provider')
     .help()
+    .fail((
+        msg:string|null,
+        err:unknown,
+        y:{ showHelp:() => void }
+    ) => {
+        // A thrown or rejected error from a command handler arrives
+        // as fail(null, err): one line, exit 2, same code as the
+        // usage errors runExecute exits with itself. No help text,
+        // no stack. A msg+err pair (parser or YError usage errors)
+        // is a usage error and keeps the help text and exit 1.
+        if (err && !msg) {
+            console.error(formatErrorMessage(err))
+            process.exit(2)
+        }
+        // A parse or validation error: keep today's output.
+        y.showHelp()
+        console.error(`\n${msg}`)
+        process.exit(1)
+    })
     .parse()
 
 function isGitRepo ():boolean {
@@ -219,45 +261,44 @@ function extractFeatureName (spec:string):string {
         parts[parts.length - 1] ?? 'feature'
 }
 
-async function runExecute (argv:{
-    provider:string
-    model?:string
-    spec?:string
-    dryRun?:boolean
-    timeout?:number
-    testCmd?:string
-    installCmd?:string
-    stopOnConflict?:boolean
-    maxTurns?:number
-    effort?:EffortLevel
-    retries?:number
-    retryDelay?:number
-    concurrency?:number
-}):Promise<void> {
-    const selections = await resolveIssuesDir(
-        argv.spec
-    )
+type LoadedTickets = {
+    allTickets:Ticket[]
+    specBodies:Map<string, string>
+    progressPaths:Map<string, string>
+    issuesDirs:string[]
+    firstFeatureName:string
+    firstLogsDir:string
+    // paths a selection needs that are not in the working tree
+    missing:string[]
+}
 
+// Scans every selected feature's tickets from the working tree.
+// `log` is a no-op for the silent re-scan after resuming an
+// integration branch. A selection whose issues dir or spec is
+// absent is skipped and reported in `missing`; the caller decides
+// whether that is fatal.
+function loadTickets (
+    selections:FeatureSelection[],
+    log:(msg:string) => void
+):LoadedTickets {
     const allTickets:Ticket[] = []
     const specBodies = new Map<string, string>()
     const progressPaths = new Map<string, string>()
+    const issuesDirs:string[] = []
     let firstFeatureName = ''
     let firstLogsDir = ''
+    const missing:string[] = []
 
     for (const selection of selections) {
         const { dir, spec, name } = selection
 
         if (!existsSync(dir)) {
-            console.error(
-                `Directory not found: ${dir}`
-            )
-            process.exit(2)
+            missing.push(`Directory not found: ${dir}`)
+            continue
         }
         if (!existsSync(spec)) {
-            console.error(
-                `Spec file not found: ${spec}`
-            )
-            process.exit(2)
+            missing.push(`Spec file not found: ${spec}`)
+            continue
         }
 
         const specBody = stripSpecSection(
@@ -267,14 +308,14 @@ async function runExecute (argv:{
         const tickets = scanTickets(dir, name)
 
         if (tickets.length === 0) {
-            console.log(
+            log(
                 'No ticket files found for ' +
                 `${name}. Skipping.`
             )
             continue
         }
 
-        console.log(
+        log(
             `[${name}] Found ${tickets.length} tickets`
         )
 
@@ -286,7 +327,7 @@ async function runExecute (argv:{
                 b => !knownNums.has(b)
             )
             if (unknown.length > 0) {
-                console.warn(
+                log(
                     `${t.filename}: blockers ` +
                     `[${unknown.join(', ')}] ` +
                     'not found in directory'
@@ -301,6 +342,7 @@ async function runExecute (argv:{
         progressPaths.set(
             name, join(dirname(dir), 'progress.md')
         )
+        issuesDirs.push(dir)
         allTickets.push(...tickets)
 
         if (!firstFeatureName) {
@@ -309,18 +351,167 @@ async function runExecute (argv:{
         }
     }
 
-    if (allTickets.length === 0) return
+    return {
+        allTickets,
+        specBodies,
+        progressPaths,
+        issuesDirs,
+        firstFeatureName,
+        firstLogsDir,
+        missing,
+    }
+}
+
+// The first scan of a run: anything missing is a usage error.
+function loadTicketsOrExit (
+    selections:FeatureSelection[]
+):LoadedTickets {
+    const loaded = loadTickets(selections, console.log)
+    if (loaded.missing.length > 0) {
+        for (const msg of loaded.missing) console.error(msg)
+        process.exit(2)
+    }
+    return loaded
+}
+
+// A resumed integration branch can predate the tickets or spec of
+// this run. Puts the launch branch back and exits 2 with the fix.
+function failStaleResume (
+    plan:IntegrationPlan,
+    problems:string[]
+):never {
+    try {
+        execFileSync(
+            'git', ['checkout', '--quiet', plan.launchBranch],
+            { cwd:getRepoRoot(), stdio:'ignore' }
+        )
+    } catch {
+        // report the problem below either way
+    }
+    const n = plan.behind
+    console.error(
+        `Cannot resume ${plan.branch}: ` +
+        `${problems.join('; ')}. It is ${n} ` +
+        `commit${n === 1 ? '' : 's'} behind ${plan.launchBranch}. ` +
+        `Merge ${plan.launchBranch} into it, or delete it with ` +
+        `\`git branch -D ${plan.branch}\`. ` +
+        `Back on ${plan.launchBranch}.`
+    )
+    process.exit(2)
+}
+
+// One feature keeps its review log next to its progress file; a
+// multi-feature run reviews one combined diff, so its log sits in
+// .scratch/ itself.
+function reviewPathFor (issuesDirs:string[]):string {
+    const featureDir = dirname(issuesDirs[0])
+    return issuesDirs.length === 1 ?
+        join(featureDir, 'review.md') :
+        join(dirname(featureDir), 'review.md')
+}
+
+async function runExecute (argv:{
+    provider:string
+    model?:string
+    spec?:string
+    dryRun?:boolean
+    timeout?:number
+    testCmd?:string
+    installCmd?:string
+    stopOnConflict?:boolean
+    maxTurns?:number
+    effort?:EffortLevel
+    retries?:number
+    retryDelay?:number
+    concurrency?:number
+    review?:boolean
+}):Promise<void> {
+    const selections = await resolveIssuesDir(
+        argv.spec
+    )
+
+    let loaded = loadTicketsOrExit(selections)
+    if (loaded.allTickets.length === 0) return
+
+    const providerPath = resolveExecutable(argv.provider)
+    const providerIsPath = argv.provider.includes('/')
+    // A path is never searched on PATH, so say what was checked
+    const providerMissing = providerIsPath ?
+        'not found or not executable' :
+        'not found on PATH'
+    if (providerPath === null && !argv.dryRun) {
+        console.error(
+            `Provider '${argv.provider}' ${providerMissing}`
+        )
+        process.exit(2)
+    }
+    // Worktrees spawn with their own cwd, so a relative path must
+    // be resolved here, against the launch directory. A bare name
+    // stays a PATH lookup at spawn time.
+    const agentCmd = providerIsPath ?
+        providerPath ?? argv.provider :
+        argv.provider
+
+    const isolated = isGitRepo()
+    const featureNames = [...loaded.specBodies.keys()]
+    let plan:IntegrationPlan|null = null
+    if (isolated && !argv.dryRun) {
+        try {
+            plan = prepareIntegrationBranch(
+                getRepoRoot(), featureNames
+            )
+        } catch (err) {
+            console.error(formatErrorMessage(err))
+            process.exit(2)
+        }
+        if (plan.created) {
+            console.log(
+                `Created branch ${plan.branch} ` +
+                `from ${plan.launchBranch}`
+            )
+        } else if (plan.resumed) {
+            console.log(
+                `Resumed ${plan.branch}` +
+                (plan.fastForwarded ?
+                    ` (fast-forwarded to ${plan.launchBranch})` :
+                    '') +
+                (plan.behind > 0 ?
+                    ` (${plan.launchBranch} is ${plan.behind} ` +
+                    `commit${plan.behind === 1 ? '' : 's'} ahead)` :
+                    '')
+            )
+            // Ticket statuses live on the branch just checked out
+            loaded = loadTickets(selections, () => {})
+            if (loaded.missing.length > 0) {
+                failStaleResume(plan, loaded.missing)
+            }
+            if (loaded.allTickets.length === 0) {
+                failStaleResume(plan, ['no tickets'])
+            }
+        }
+    }
+
+    const {
+        allTickets, specBodies, progressPaths,
+        firstFeatureName, firstLogsDir,
+    } = loaded
 
     const timeout = argv.timeout ?? 900
-    const testCmd = argv.testCmd || detectTestCmd(
-        isGitRepo() ?
+    const testCmd = argv.testCmd ?? detectTestCmd(
+        isolated ?
             getRepoRoot() :
             process.cwd()
-    ) || 'npm test'
+    ) ?? ''
+    if (argv.testCmd === undefined && testCmd === '') {
+        console.log(
+            'No test command detected; running without a ' +
+            'test gate. Pass --test-cmd to add one.'
+        )
+    }
     // Only worktrees start without dependencies, so only an
     // isolated run installs. An explicit "" disables it.
     const installCmd = argv.installCmd ??
-        (isGitRepo() ?
+        (isolated ?
             detectInstallCmd(getRepoRoot()) ?? undefined :
             undefined)
     const conflictStrategy = argv.stopOnConflict ?
@@ -330,7 +521,10 @@ async function runExecute (argv:{
     const fallbackSpec = specBodies.values().next().value!
 
     if (argv.dryRun) {
-        if (isGitRepo()) {
+        console.log(
+            `Provider:     ${providerPath ?? providerMissing}`
+        )
+        if (isolated) {
             const repoName = getRepoName()
             dryRunIsolated({
                 tickets:allTickets,
@@ -346,6 +540,13 @@ async function runExecute (argv:{
                 retryDelay:argv.retryDelay,
                 concurrency:argv.concurrency,
             })
+            console.log(
+                describeIntegrationBranch(
+                    getRepoRoot(), featureNames
+                )
+            )
+            const reviewState = argv.review === false ? 'off' : 'on'
+            console.log(`Review:       ${reviewState}`)
         } else {
             dryRun(allTickets, fallbackSpec, testCmd)
         }
@@ -362,14 +563,14 @@ async function runExecute (argv:{
     process.on('SIGINT', () => onSignal(130))
     process.on('SIGTERM', () => onSignal(143))
 
-    let result:{ allDone:boolean }
+    let result:{ allDone:boolean; branch?:string }
 
-    if (isGitRepo()) {
+    if (isolated) {
         result = await runWavesIsolated({
             tickets:allTickets,
             specBody:fallbackSpec,
             specBodies,
-            agentCmd:argv.provider,
+            agentCmd,
             model:argv.model ?? null,
             timeout,
             logsDir,
@@ -384,11 +585,17 @@ async function runExecute (argv:{
             retryDelay:argv.retryDelay,
             concurrency:argv.concurrency,
             progressPaths,
+            review:argv.review === false ?
+                undefined :
+                {
+                    reviewPath:reviewPathFor(loaded.issuesDirs),
+                    forkedFrom:plan?.forkedFrom ?? undefined,
+                },
         })
     } else {
         result = await runWaves(
             allTickets, fallbackSpec,
-            argv.provider, argv.model ?? null,
+            agentCmd, argv.model ?? null,
             timeout,
             logsDir,
             testCmd,

@@ -6,9 +6,10 @@ import {
     writeFileSync,
     unlinkSync,
     readdirSync,
+    statSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, dirname, basename } from 'node:path'
+import { join, dirname, basename, relative } from 'node:path'
 import { createInterface } from 'node:readline'
 import { promisify } from 'node:util'
 
@@ -23,6 +24,7 @@ import {
     hasNewCommits,
     isDirty,
     commitDirty,
+    headCommit,
 } from './worktree.js'
 import {
     generateProgress,
@@ -50,6 +52,50 @@ import {
     type TicketRef,
 } from './display.js'
 import { runTestCmd } from './testcmd.js'
+import {
+    readDocsRule,
+    installRule,
+    testGateRule,
+    LINT_RULE,
+    integrityRule,
+    CONFINEMENT_RULES,
+    commitRule,
+    notesRule,
+    agentsMdRule,
+} from './rules.js'
+import { runReviewPass, renderReviewSummary } from './review.js'
+import {
+    EFFORT_LADDERS,
+    escalateEffort,
+    retryDelayFor,
+    runWithRetries,
+    sleep,
+    type EffortLevel,
+    type ProviderName,
+} from './retry.js'
+
+export {
+    EFFORT_LADDERS,
+    ALL_EFFORT_LEVELS,
+    escalateEffort,
+    retryDelayFor,
+    type EffortLevel,
+    type ProviderName,
+} from './retry.js'
+import {
+    LOG_TAIL_LINES,
+    appendEntry,
+    collectNotes,
+    ensureNotesIgnored,
+    learningsPathFor,
+    readEntries,
+    renderEntry,
+    renderHistory,
+    selectHistory,
+    tailLines,
+    type AgentRunRecord,
+    type EntryInput,
+} from './learnings.js'
 
 export type Ticket = {
     num:number
@@ -445,6 +491,18 @@ export function stripSpecSection (
     return out.join('\n')
 }
 
+// The spec text for the review: the one spec, or every feature's
+// spec under its own heading for a multi-feature run.
+function reviewSpecBody (
+    specBody:string,
+    specBodies?:Map<string, string>
+):string {
+    if (!specBodies || specBodies.size <= 1) return specBody
+    return [...specBodies]
+        .map(([name, body]) => `# Feature: ${name}\n\n${body}`)
+        .join('\n\n')
+}
+
 export function lookupSpec (
     specBodies:Map<string, string>|undefined,
     fallback:string,
@@ -454,24 +512,19 @@ export function lookupSpec (
     return specBodies.get(feature) ?? fallback
 }
 
-// The rule for agents in a worktree the orchestrator has
-// already installed dependencies into. Empty without one.
-function installRule (installCmd?:string):string[] {
-    if (!installCmd) return []
-    return [
-        '- Dependencies are already installed with ' +
-            `\`${installCmd}\`. Do NOT reinstall them ` +
-            'with any other command; to reinstall, run ' +
-            'that same command. To add a dependency, use ' +
-            'the package manager that command uses, so ' +
-            'its lockfile stays in sync.',
-    ]
+function historyBlock (history?:string):string[] {
+    if (!history) return []
+    return [history, '']
 }
 
 export function renderPrompt (
     specBody:string,
     ticket:Ticket,
-    opts:{ testCmd:string; installCmd?:string }
+    opts:{
+        testCmd:string
+        installCmd?:string
+        history?:string
+    }
 ):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -481,17 +534,13 @@ export function renderPrompt (
         ticket.filename,
         ticket.body,
         '',
+        ...historyBlock(opts.history),
         '---- AGENT INSTRUCTIONS ----',
         'You are an autonomous coding agent. ' +
             'Implement the ticket using /tdd.',
         '',
         'Follow these rules:',
-        '- Read the files directly relevant to the ' +
-            'ticket before writing code. Also read any ' +
-            'AGENTS.md in or above the directories you ' +
-            'will touch, plus CONTEXT.md and the ' +
-            'relevant docs/adr/ entries if they exist. ' +
-            'If they do not exist, proceed silently.',
+        readDocsRule('ticket'),
         '- Work ONLY on this ticket. Do not fix ' +
             'unrelated problems you notice.',
         '- Do NOT research external APIs or services ' +
@@ -503,42 +552,21 @@ export function renderPrompt (
             'seams named in the spec\'s Testing ' +
             'Decisions section, then write only ' +
             'enough code to make it pass, then ' +
-            'refactor.',
-        '- While iterating, run only the tests ' +
-            'relevant to what you changed. Run ' +
-            `\`${opts.testCmd}\` in full once, as the ` +
-            'final gate before your last commit. Do ' +
-            'not commit with failing tests. The ' +
-            'orchestrator runs the same command after ' +
-            'you exit and rejects the ticket if it ' +
-            'fails.',
-        '- If the project has a lint script, run it ' +
-            'and fix what it reports.',
-        '- INTEGRITY: never delete, skip, weaken, or ' +
-            'write tautological tests to force a green ' +
-            'result. Only report a checklist item done ' +
-            'when its real tests genuinely pass. If an ' +
-            'item cannot be completed honestly, leave ' +
-            'it unchecked and say what blocked you.',
-        '- Do NOT read or modify files outside ' +
-            'your current directory (the worktree).',
-        '- Do NOT run git push.',
-        '- Commit after each checklist item, and make ' +
-            'sure everything is committed when finished.',
+            'refactor. For a checklist item that is ' +
+            'pure scaffolding, config, or docs (where ' +
+            'a test adds no value), skip test-first ' +
+            'and record that decision in your notes ' +
+            'file.',
+        testGateRule(opts.testCmd, 'ticket'),
+        LINT_RULE,
+        integrityRule('checklist item'),
+        ...CONFINEMENT_RULES,
+        commitRule('checklist item'),
+        notesRule('checklist item', 'ticket'),
         '- After completing each checklist item in the ' +
             'ticket, print a line: [x] <item text> ' +
             '(matching the checklist text exactly).',
-        '- Before your final commit, record reusable ' +
-            'learnings in the nearest AGENTS.md (in or ' +
-            'above the directories you modified; ' +
-            'prefer that over the repo root). Good ' +
-            'additions: module conventions, gotchas, ' +
-            'files that must change together, how to ' +
-            'test that area, environment requirements. ' +
-            'Do NOT add ticket-specific details or ' +
-            'temporary debugging notes. Only write ' +
-            'when you have knowledge that would help ' +
-            'future work in that directory.',
+        agentsMdRule('ticket'),
         '',
     ].join('\n')
 }
@@ -697,43 +725,6 @@ const PROVIDER_ARGS:Record<string, string[]> = {
 export function getProviderArgs (cmd:string):string[] {
     const name = basename(cmd)
     return PROVIDER_ARGS[name] ?? []
-}
-
-// Per-provider effort ladders.
-export const EFFORT_LADDERS = {
-    pi:['off', 'minimal', 'low', 'medium',
-        'high', 'xhigh', 'max'],
-    claude:['low', 'medium', 'high',
-        'xhigh', 'max'],
-    codex:['low', 'medium', 'high'],
-} as const
-
-export type ProviderName =
-    keyof typeof EFFORT_LADDERS
-
-export type EffortLevel =
-    typeof EFFORT_LADDERS[ProviderName][number]
-
-export const ALL_EFFORT_LEVELS:EffortLevel[] = [
-    'off', 'minimal', 'low', 'medium',
-    'high', 'xhigh', 'max',
-]
-
-// Step up the effort ladder for a given provider.
-// Without a starting level, the first retry jumps to high.
-// Otherwise, step one rung up and stop at the provider's max.
-export function escalateEffort (
-    provider:ProviderName,
-    level?:EffortLevel
-):EffortLevel {
-    if (!level) return 'high'
-    const ladder = EFFORT_LADDERS[provider]
-    const i = (ladder as readonly string[])
-        .indexOf(level)
-    if (i === -1) return level
-    return ladder[
-        Math.min(i + 1, ladder.length - 1)
-    ] as EffortLevel
 }
 
 export function formatStreamLine (
@@ -1195,16 +1186,23 @@ export function spawnAgent (opts:{
             }
             rl.close()
             rlErr.close()
-            logStream.end()
-            if (promptFile) cleanupPromptFile(promptFile)
-            console.error(
-                'Agent process error:',
+            const msg = 'agent process error: ' +
                 formatErrorMessage(err)
-            )
-            resolve({
-                exitCode:1,
-                completedItems,
-                timedOut,
+            logStream.write(`nightralph: ${msg}\n`)
+            if (promptFile) cleanupPromptFile(promptFile)
+            if (opts.onLine) {
+                opts.onLine(`${prefix}${msg}`)
+            } else {
+                console.error(`${prefix}${msg}`)
+            }
+            // Resolve only once the log is flushed, so a caller
+            // that reads the log right away sees the message.
+            logStream.end(() => {
+                resolve({
+                    exitCode:1,
+                    completedItems,
+                    timedOut,
+                })
             })
         })
     })
@@ -1232,6 +1230,8 @@ export function dryRun (
             stuck.map(t => t.filename).join(', ')
         )
     }
+
+    console.log(`\nTest command: ${testCmd || '(none)'}`)
 
     const firstReady = findReadyTickets(tickets)
     if (firstReady.length > 0) {
@@ -1313,7 +1313,7 @@ export function dryRunIsolated (opts:{
             'respawn (re-run agent on conflict)' :
             'stop (stop merging on conflict)'
     console.log(
-        `\nTest command: ${opts.testCmd}`
+        `\nTest command: ${opts.testCmd || '(none)'}`
     )
     console.log(
         `Install:      ${opts.installCmd || '(none)'}`
@@ -1374,9 +1374,10 @@ async function runInstall (opts:{
     return true
 }
 
-// Runs the project's test command in a ticket's worktree.
-// Writes the output to a per-ticket log either way, and
-// returns true only when the suite is green.
+// Runs the project's test command in a ticket's worktree,
+// writes the output to a per-ticket log, and returns true
+// only when the suite is green. A testCmd of '' is no gate:
+// nothing runs, no log is written, and it returns true.
 async function runTestGate (opts:{
     testCmd:string
     ticket:Ticket
@@ -1387,6 +1388,10 @@ async function runTestGate (opts:{
     log:(msg:string) => void
     registry?:Set<number>
 }):Promise<boolean> {
+    if (opts.testCmd === '') {
+        opts.log(`  ${opts.ticket.filename}: no test gate`)
+        return true
+    }
     const result = await runTestCmd({
         cmd:opts.testCmd,
         cwd:opts.worktreePath,
@@ -1585,14 +1590,6 @@ export async function runPool<T, R> (
     return results
 }
 
-export function retryDelayFor (base:number, attempt:number):number {
-    return base * 2 ** (attempt - 2)
-}
-
-function sleep (ms:number):Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
-}
-
 // Log file for one attempt: the first attempt keeps the
 // plain name so existing tooling still finds it, later
 // attempts get their own file instead of overwriting it.
@@ -1619,19 +1616,32 @@ type TicketOutcome =
         kind:'no-commits'
         worktreePath:string
         branchName:string
+        agentRun:AgentRunRecord
     }
     | {
+        // No agent ran, so there is no agent record
         kind:'failed'
-        reason:'exit'|'tests'|'install'
+        reason:'install'
         branchName:string
         exitCode:number
         completedItems:string[]
+    }
+    | {
+        kind:'failed'
+        reason:'exit'|'tests'
+        branchName:string
+        // A placeholder 1 for 'tests'; the agent's real exit
+        // code is agentRun.exitCode
+        exitCode:number
+        completedItems:string[]
+        agentRun:AgentRunRecord
     }
     | {
         kind:'ready'
         worktreePath:string
         branchName:string
         completedItems:string[]
+        agentRun:AgentRunRecord
     }
 
 type TicketAttemptOpts = {
@@ -1649,7 +1659,35 @@ type TicketAttemptOpts = {
     installCmd?:string
     maxTurns?:number
     effort?:EffortLevel
+    learningsPath:string
     d:Display
+}
+
+// The ticket's own earlier attempts and its direct blockers'
+// last successful runs, rendered for the prompt. Learnings are
+// advisory, so an unreadable log means no history, not a failure.
+function buildHistory (
+    learningsPath:string,
+    ticket:Ticket,
+    d:Display
+):string {
+    try {
+        return renderHistory(selectHistory(
+            readEntries(learningsPath),
+            {
+                key:ticketKey(ticket.feature, ticket.num),
+                blockerKeys:ticket.blockers.map(b => {
+                    return ticketKey(ticket.feature, b)
+                }),
+            }
+        ))
+    } catch (err) {
+        d.log(
+            `  ${ticket.filename}: could not read ` +
+            `learnings: ${formatErrorMessage(err)}`
+        )
+        return ''
+    }
 }
 
 // One attempt at a ticket: a fresh worktree, one agent run,
@@ -1700,6 +1738,16 @@ async function runTicketAttempt (
         }
     }
 
+    // Keeps the agent's notes out of any `git add -A`.
+    try {
+        ensureNotesIgnored(worktree.worktreePath)
+    } catch (err) {
+        d.log(
+            `  ${ticket.filename}: could not set up the notes ` +
+            `directory: ${formatErrorMessage(err)}`
+        )
+    }
+
     const ticketSpec = lookupSpec(
         opts.specBodies, opts.specBody, ticket.feature
     )
@@ -1709,6 +1757,11 @@ async function runTicketAttempt (
             {
                 testCmd:opts.testCmd,
                 installCmd:opts.installCmd,
+                // Rebuilt every attempt, so a retry sees the
+                // entry its previous attempt just wrote
+                history:buildHistory(
+                    opts.learningsPath, ticket, d
+                ),
             }
         ),
         agentCmd:opts.agentCmd,
@@ -1723,6 +1776,24 @@ async function runTicketAttempt (
         effort:opts.effort,
         onLine:(line) => d.log(line),
     })
+
+    // Collect before anything commits or removes the worktree,
+    // so the notes never reach the timeout auto-commit.
+    let notes:string|null = null
+    try {
+        notes = collectNotes(worktree.worktreePath)
+    } catch (err) {
+        d.log(
+            `  ${ticket.filename}: could not collect ` +
+            `notes: ${formatErrorMessage(err)}`
+        )
+    }
+    const agentRun:AgentRunRecord = {
+        exitCode:agentResult.exitCode,
+        completedItems:agentResult.completedItems,
+        timedOut:agentResult.timedOut,
+        notes,
+    }
 
     // A timeout kill is not the agent reporting failure.
     // Keep whatever it committed and let the test gate and
@@ -1744,6 +1815,7 @@ async function runTicketAttempt (
             branchName:worktree.branchName,
             exitCode:agentResult.exitCode,
             completedItems:agentResult.completedItems,
+            agentRun,
         }
     }
 
@@ -1769,6 +1841,7 @@ async function runTicketAttempt (
             kind:'no-commits',
             worktreePath:worktree.worktreePath,
             branchName:worktree.branchName,
+            agentRun,
         }
     }
 
@@ -1792,6 +1865,7 @@ async function runTicketAttempt (
             branchName:worktree.branchName,
             exitCode:1,
             completedItems:agentResult.completedItems,
+            agentRun,
         }
     }
 
@@ -1800,6 +1874,120 @@ async function runTicketAttempt (
         worktreePath:worktree.worktreePath,
         branchName:worktree.branchName,
         completedItems:agentResult.completedItems,
+        agentRun,
+    }
+}
+
+// The last lines of a log for a learnings entry; a missing or
+// unreadable log gives an empty tail.
+function readLogTail (path:string):string {
+    try {
+        return tailLines(readFileSync(path, 'utf8'), LOG_TAIL_LINES)
+    } catch {
+        return ''
+    }
+}
+
+// Maps one attempt's outcome to a learnings entry, or null when
+// there is nothing to record. The exit code always comes from the
+// agent record, never the outcome's top-level `exitCode`, which is
+// a progress.md placeholder.
+function attemptEntry (opts:{
+    logsDir:string
+    ticket:Ticket
+    attempt:number
+    effort?:EffortLevel
+    outcome:TicketOutcome
+}):EntryInput|null {
+    const { logsDir, ticket, attempt, effort, outcome } = opts
+    const base = {
+        key:ticketKey(ticket.feature, ticket.num),
+        label:ticketLabel(ticket),
+        attempt,
+        now:new Date(),
+    }
+    const logFor = (ext:string) => {
+        const path = attemptLogPath(logsDir, ticket, attempt, ext)
+        return { logName:basename(path), logTail:readLogTail(path) }
+    }
+
+    switch (outcome.kind) {
+        case 'ready':
+            return {
+                ...base,
+                outcome:'done',
+                run:outcome.agentRun,
+                effort,
+            }
+        case 'failed':
+            switch (outcome.reason) {
+                case 'exit':
+                    return {
+                        ...base,
+                        outcome:'exit',
+                        run:outcome.agentRun,
+                        effort,
+                    }
+                case 'tests':
+                    return {
+                        ...base,
+                        outcome:'tests',
+                        run:outcome.agentRun,
+                        effort,
+                        ...logFor('.test.log'),
+                    }
+                case 'install':
+                    return {
+                        ...base,
+                        outcome:'install',
+                        ...logFor('.install.log'),
+                    }
+                default: {
+                    const _exhaustive:never = outcome
+                    return _exhaustive
+                }
+            }
+        case 'no-commits':
+            return {
+                ...base,
+                outcome:'no-commits',
+                run:outcome.agentRun,
+                effort,
+            }
+        case 'error':
+        case 'worktree-error':
+            return {
+                ...base,
+                outcome:'error',
+                error:formatErrorMessage(outcome.error),
+            }
+        default: {
+            const _exhaustive:never = outcome
+            return _exhaustive
+        }
+    }
+}
+
+// Appends one attempt's entry to the learnings log. Learnings are
+// advisory: a failure is reported and never fails the ticket.
+function recordAttempt (opts:{
+    learningsPath:string
+    logsDir:string
+    ticket:Ticket
+    attempt:number
+    effort?:EffortLevel
+    outcome:TicketOutcome
+    d:Display
+}):void {
+    try {
+        const entry = attemptEntry(opts)
+        if (!entry) return
+        appendEntry(opts.learningsPath, renderEntry(entry))
+    } catch (err) {
+        opts.d.log(
+            `  ${opts.ticket.filename}: could not record ` +
+            `learnings: ${formatErrorMessage(err)}`
+        )
     }
 }
 
@@ -1810,36 +1998,26 @@ async function runTicketAttempts (
     opts:TicketAttemptOpts&{ retries:number; retryDelay:number }
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
-    const maxAttempts = opts.retries + 1
-    const providerName = basename(opts.agentCmd)
-    const isKnown = providerName in EFFORT_LADDERS
-    let effort = opts.effort
-    let outcome:TicketOutcome = {
-        kind:'no-commits', worktreePath:'', branchName:'',
-    }
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        if (attempt === 1) {
-            d.log(`  Starting ${ticket.filename}`)
-        } else {
-            if (isKnown) {
-                effort = escalateEffort(
-                    providerName as ProviderName,
-                    effort
-                )
-            }
-            const delay = retryDelayFor(opts.retryDelay, attempt)
-            d.log(
-                `  ${ticket.filename}: retrying ` +
-                `(attempt ${attempt}/${maxAttempts}` +
-                (isKnown && effort ?
-                    `, effort ${effort}` : '') +
-                (delay > 0 ?
-                    `, waiting ${delay}s` : '') +
-                ')'
-            )
-            if (delay > 0) await sleep(delay * 1000)
+    return runWithRetries<TicketOutcome>({
+        maxAttempts:opts.retries + 1,
+        retryDelay:opts.retryDelay,
+        agentCmd:opts.agentCmd,
+        effort:opts.effort,
+        label:ticket.filename,
+        log:(msg) => d.log(msg),
+    }, async (attempt, effort) => {
+        const record = (o:TicketOutcome):void => {
+            recordAttempt({
+                learningsPath:opts.learningsPath,
+                logsDir:opts.logsDir,
+                ticket,
+                attempt,
+                effort,
+                outcome:o,
+                d,
+            })
         }
+        let outcome:TicketOutcome
         try {
             outcome = await runTicketAttempt({
                 ...opts, attempt, effort,
@@ -1849,8 +2027,11 @@ async function runTicketAttempts (
                 `  ${ticket.filename}: attempt ${attempt} ` +
                 `threw: ${formatErrorMessage(error)}`
             )
-            return { kind:'error', error }
+            const errorOutcome:TicketOutcome = { kind:'error', error }
+            record(errorOutcome)
+            return { result:errorOutcome, stop:true }
         }
+        record(outcome)
         if (outcome.kind === 'ready') {
             // The agent is no longer running, but the branch is
             // only merged once the whole wave has finished.
@@ -1858,17 +2039,29 @@ async function runTicketAttempts (
                 ticket.num, 'awaiting-merge',
                 ticket.feature,
             )
-            return outcome
+            return { result:outcome, stop:true }
         }
-        if (outcome.kind === 'worktree-error') return outcome
-    }
-    return outcome
+        return {
+            result:outcome,
+            stop:outcome.kind === 'worktree-error',
+        }
+    })
 }
 
 function failureNote (reason:'exit'|'tests'|'install'):string {
     if (reason === 'tests') return 'tests failed'
     if (reason === 'install') return 'install failed'
     return 'failed'
+}
+
+// A path that git can stage as a file: a directory or other bad
+// path must not make `git add` fail and take a commit down with it.
+function isRegularFile (path:string):boolean {
+    try {
+        return statSync(path).isFile()
+    } catch {
+        return false
+    }
 }
 
 // Wraps writeProgress + commitProgress so callers do not each
@@ -1882,8 +2075,12 @@ async function saveProgress (
     d:Display
 ):Promise<void> {
     writeProgress(progressPath, progress)
+    const learningsPath = learningsPathFor(progressPath)
+    const paths = isRegularFile(learningsPath) ?
+        [progressPath, learningsPath] :
+        progressPath
     try {
-        await commitProgress(repoRoot, progressPath, message)
+        await commitProgress(repoRoot, paths, message)
     } catch (err) {
         d.log(
             '  Failed to commit progress: ' +
@@ -2251,7 +2448,15 @@ export async function runWavesIsolated (opts:{
     concurrency?:number
     // per-feature progress paths for multi-feature runs
     progressPaths?:Map<string, string>
-}):Promise<{ allDone:boolean }> {
+    // review the unreviewed work and run one fix pass at the end;
+    // unset = no review
+    review?:{
+        reviewPath:string
+        // the default branch, when this run is on an
+        // integration branch
+        forkedFrom?:string
+    }
+}):Promise<{ allDone:boolean; branch:string }> {
     mkdirSync(opts.logsDir, { recursive:true })
 
     const d = opts.display ?? createDisplay()
@@ -2271,6 +2476,10 @@ export async function runWavesIsolated (opts:{
             'changes before running'
         )
     }
+
+    // The review falls back to this when no earlier review or
+    // fork point applies.
+    const launchCommit = headCommit(repoRoot)
 
     const features = new Set(
         opts.tickets.map(t => t.feature).filter(Boolean)
@@ -2379,11 +2588,37 @@ export async function runWavesIsolated (opts:{
                 installCmd:opts.installCmd,
                 maxTurns:opts.maxTurns,
                 effort:opts.effort,
+                learningsPath:learningsPathFor(
+                    tracker.pathFor(t.feature)
+                ),
                 retries,
                 retryDelay,
                 d,
             })
         )
+
+        // Entries were appended while the pool ran, but not every
+        // outcome below saves progress before merging. Commit them
+        // now, so the base tree has no modified tracked files when
+        // mergeWave touches it.
+        const touched = new Set(ready.map(t => {
+            return learningsPathFor(tracker.pathFor(t.feature))
+        }))
+        for (const path of touched) {
+            if (!isRegularFile(path)) continue
+            try {
+                await commitProgress(
+                    repoRoot, path,
+                    'nightralph: record attempt learnings'
+                )
+            } catch (err) {
+                d.log(
+                    '  Failed to commit learnings: ' +
+                    formatErrorMessage(err)
+                )
+            }
+        }
+
         // runTicketAttempts never rejects (a throw inside an
         // attempt becomes an 'error' outcome), so every
         // result here is fulfilled.
@@ -2542,6 +2777,7 @@ export async function runWavesIsolated (opts:{
                 strategy:opts.conflictStrategy,
             })
 
+            const doneThisWave:Ticket[] = []
             for (const branchResult of mergeResult.merged) {
                 const bk = branchToKey.get(
                     branchResult.branch
@@ -2553,6 +2789,7 @@ export async function runWavesIsolated (opts:{
 
                 if (branchResult.merged) {
                     markDone(ticket)
+                    doneThisWave.push(ticket)
                     waveCompleted++
                     totalCompleted++
                     d.setTicketStatus(
@@ -2615,6 +2852,7 @@ export async function runWavesIsolated (opts:{
 
                     if (recovered) {
                         markDone(ticket)
+                        doneThisWave.push(ticket)
                         waveCompleted++
                         totalCompleted++
                         d.setTicketStatus(
@@ -2674,6 +2912,30 @@ export async function runWavesIsolated (opts:{
                             exitCode:0,
                             done:false,
                         })
+                        // saveProgress below commits this entry
+                        try {
+                            appendEntry(
+                                learningsPathFor(
+                                    tracker.pathFor(ticket.feature)
+                                ),
+                                renderEntry({
+                                    outcome:'merge',
+                                    key:ticketKey(
+                                        ticket.feature, ticket.num
+                                    ),
+                                    label:ticketLabel(ticket),
+                                    attempt:0,
+                                    now:new Date(),
+                                    stderr:branchResult.stderr ?? '',
+                                })
+                            )
+                        } catch (err) {
+                            d.log(
+                                `  ${ticket.filename}: could not ` +
+                                'record learnings: ' +
+                                formatErrorMessage(err)
+                            )
+                        }
                         await saveProgress(
                             repoRoot,
                             tracker.pathFor(ticket.feature),
@@ -2685,6 +2947,9 @@ export async function runWavesIsolated (opts:{
                     }
                 }
             }
+
+            // markDone edited the ticket files in the base checkout
+            await commitTicketFiles(repoRoot, doneThisWave, d)
 
             if (mergeResult.stoppedAt) {
                 d.log(
@@ -2741,13 +3006,50 @@ export async function runWavesIsolated (opts:{
 
     if (waveNum > 0) reportBlocked(d, opts.tickets, failedKeys)
 
+    // Advisory, like learnings: a broken review is reported and
+    // never changes the run's result.
+    let reviewLine:string|null = null
+    if (opts.review) {
+        try {
+            const outcome = await runReviewPass({
+                repoRoot,
+                repoName,
+                baseBranch,
+                reviewPath:opts.review.reviewPath,
+                forkedFrom:opts.review.forkedFrom,
+                launchCommit,
+                specBody:reviewSpecBody(
+                    opts.specBody, opts.specBodies
+                ),
+                agentCmd:opts.agentCmd,
+                model:opts.model,
+                timeout:opts.timeout,
+                logsDir:opts.logsDir,
+                testCmd:opts.testCmd,
+                installCmd:opts.installCmd,
+                maxTurns:opts.maxTurns,
+                effort:opts.effort,
+                retries,
+                retryDelay,
+                log:(msg) => d.log(msg),
+            }, { spawnAgent, registry:runningAgents })
+            reviewLine = renderReviewSummary(
+                outcome, relative(repoRoot, opts.review.reviewPath)
+            )
+        } catch (err) {
+            d.log(`\nReview failed: ${formatErrorMessage(err)}`)
+        }
+    }
+
     const remaining = opts.tickets.filter(
         t => t.status === 'ready-for-agent'
     )
     d.log('\n' + renderFinishSummary(
         opts.tickets, totalCompleted, failedKeys
     ))
+    if (reviewLine) d.log(reviewLine)
+    d.log(`Work is on ${baseBranch}`)
     d.cleanup()
 
-    return { allDone:remaining.length === 0 }
+    return { allDone:remaining.length === 0, branch:baseBranch }
 }

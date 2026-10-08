@@ -22,6 +22,7 @@ so they can't drift as long as you install the skills with this package.
 <!-- toc -->
 
 - [Install](#install)
+  * [Requirements](#requirements)
   * [Install Dependency Skills](#install-dependency-skills)
 - [Workflow](#workflow)
   * [Create Issues](#create-issues)
@@ -32,12 +33,15 @@ so they can't drift as long as you install the skills with this package.
   * [Select a ticket](#select-a-ticket)
   * [Worktrees](#worktrees)
   * [Progress](#progress)
+  * [Integration branch](#integration-branch)
+  * [Review](#review)
   * [Status display](#status-display)
 - [Keep Your Machine Awake](#keep-your-machine-awake)
   * [Mac OS](#mac-os)
     + [Claude Opus 4.6](#claude-opus-46)
     + [Claude Opus 5.5](#claude-opus-55)
     + [Claude Sonnet 5](#claude-sonnet-5)
+    + [Claude Haiku 5.5](#claude-haiku-55)
     + [Claude Fable 5.1](#claude-fable-51)
     + [`pi` + OpenRouter model](#pi--openrouter-model)
     + [`codex` + Luna](#codex--luna)
@@ -51,6 +55,19 @@ so they can't drift as long as you install the skills with this package.
 ```bash
 npm i -S nightralph
 ```
+
+### Requirements
+
+- Node 24 or newer (see `engines` in `package.json`) and git.
+- The agent CLI you name on the command line (`claude`, `codex` or
+  `pi`) installed and on your `PATH`. After it finds tickets,
+  nightralph checks for this command before it touches git, and
+  exits with code 2 if the command is not found. A run with no
+  tickets stops before the check. With `--dry-run` it prints the
+  problem and keeps going.
+- macOS or Linux. nightralph runs agents in their own process group
+  and uses `sh -c` for test and install commands, so it does not
+  run on Windows.
 
 ### Install Dependency Skills
 
@@ -100,8 +117,8 @@ a prose text description.
 The `nightralph` CLI does the `tdd` part of the workflow: the agent
 prompt tells the agent to write a failing test per acceptance
 criterion at the seams named in the spec's Testing Decisions, and
-the orchestrator runs the project's test command in the worktree
-before a ticket can be marked `done`.
+the orchestrator runs the project's test command, when there is
+one, in the worktree before a ticket can be marked `done`.
 
 >
 > [!NOTE]  
@@ -161,9 +178,10 @@ Flags:
 | `-m`, `--model` | no | -- | Model flag passed to the agent |
 | `--spec <name>` | no | auto | Feature name (resolves `.scratch/<name>/`) |
 | `--dry-run` | no | -- | Show wave order and prompt without running |
+| `--no-review` | no | review on | Skip the review and fix pass at the end of a run |
 | `-X` | no | -- | Stop on merge conflict instead of re-spawning |
 | `--timeout` | no | `3600` | Kill the agent after N seconds. A killed agent is not a failure: its work is kept (see Notes) |
-| `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Auto-detects `npm test`. Pass `""` to disable. Shares the agent's `--timeout`. Dependencies are already installed by `--install-cmd` |
+| `--test-cmd <cmd>` | no | auto | Run in each worktree after the agent exits; non-zero exit rejects the ticket. Defaults to `npm test` when `package.json` has a `test` script. When nothing is detected the run has no test gate and says so at startup. Pass `""` to run without a gate. Shares the agent's `--timeout`. Dependencies are already installed by `--install-cmd` |
 | `--install-cmd <cmd>` | no | auto | Run in each fresh worktree before the agent starts, and again after a merge-conflict rebase; non-zero exit fails the attempt (it is retried like any other failure). Auto-detects from the lockfile: `pnpm-lock.yaml` -> `pnpm install --prefer-offline --frozen-lockfile`, `package-lock.json` -> `npm ci --prefer-offline --no-audit --no-fund`, a `package.json` with no lockfile -> `npm install --prefer-offline --no-audit --no-fund --no-package-lock`, no `package.json` -> no install. Pass `""` to disable. Shares the agent's `--timeout`. Output goes to `<ticket>.install.log` |
 | `--max-turns <n>` | no | -- | Max agentic turns per agent run. Forwarded as `--max-turns <n>` to `claude` only; for `codex` and `pi` the flag is skipped with a warning and the agent runs with no turn limit. The limit is per spawn, not a total for the ticket: every retry and every re-spawn after a merge conflict starts with a fresh budget of `n` turns, so with `--retries 3` one ticket can use up to 4 x `n`. When omitted (or `0`), no limit is passed, so `--timeout` is the only cap. Takes precedence over the `[turns]` positional when both are given. Reaching the limit is an error exit, so the attempt fails and is retried like any other failure |
 | `--effort <level>` | no | -- | Starting effort/reasoning level. Each provider has its own ladder: `claude` supports `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--effort`); `codex` supports `low`, `medium`, `high` (forwarded as `-c model_reasoning_effort=<level>`); `pi` supports `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--thinking`). Omitted = provider default. Each retry steps up from here (see `--retries`) |
@@ -184,7 +202,8 @@ Flags:
   tickets start in the next wave.
 * An agent run only counts as a success when the agent exits 0,
   its worktree branch has new commits relative to the base branch,
-  and the test command (see `--test-cmd`) exits 0 in that worktree.
+  and the test command (see `--test-cmd`), when there is one, exits
+  0 in that worktree.
   Uncommitted changes left by the agent are auto-committed before
   the check. On success, the ticket's status is updated to `done`
   in-place. If the agent exits 0 but made no commits, or the test
@@ -209,6 +228,20 @@ Flags:
   logs are written to `<dir>/../logs/<ticket>.attempt<n>.log`
   (and `.attempt<n>.test.log` for the test command) so the first
   attempt's log is kept.
+* Each attempt at a ticket appends an entry to
+  `.scratch/<feature>/learnings.md`, next to `progress.md`. The
+  entry records what the orchestrator saw (the outcome, the agent's
+  exit code, the checklist items it reported, and the last lines of
+  the test or install log when one of those failed) and, when an
+  agent ran, the agent's own notes. The file is committed along with
+  `progress.md` and persists across runs. Each agent's prompt
+  includes the most
+  recent entries for its own ticket and the last successful entry of
+  each ticket that directly blocks it, so a retry can see why the
+  previous attempt failed. Agents keep their notes in
+  `.nightralph/notes.md` inside the worktree. nightralph collects
+  that file when the agent exits, and a self-ignoring
+  `.nightralph/.gitignore` keeps it out of the agent's commits.
 * A ticket that exhausts all its retry attempts is excluded from
   later waves in the same run. It stays `ready-for-agent` on disk
   so a future run can pick it up, but it will not be re-started
@@ -287,6 +320,13 @@ completes, successful branches are merged back into the base branch.
 The first branch merges directly, and subsequent branches rebase
 onto the updated base before merging.
 
+Worktrees are created next to the repository, not inside it: a
+ticket's worktree is the sibling directory
+`<repo>.<feature>-<num>-<slug>` on the branch
+`<repo>--<feature>-<num>-<slug>`. A run that is interrupted leaves
+them in place; the next run removes a stale worktree and branch of
+the same name before creating a new one.
+
 A fresh worktree has only tracked files, so there is no
 `node_modules`. Before the agent starts, the orchestrator installs
 dependencies with the command that matches the project's lockfile
@@ -303,6 +343,33 @@ the run stops immediately.
 A file `progress.md` is written to the `.scratch/<feature>/` directory
 and committed after each ticket completes, so you can monitor the run from
 another terminal by reading the file.
+
+### Integration branch
+
+Launched from your default branch (`main`), nightralph does not merge
+into it. It creates `nightralph--<feature>` (or `nightralph--all` for
+several features), merges every ticket there, and leaves you on that
+branch. Running again from `main` resumes the same branch, so finished
+tickets stay finished. Launched from any other branch, it merges into
+that branch.
+
+After you merge the integration branch into `main`, the next run
+fast-forwards it to `main` and resumes. If the branch has commits `main`
+lacks, nightralph reports how far behind it is; merge `main` into it or
+delete it with `git branch -D`.
+
+If `.scratch/` is gitignored, the bookkeeping files (tickets, progress,
+learnings, review) are force-added and live on the integration branch, so
+they disappear from disk when you check out `main`.
+
+### Review
+
+After the last wave, an agent reviews everything merged since the last
+review and writes its findings to `.scratch/<feature>/review.md` (`.scratch/review.md`
+for a multi-feature run). A
+second agent fixes them test-first; its work merges only if the test
+command passes. Findings it could not fix stay unchecked in
+`review.md`. Skip this with `--no-review`.
 
 ### Status display
 
@@ -368,10 +435,16 @@ caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort low
 ```sh
 caffeinate -i npx nightralph claude -m claude-opus-5-5 --effort low
 ```
-#### Claude Sonnet 5
+#### Claude Sonnet 5.5
 
 ```sh
-caffeinate -i npx nightralph claude -m claude-sonnet-5 --effort high
+caffeinate -i npx nightralph claude -m claude-sonnet-5-5 --effort high
+```
+
+#### Claude Haiku 5.5
+
+```sh
+caffeinate -i npx nightralph claude -m claude-haiku-5-5 --effort high
 ```
 
 #### Claude Fable 5.1

@@ -7,6 +7,7 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
     parseTicketFilename,
     parseStatus,
@@ -41,6 +42,7 @@ import {
     type Ticket,
     type EffortLevel,
 } from '../src/orchestrator.js'
+import { NOTES_PATH } from '../src/learnings.js'
 
 // -- helpers --
 
@@ -1655,6 +1657,34 @@ test('renderPrompt includes the test command',
         )
     })
 
+test('renderPrompt with an empty test command names no gate',
+    t => {
+        const ticket = makeTicket({
+            num:1,
+            filename:'01-thing.md',
+        })
+        const withCmd = renderPrompt(
+            'spec body here', ticket,
+            { testCmd:'npm run check' }
+        )
+        const without = renderPrompt(
+            'spec body here', ticket,
+            { testCmd:'' }
+        )
+        t.ok(
+            withCmd.includes('npm run check'),
+            'non-empty command is named'
+        )
+        t.ok(
+            !without.includes('npm run check'),
+            'empty command is not named'
+        )
+        t.ok(
+            !without.includes('``'),
+            'no empty code span for the command'
+        )
+    })
+
 test('renderPrompt names the install command when given',
     t => {
         const ticket = makeTicket({
@@ -1817,6 +1847,82 @@ test('renderPrompt asks for a commit per checklist item',
         )
     })
 
+test('renderPrompt includes history when provided ' +
+    '(AC4.1)', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const token = randomUUID()
+    const history = `Some history\ncontaining ${token}`
+    const prompt = renderPrompt('spec body', ticket, {
+        testCmd:'npm test',
+        history,
+    })
+    const tokenIdx = prompt.indexOf(token)
+    const ticketEnd = prompt.indexOf(ticket.body) + ticket.body.length
+    const instructionsIdx = prompt.indexOf(
+        'AGENT INSTRUCTIONS'
+    )
+    t.ok(
+        tokenIdx >= 0,
+        'prompt contains history token'
+    )
+    t.ok(
+        tokenIdx > ticketEnd,
+        'history token appears after the ticket body'
+    )
+    t.ok(
+        tokenIdx < instructionsIdx,
+        'history token appears before AGENT INSTRUCTIONS'
+    )
+})
+
+test('renderPrompt with empty history equals no history ' +
+    '(AC4.2)', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const noHistory = renderPrompt('spec body', ticket,
+        { testCmd:'npm test' })
+    const emptyHistory = renderPrompt('spec body', ticket, {
+        testCmd:'npm test',
+        history:'',
+    })
+    t.equal(
+        noHistory,
+        emptyHistory,
+        'empty history string produces same prompt as no history'
+    )
+
+    // History adds exactly its own text plus one blank line, so the
+    // no-history prompt cannot carry an empty header or extra lines
+    const history = 'HIST-' + randomUUID()
+    const withHistory = renderPrompt('spec body', ticket, {
+        testCmd:'npm test',
+        history,
+    })
+    t.equal(
+        withHistory.replace(history + '\n\n', ''),
+        noHistory,
+        'history adds exactly its text and one blank line'
+    )
+})
+
+test('renderPrompt includes NOTES_PATH', t => {
+    const ticket = makeTicket({
+        num:1,
+        filename:'01-thing.md',
+    })
+    const prompt = renderPrompt('spec body', ticket,
+        { testCmd:'npm test' })
+    t.ok(
+        prompt.includes(NOTES_PATH),
+        'prompt mentions NOTES_PATH'
+    )
+})
+
 test('renderMergePrompt keeps both sides of doc conflicts',
     t => {
         const ticket = makeTicket({
@@ -1933,6 +2039,38 @@ test('spawnAgent keeps logging stderr after stdout closes',
             logContent.includes('stderr after stdout closed'),
             'stdout EOF does not end the log before stderr is done'
         )
+    }
+)
+
+test('spawnAgent reports spawn errors through onLine and the log',
+    async t => {
+        const tmpDir = mkdtempSync(join(tmpdir(), 'test-spawn-err-'))
+        try {
+            const lines:string[] = []
+            const logPath = join(tmpDir, 'agent.log')
+
+            const result = await spawnAgent({
+                prompt:'x',
+                agentCmd:join(tmpDir, 'nightralph-no-such-agent'),
+                model:null,
+                timeout:10,
+                logPath,
+                onLine:(line:string) => lines.push(line),
+            })
+
+            t.equal(result.exitCode, 1, 'spawn failure exits 1')
+            t.ok(
+                lines.some(line => line.includes('ENOENT')),
+                'spawn error is sent to onLine'
+            )
+            t.ok(
+                existsSync(logPath) &&
+                readFileSync(logPath, 'utf8').includes('ENOENT'),
+                'spawn error is written to the log'
+            )
+        } finally {
+            rmSync(tmpDir, { recursive:true, force:true })
+        }
     }
 )
 
@@ -2390,6 +2528,91 @@ test('dryRunIsolated basic test', t => {
     } finally {
         console.log = originalLog
     }
+})
+
+function captureLog (fn:() => void):string {
+    const output:Array<string> = []
+    const originalLog = console.log
+    console.log = function (msg:unknown) {
+        output.push(String(msg))
+    }
+    try {
+        fn()
+    } finally {
+        console.log = originalLog
+    }
+    return output.join('\n')
+}
+
+test('dryRunIsolated prints (none) for an empty test command',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-test.md',
+                status:'ready-for-agent',
+                blockers:[],
+            }),
+        ]
+
+        const out = captureLog(() => {
+            dryRunIsolated({
+                tickets,
+                specBody:'test spec body',
+                repoName:'myapp',
+                conflictStrategy:'respawn',
+                progressPath:'.scratch/feature/progress.md',
+                testCmd:'',
+            })
+        })
+
+        t.ok(out.includes('Test command: (none)'),
+            'prints (none) for the empty command')
+    })
+
+test('dryRunIsolated prints the test command when set', t => {
+    const tickets:Array<Ticket> = [
+        makeTicket({
+            num:1,
+            filename:'01-test.md',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+    ]
+
+    const out = captureLog(() => {
+        dryRunIsolated({
+            tickets,
+            specBody:'test spec body',
+            repoName:'myapp',
+            conflictStrategy:'respawn',
+            progressPath:'.scratch/feature/progress.md',
+            testCmd:'npm test',
+        })
+    })
+
+    t.ok(out.includes('Test command: npm test'),
+        'prints the command')
+    t.ok(!out.includes('Test command: (none)'),
+        'does not print (none) for the test command')
+})
+
+test('dryRun prints (none) for an empty test command', t => {
+    const tickets:Array<Ticket> = [
+        makeTicket({
+            num:1,
+            filename:'01-test.md',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+    ]
+
+    const out = captureLog(() => {
+        dryRun(tickets, 'spec body', '')
+    })
+
+    t.ok(out.includes('Test command: (none)'),
+        'in-place dry run prints (none)')
 })
 
 test('dryRunIsolated shows worktree paths and branches',
