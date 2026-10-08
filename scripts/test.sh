@@ -22,6 +22,7 @@ TESTS=(
     merge
     display
     testcmd
+    preflight
     resolve
     integration
     review-integration
