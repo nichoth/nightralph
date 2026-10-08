@@ -413,9 +413,13 @@ async function runExecute (argv:{
     if (loaded.allTickets.length === 0) return
 
     const providerPath = resolveExecutable(argv.provider)
+    // A path is never searched on PATH, so say what was checked
+    const providerMissing = argv.provider.includes('/') ?
+        'not found or not executable' :
+        'not found on PATH'
     if (providerPath === null && !argv.dryRun) {
         console.error(
-            `Provider '${argv.provider}' not found on PATH`
+            `Provider '${argv.provider}' ${providerMissing}`
         )
         process.exit(2)
     }
@@ -484,7 +488,7 @@ async function runExecute (argv:{
 
     if (argv.dryRun) {
         console.log(
-            `Provider:     ${providerPath ?? 'not found on PATH'}`
+            `Provider:     ${providerPath ?? providerMissing}`
         )
         if (isolated) {
             const repoName = getRepoName()

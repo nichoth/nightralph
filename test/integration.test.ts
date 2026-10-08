@@ -4935,6 +4935,31 @@ test('CLI subprocess - AC1.6 dry-run with a provider not on PATH',
         }
     })
 
+test('CLI subprocess - AC1.4 a path provider that is not ' +
+    'executable fails with a clear reason', async t => {
+    const projectDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const noexec = join(projectDir, 'noexec-agent.js')
+        writeFileSync(noexec, '#!/bin/sh\nexit 0\n')
+        chmodSync(noexec, 0o644)
+
+        const { code, stderr } = await spawnCli([
+            noexec, '--spec', FEAT,
+        ], { cwd:projectDir })
+
+        t.equal(code, 2, 'exit 2')
+        t.ok(stderr.includes(noexec), 'stderr names the provider')
+        t.ok(stderr.includes('not executable'), 'says not executable')
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
 test('CLI subprocess - AC2.1 a run from main lands on the ' +
     'integration branch', async t => {
     const { projectDir, issuesDir, templateDir } = cliGitRepo()
