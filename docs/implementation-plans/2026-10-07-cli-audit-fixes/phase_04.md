@@ -9,6 +9,14 @@ the dry-run branch), and a non-zero exit aborts the publish. It does
 not run for `npm pack`. The existing `postversion` script, which
 calls `npm publish`, therefore builds and tests without any change.
 
+`postversion` is reordered to `npm publish && git push --follow-tags`
+(it was `git push --follow-tags && npm publish`). Before this phase,
+`npm version` pushed the version commit and tag first, and only then
+ran `prepublishOnly`. A red test suite aborted the publish but left
+the version commit and tag on the remote. With the reorder, build and
+tests run before anything is pushed, so a red suite leaves only a
+local commit and tag. `preversion` is unchanged.
+
 **Tech Stack:** npm 11 lifecycle scripts.
 
 **Scope:** Phase 4 of 5 from
@@ -75,10 +83,13 @@ Make one test fail on purpose: add `t.ok(false, 'temporary')` to
 any test in `test/retry.test.ts`.
 
 Run: `npm publish --dry-run; echo "exit=$?"`
-Expected: the test run stops at the failing suite, `npm` prints an
-error block naming the `prepublishOnly` script, no `Tarball
-Contents` listing is printed, and the exit code is non-zero. The
-absence of the listing is what distinguishes this from Step 2.
+Expected: the test run stops at the failing suite. The output starts
+with the `> nightralph@0.0.53 prepublishOnly` header, then an `npm
+error command failed` block naming the command `npm run build && npm
+test` (the script name appears only in that header, not in the error
+block). No `Tarball Contents` listing is printed, and the exit code is
+non-zero. The absence of the listing is what distinguishes this from
+Step 2.
 
 Revert the temporary change: `git checkout -- test/retry.test.ts`.
 
