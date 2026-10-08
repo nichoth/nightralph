@@ -7,15 +7,27 @@ before the package is packed, for `npm publish` and `npm publish
 --dry-run` alike (npm 11 `lib/commands/publish.js` runs it before
 the dry-run branch), and a non-zero exit aborts the publish. It does
 not run for `npm pack`. The existing `postversion` script, which
-calls `npm publish`, therefore builds and tests without any change.
+calls `npm publish`, therefore builds and tests too; its order
+changes as described below.
 
 `postversion` is reordered to `npm publish && git push --follow-tags`
-(it was `git push --follow-tags && npm publish`). Before this phase,
-`npm version` pushed the version commit and tag first, and only then
-ran `prepublishOnly`. A red test suite aborted the publish but left
-the version commit and tag on the remote. With the reorder, build and
-tests run before anything is pushed, so a red suite leaves only a
-local commit and tag. `preversion` is unchanged.
+(it was `git push --follow-tags && npm publish`). With the old
+order, `npm version` would push the version commit and tag first, and
+only then run `prepublishOnly`, so a red test suite would abort the
+publish but leave the version commit and tag on the remote. With the
+reorder, build and tests run before anything is pushed, so a red
+suite leaves only a local commit and tag. `preversion` is unchanged.
+
+Recovery from the two partial failures the new order allows:
+
+- Red suite after `npm version`: the version commit and tag `vX`
+  stay local. Remove both with `git tag -d vX && git reset --hard
+  HEAD~1`, fix the tests, and run `npm version` again. Without this,
+  the next `npm version` skips a number and `git push --follow-tags`
+  also pushes the stale `vX` tag.
+- Publish succeeded but the push failed: the package is on the
+  registry and the commit and tag are only local. Run `git push
+  --follow-tags` by hand.
 
 **Tech Stack:** npm 11 lifecycle scripts.
 
@@ -48,7 +60,8 @@ not by automated tests:
 the commands below)
 
 **Files:**
-- Modify: `package.json:16-29` (the `scripts` block)
+- Modify: `package.json:16-29` (the `scripts` block: add
+  `prepublishOnly`, reorder `postversion`)
 
 **Step 1: Add the script**
 
@@ -62,6 +75,16 @@ lifecycle scripts sit together:
 Order matters inside the command: `scripts/test.sh` does not build,
 and the integration suite runs `dist/index.js`, so `build` must come
 first.
+
+In the same block, reorder `postversion` so the publish, and with it
+the build and tests, runs before the push:
+
+```json
+    "postversion": "npm publish && git push --follow-tags",
+```
+
+Never run `npm version` or `postversion` to check this; verify it by
+reading the script.
 
 **Step 2: Verify operationally (AC4.1)**
 
@@ -84,7 +107,7 @@ any test in `test/retry.test.ts`.
 
 Run: `npm publish --dry-run; echo "exit=$?"`
 Expected: the test run stops at the failing suite. The output starts
-with the `> nightralph@0.0.53 prepublishOnly` header, then an `npm
+with the `> nightralph@<version> prepublishOnly` header, then an `npm
 error command failed` block naming the command `npm run build && npm
 test` (the script name appears only in that header, not in the error
 block). No `Tarball Contents` listing is printed, and the exit code is
@@ -99,4 +122,7 @@ Revert the temporary change: `git checkout -- test/retry.test.ts`.
 git add package.json
 git commit -m "chore: build and test before publish"
 ```
+
+The `postversion` reorder landed as its own commit, `fix: publish
+before pushing the version tag`, after review.
 <!-- END_TASK_1 -->
