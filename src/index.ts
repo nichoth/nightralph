@@ -24,6 +24,7 @@ import {
     type Ticket,
 } from './orchestrator.js'
 import { detectTestCmd, detectInstallCmd } from './testcmd.js'
+import { resolveExecutable } from './preflight.js'
 import { createDisplay } from './display.js'
 import {
     findFeatureDirs,
@@ -411,6 +412,14 @@ async function runExecute (argv:{
     let loaded = loadTicketsOrExit(selections)
     if (loaded.allTickets.length === 0) return
 
+    const providerPath = resolveExecutable(argv.provider)
+    if (providerPath === null && !argv.dryRun) {
+        console.error(
+            `Provider '${argv.provider}' not found on PATH`
+        )
+        process.exit(2)
+    }
+
     const isolated = isGitRepo()
     const featureNames = [...loaded.specBodies.keys()]
     let plan:IntegrationPlan|null = null
@@ -474,6 +483,9 @@ async function runExecute (argv:{
     const fallbackSpec = specBodies.values().next().value!
 
     if (argv.dryRun) {
+        console.log(
+            `Provider:     ${providerPath ?? 'not found on PATH'}`
+        )
         if (isolated) {
             const repoName = getRepoName()
             dryRunIsolated({

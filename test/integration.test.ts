@@ -4852,6 +4852,89 @@ function cliGitRepo ():{
     return { projectDir, issuesDir, templateDir }
 }
 
+test('CLI subprocess - AC1.4 a provider not on PATH fails before ' +
+    'git state changes', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+
+        const missing = 'nightralph-no-such-provider'
+        const { code, stderr } = await spawnCli([
+            missing, '--spec', FEAT,
+        ], { cwd:projectDir })
+
+        t.equal(code, 2, 'exit 2')
+        t.ok(stderr.includes(missing), 'stderr names the provider')
+        t.equal(
+            gitOut(projectDir, ['branch', '--list', 'nightralph--*'])
+                .trim(),
+            '',
+            'no integration branch created'
+        )
+        t.equal(
+            gitOut(projectDir, ['rev-parse', '--abbrev-ref', 'HEAD'])
+                .trim(),
+            'main',
+            'still on main'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC1.5 an absolute path to a provider runs',
+    async t => {
+        const projectDir = tmp()
+        try {
+            const { issuesDir, logsDir } = scratchDirs(projectDir)
+            writeFileSync(
+                join(issuesDir, '01-task.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+
+            const { code } = await spawnCli([
+                MOCK_AGENT, '--spec', FEAT, '--timeout', '10',
+            ], { cwd:projectDir })
+
+            t.equal(code, 0, 'exit 0')
+            t.ok(
+                existsSync(join(logsDir, '01-task.log')),
+                'agent ran and wrote its log'
+            )
+        } finally {
+            rmSync(projectDir, { recursive:true, force:true })
+        }
+    })
+
+test('CLI subprocess - AC1.6 dry-run with a provider not on PATH',
+    async t => {
+        const projectDir = tmp()
+        try {
+            const { issuesDir } = scratchDirs(projectDir)
+            writeFileSync(
+                join(issuesDir, '01-task.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+
+            const { code, stdout } = await spawnCli([
+                'nightralph-no-such-provider',
+                '--spec', FEAT,
+                '--dry-run',
+            ], { cwd:projectDir })
+
+            t.equal(code, 0, 'exit 0')
+            t.ok(stdout.includes('Provider:'), 'prints a Provider line')
+            t.ok(stdout.includes('not found'), 'says it was not found')
+        } finally {
+            rmSync(projectDir, { recursive:true, force:true })
+        }
+    })
+
 test('CLI subprocess - AC2.1 a run from main lands on the ' +
     'integration branch', async t => {
     const { projectDir, issuesDir, templateDir } = cliGitRepo()
