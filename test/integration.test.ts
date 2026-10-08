@@ -5505,12 +5505,13 @@ test('CLI subprocess - AC3.3 a closed feature prompt exits 2 with ' +
             makeTicketBody({ status:'ready-for-agent' })
         )
 
-        const { code, stderr } = await spawnCli([MOCK_AGENT], {
+        const { code, stdout, stderr } = await spawnCli([MOCK_AGENT], {
             cwd:projectDir,
             closeStdin:true,
         })
 
         t.equal(code, 2, 'exit 2')
+        t.ok(stdout.trim().length > 0, 'the feature prompt was reached')
         t.equal(
             stderr.trim().split('\n').length, 1,
             'stderr is one line'

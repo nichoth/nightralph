@@ -224,10 +224,12 @@ yargs(hideBin(process.argv))
         err:unknown,
         y:{ showHelp:() => void }
     ) => {
-        // A thrown or rejected error from a command handler: one
-        // line, exit 2, same code as the usage errors runExecute
-        // exits with itself. No help text, no stack.
-        if (err) {
+        // A thrown or rejected error from a command handler arrives
+        // as fail(null, err): one line, exit 2, same code as the
+        // usage errors runExecute exits with itself. No help text,
+        // no stack. A msg+err pair (parser or YError usage errors)
+        // is a usage error and keeps the help text and exit 1.
+        if (err && !msg) {
             console.error(formatErrorMessage(err))
             process.exit(2)
         }
