@@ -730,7 +730,7 @@ export async function runFixer (
             )) {
                 return fail('no-commits', agent.exitCode, notes)
             }
-            if (!(await runStep(
+            if (opts.testCmd !== '' && !(await runStep(
                 opts, deps, opts.testCmd, wt.worktreePath,
                 logPath(
                     opts.logsDir, 'review-fix', attempt, '.test.log'

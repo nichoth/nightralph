@@ -1007,6 +1007,73 @@ test('runWavesIsolated - passing test command runs in the ' +
     }
 })
 
+test('runWavesIsolated - an empty test command writes no test ' +
+    'log and merges the branch', async t => {
+    const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+    const projectDir = initTempGitRepo({ templateDir })
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            const result = await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature',
+                conflictStrategy:'respawn',
+                testCmd:'',
+            })
+
+            t.equal(result.allDone, true, 'run done')
+            t.equal(tickets[0].status, 'done', 'ticket done')
+            t.ok(
+                !existsSync(join(logsDir, '01-first.test.log')),
+                'no test log without a gate'
+            )
+            const log = execSync(
+                'git log --oneline',
+                { cwd:projectDir }
+            ).toString()
+            t.ok(
+                log.includes('mock agent change'),
+                'branch with commits is merged'
+            )
+        } finally {
+            process.chdir(originalCwd)
+        }
+    } finally {
+        try {
+            execSync(
+                'git worktree list --porcelain',
+                { cwd:projectDir }
+            ).toString()
+                .split('\n')
+                .filter(l => l.startsWith('worktree '))
+                .map(l => l.substring('worktree '.length))
+                .filter(p => p !== projectDir)
+                .forEach(p => rmSync(p, {
+                    recursive:true, force:true
+                }))
+        } catch {
+        }
+        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
 test('runWavesIsolated - install command runs in the ' +
     'worktree before the test gate', async t => {
     const projectDir = initTempGitRepo()

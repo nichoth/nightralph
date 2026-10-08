@@ -1,7 +1,7 @@
 import { test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync,
-    realpathSync,
+    realpathSync, readdirSync,
 } from 'node:fs'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -231,6 +231,27 @@ test('runFixer - AC6.1 a green fix merges and checks echoed ' +
         t.ok(existsSync(join(repoRoot, 'fix.ts')),
             'the fix is on main')
         t.ok(!existsSync(agent.calls[0].cwd), 'worktree removed')
+    })
+})
+
+test('runFixer - an empty test command writes no fixer test log ' +
+    'and merges', async t => {
+    await withRepo(async repoRoot => {
+        const agent = fakeAgent(cwd => {
+            commitIn(cwd, 'fix.ts')
+            return { completedItems:['first thing'] }
+        })
+        const opts = passOpts(repoRoot, { testCmd:'' })
+        const result = await runFixer(
+            opts, { spawnAgent:agent.spawnAgent }, FINDINGS
+        )
+        t.ok(result.merged, 'merged')
+        t.ok(existsSync(join(repoRoot, 'fix.ts')),
+            'the fix is on main')
+        const testLogs = readdirSync(opts.logsDir).filter(
+            f => /^review-fix.*\.test\.log$/.test(f)
+        )
+        t.equal(testLogs.length, 0, 'no fixer test log')
     })
 })
 

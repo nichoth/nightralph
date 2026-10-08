@@ -1385,6 +1385,10 @@ async function runTestGate (opts:{
     log:(msg:string) => void
     registry?:Set<number>
 }):Promise<boolean> {
+    if (opts.testCmd === '') {
+        opts.log(`  ${opts.ticket.filename}: no test gate`)
+        return true
+    }
     const result = await runTestCmd({
         cmd:opts.testCmd,
         cwd:opts.worktreePath,
