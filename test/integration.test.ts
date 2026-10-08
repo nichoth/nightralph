@@ -1,6 +1,7 @@
 import { test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync,
+    appendFileSync,
     readFileSync, existsSync, rmSync, chmodSync,
     symlinkSync, readdirSync,
 } from 'node:fs'
@@ -211,14 +212,18 @@ const MOCK_AGENT_FAIL = join(
 
 function spawnCli (
     args:string[],
-    opts?:{ cwd?:string; env?:NodeJS.ProcessEnv },
+    opts?:{
+        cwd?:string
+        env?:NodeJS.ProcessEnv
+        closeStdin?:boolean
+    },
 ):Promise<{
     code:number
     stdout:string
     stderr:string
 }> {
     return new Promise(resolve => {
-        execFile(
+        const child = execFile(
             process.execPath,
             [CLI, ...args],
             { timeout:30_000, cwd:opts?.cwd, env:opts?.env },
@@ -233,7 +238,13 @@ function spawnCli (
                 })
             },
         )
+        if (opts?.closeStdin) child.stdin?.end()
     })
+}
+
+// True when some line of `text` is a stack frame.
+function hasStackLine (text:string):boolean {
+    return text.split('\n').some(l => l.startsWith('    at '))
 }
 
 function makeTicketBody (opts:{
@@ -5422,3 +5433,90 @@ test('CLI subprocess - a dry run from main changes no branch',
             rmSync(templateDir, { recursive:true, force:true })
         }
     })
+
+test('CLI subprocess - AC3.1 a dirty tree on a feature branch exits ' +
+    '2 with one error line and no help or stack', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        execFileSync(
+            'git', ['checkout', '-b', 'feature'],
+            { cwd:projectDir, env:GIT_ENV }
+        )
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        appendFileSync(
+            join(projectDir, '.scratch', FEAT, 'spec.md'),
+            '\nuncommitted edit\n'
+        )
+
+        const { code, stdout, stderr } = await spawnCli([
+            MOCK_AGENT, '--spec', FEAT, '--no-review',
+        ], { cwd:projectDir })
+
+        t.equal(code, 2, 'exit 2')
+        t.ok(
+            stderr.includes('Working tree is dirty'),
+            'stderr names the dirty tree'
+        )
+        t.ok(!stderr.includes('Options:'), 'no help text on stderr')
+        t.ok(!stdout.includes('Options:'), 'no help text on stdout')
+        t.ok(!hasStackLine(stderr), 'no stack frames on stderr')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC3.2 a usage error prints help and exits 1',
+    async t => {
+        const dir = tmp()
+        try {
+            const { code, stderr } = await spawnCli([], { cwd:dir })
+
+            t.equal(code, 1, 'exit 1')
+            t.ok(stderr.includes('Options:'), 'help text on stderr')
+        } finally {
+            rmSync(dir, { recursive:true, force:true })
+        }
+    })
+
+test('CLI subprocess - AC3.3 a closed feature prompt exits 2 with ' +
+    'one line and no stack', async t => {
+    const projectDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const otherIssues = join(
+            projectDir, '.scratch', 'other', 'issues'
+        )
+        mkdirSync(otherIssues, { recursive:true })
+        writeFileSync(
+            join(projectDir, '.scratch', 'other', 'spec.md'),
+            '# Other spec'
+        )
+        writeFileSync(
+            join(otherIssues, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+
+        const { code, stderr } = await spawnCli([MOCK_AGENT], {
+            cwd:projectDir,
+            closeStdin:true,
+        })
+
+        t.equal(code, 2, 'exit 2')
+        t.equal(
+            stderr.trim().split('\n').length, 1,
+            'stderr is one line'
+        )
+        t.ok(!hasStackLine(stderr), 'no stack frames on stderr')
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})

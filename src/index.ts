@@ -219,6 +219,23 @@ yargs(hideBin(process.argv))
     .strict()
     .demandCommand(1, 'Specify a command or provider')
     .help()
+    .fail((
+        msg:string|null,
+        err:unknown,
+        y:{ showHelp:() => void }
+    ) => {
+        // A thrown or rejected error from a command handler: one
+        // line, exit 2, same code as the usage errors runExecute
+        // exits with itself. No help text, no stack.
+        if (err) {
+            console.error(formatErrorMessage(err))
+            process.exit(2)
+        }
+        // A parse or validation error: keep today's output.
+        y.showHelp()
+        console.error(`\n${msg}`)
+        process.exit(1)
+    })
     .parse()
 
 function isGitRepo ():boolean {
