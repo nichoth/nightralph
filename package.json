@@ -24,7 +24,7 @@
     "preversion": "npm run lint",
     "prepublishOnly": "npm run build",
     "version": "npm run toc && git add README.md",
-    "postversion": "npm publish && git push --follow-tags",
+    "postversion": "git push --follow-tags && npm publish",
     "demo": "npm run build && node test/demo-display.mjs",
     "test": "bash scripts/test.sh"
   },
