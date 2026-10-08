@@ -132,7 +132,9 @@ yargs(hideBin(process.argv))
                 describe:'Command run in each worktree ' +
                     'after the agent exits; non-zero ' +
                     'exit rejects the ticket. Defaults ' +
-                    'to "npm test".',
+                    'to "npm test" when package.json has ' +
+                    'a test script; otherwise the run ' +
+                    'has no test gate. "" disables it.',
             })
             .option('install-cmd', {
                 type:'string',
@@ -469,11 +471,17 @@ async function runExecute (argv:{
     } = loaded
 
     const timeout = argv.timeout ?? 900
-    const testCmd = argv.testCmd || detectTestCmd(
+    const testCmd = argv.testCmd ?? detectTestCmd(
         isolated ?
             getRepoRoot() :
             process.cwd()
-    ) || 'npm test'
+    ) ?? ''
+    if (argv.testCmd === undefined && testCmd === '') {
+        console.log(
+            'No test command detected; running without a ' +
+            'test gate. Pass --test-cmd to add one.'
+        )
+    }
     // Only worktrees start without dependencies, so only an
     // isolated run installs. An explicit "" disables it.
     const installCmd = argv.installCmd ??

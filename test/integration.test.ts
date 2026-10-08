@@ -5113,6 +5113,199 @@ test('CLI subprocess - AC2.2 a run from main resumes the ' +
     }
 })
 
+// Fast CLI run flags: no retries, no install, no review.
+const NO_GATE_RUN_ARGS = [
+    '--spec', FEAT,
+    '--retries', '0',
+    '--install-cmd', '',
+    '--timeout', '30',
+    '--no-review',
+]
+
+function writePackageJson (dir:string, body:string):void {
+    writeFileSync(join(dir, 'package.json'), body + '\n')
+}
+
+const NO_TEST_SCRIPT = '{"name":"p","private":true}'
+const FAILING_TEST_SCRIPT =
+    '{"name":"p","private":true,"scripts":{"test":"exit 7"}}'
+
+function logFiles (logsDir:string):string[] {
+    return existsSync(logsDir) ? readdirSync(logsDir) : []
+}
+
+test('CLI subprocess - AC2.4 --test-cmd "" completes a ticket ' +
+    'in a project with no test script', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writePackageJson(projectDir, NO_TEST_SCRIPT)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        const { logsDir } = scratchDirs(projectDir)
+
+        const { code } = await spawnCli([
+            MOCK_AGENT, ...NO_GATE_RUN_ARGS, '--test-cmd', '',
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.ok(
+            gitOut(projectDir, ['log', '--oneline'])
+                .includes('mock agent change'),
+            'the ticket branch merged'
+        )
+        t.ok(
+            !logFiles(logsDir).some(f => f.endsWith('.test.log')),
+            'no test log was written'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC2.5 no flag and no test script warns ' +
+    'once and completes the ticket', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writePackageJson(projectDir, NO_TEST_SCRIPT)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+
+        const { code, stdout } = await spawnCli([
+            MOCK_AGENT, ...NO_GATE_RUN_ARGS,
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.ok(
+            gitOut(projectDir, ['log', '--oneline'])
+                .includes('mock agent change'),
+            'the ticket branch merged'
+        )
+        t.equal(
+            stdout.split('No test command detected').length - 1,
+            1,
+            'the warning prints once'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC2.6 a test script with no flag still ' +
+    'runs npm test as the gate', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writePackageJson(projectDir, FAILING_TEST_SCRIPT)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        const { logsDir } = scratchDirs(projectDir)
+
+        const { code, stdout } = await spawnCli([
+            MOCK_AGENT, ...NO_GATE_RUN_ARGS,
+        ], { cwd:projectDir })
+
+        t.ok(code !== 0, 'the failing gate fails the run')
+        t.ok(
+            !stdout.includes('No test command detected'),
+            'no detection warning'
+        )
+        t.ok(
+            existsSync(join(logsDir, '01-task.test.log')),
+            'the gate wrote its log'
+        )
+        t.ok(
+            !gitOut(projectDir, ['log', '--oneline'])
+                .includes('mock agent change'),
+            'the ticket did not merge'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC2.7 --dry-run prints Test command: ' +
+    '(none) for an empty command', async t => {
+    const plain = tmp()
+    try {
+        const { issuesDir } = scratchDirs(plain)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const { stdout } = await spawnCli([
+            MOCK_AGENT, '--spec', FEAT, '--dry-run', '--test-cmd', '',
+        ], { cwd:plain })
+        t.ok(stdout.includes('Test command: (none)'),
+            'in-place printer prints (none)')
+    } finally {
+        rmSync(plain, { recursive:true, force:true })
+    }
+
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        const { stdout } = await spawnCli([
+            MOCK_AGENT, '--spec', FEAT, '--dry-run', '--test-cmd', '',
+        ], { cwd:projectDir })
+        t.ok(stdout.includes('Test command: (none)'),
+            'isolated printer prints (none)')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC2.8 --test-cmd "" on a project with a ' +
+    'failing test script runs no gate and no warning', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writePackageJson(projectDir, FAILING_TEST_SCRIPT)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        const { logsDir } = scratchDirs(projectDir)
+
+        const { code, stdout } = await spawnCli([
+            MOCK_AGENT, ...NO_GATE_RUN_ARGS, '--test-cmd', '',
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.ok(
+            gitOut(projectDir, ['log', '--oneline'])
+                .includes('mock agent change'),
+            'the ticket branch merged'
+        )
+        t.ok(
+            !logFiles(logsDir).some(f => f.endsWith('.test.log')),
+            'no test log was written'
+        )
+        t.ok(
+            !stdout.includes('No test command detected'),
+            'no detection warning'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
 const MOCK_REVIEW_AGENT = join(
     process.cwd(), 'test', 'mock-agent-review.js'
 )
