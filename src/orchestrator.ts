@@ -1186,16 +1186,23 @@ export function spawnAgent (opts:{
             }
             rl.close()
             rlErr.close()
-            logStream.end()
-            if (promptFile) cleanupPromptFile(promptFile)
-            console.error(
-                'Agent process error:',
+            const msg = 'agent process error: ' +
                 formatErrorMessage(err)
-            )
-            resolve({
-                exitCode:1,
-                completedItems,
-                timedOut,
+            logStream.write(`nightralph: ${msg}\n`)
+            if (promptFile) cleanupPromptFile(promptFile)
+            if (opts.onLine) {
+                opts.onLine(`${prefix}${msg}`)
+            } else {
+                console.error(`${prefix}${msg}`)
+            }
+            // Resolve only once the log is flushed, so a caller
+            // that reads the log right away sees the message.
+            logStream.end(() => {
+                resolve({
+                    exitCode:1,
+                    completedItems,
+                    timedOut,
+                })
             })
         })
     })

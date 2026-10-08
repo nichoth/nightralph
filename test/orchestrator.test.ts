@@ -2014,6 +2014,38 @@ test('spawnAgent keeps logging stderr after stdout closes',
     }
 )
 
+test('spawnAgent reports spawn errors through onLine and the log',
+    async t => {
+        const tmpDir = mkdtempSync(join(tmpdir(), 'test-spawn-err-'))
+        try {
+            const lines:string[] = []
+            const logPath = join(tmpDir, 'agent.log')
+
+            const result = await spawnAgent({
+                prompt:'x',
+                agentCmd:join(tmpDir, 'nightralph-no-such-agent'),
+                model:null,
+                timeout:10,
+                logPath,
+                onLine:(line:string) => lines.push(line),
+            })
+
+            t.equal(result.exitCode, 1, 'spawn failure exits 1')
+            t.ok(
+                lines.some(line => line.includes('ENOENT')),
+                'spawn error is sent to onLine'
+            )
+            t.ok(
+                existsSync(logPath) &&
+                readFileSync(logPath, 'utf8').includes('ENOENT'),
+                'spawn error is written to the log'
+            )
+        } finally {
+            rmSync(tmpDir, { recursive:true, force:true })
+        }
+    }
+)
+
 // -- runWaves (integration) --
 
 const MOCK_PASS = join(
