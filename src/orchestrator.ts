@@ -1231,6 +1231,8 @@ export function dryRun (
         )
     }
 
+    console.log(`\nTest command: ${testCmd || '(none)'}`)
+
     const firstReady = findReadyTickets(tickets)
     if (firstReady.length > 0) {
         console.log(
@@ -1311,7 +1313,7 @@ export function dryRunIsolated (opts:{
             'respawn (re-run agent on conflict)' :
             'stop (stop merging on conflict)'
     console.log(
-        `\nTest command: ${opts.testCmd}`
+        `\nTest command: ${opts.testCmd || '(none)'}`
     )
     console.log(
         `Install:      ${opts.installCmd || '(none)'}`

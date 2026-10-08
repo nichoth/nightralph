@@ -2530,6 +2530,91 @@ test('dryRunIsolated basic test', t => {
     }
 })
 
+function captureLog (fn:() => void):string {
+    const output:Array<string> = []
+    const originalLog = console.log
+    console.log = function (msg:unknown) {
+        output.push(String(msg))
+    }
+    try {
+        fn()
+    } finally {
+        console.log = originalLog
+    }
+    return output.join('\n')
+}
+
+test('dryRunIsolated prints (none) for an empty test command',
+    t => {
+        const tickets:Array<Ticket> = [
+            makeTicket({
+                num:1,
+                filename:'01-test.md',
+                status:'ready-for-agent',
+                blockers:[],
+            }),
+        ]
+
+        const out = captureLog(() => {
+            dryRunIsolated({
+                tickets,
+                specBody:'test spec body',
+                repoName:'myapp',
+                conflictStrategy:'respawn',
+                progressPath:'.scratch/feature/progress.md',
+                testCmd:'',
+            })
+        })
+
+        t.ok(out.includes('Test command: (none)'),
+            'prints (none) for the empty command')
+    })
+
+test('dryRunIsolated prints the test command when set', t => {
+    const tickets:Array<Ticket> = [
+        makeTicket({
+            num:1,
+            filename:'01-test.md',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+    ]
+
+    const out = captureLog(() => {
+        dryRunIsolated({
+            tickets,
+            specBody:'test spec body',
+            repoName:'myapp',
+            conflictStrategy:'respawn',
+            progressPath:'.scratch/feature/progress.md',
+            testCmd:'npm test',
+        })
+    })
+
+    t.ok(out.includes('Test command: npm test'),
+        'prints the command')
+    t.ok(!out.includes('Test command: (none)'),
+        'does not print (none) for the test command')
+})
+
+test('dryRun prints (none) for an empty test command', t => {
+    const tickets:Array<Ticket> = [
+        makeTicket({
+            num:1,
+            filename:'01-test.md',
+            status:'ready-for-agent',
+            blockers:[],
+        }),
+    ]
+
+    const out = captureLog(() => {
+        dryRun(tickets, 'spec body', '')
+    })
+
+    t.ok(out.includes('Test command: (none)'),
+        'in-place dry run prints (none)')
+})
+
 test('dryRunIsolated shows worktree paths and branches',
     t => {
         const tickets:Array<Ticket> = [
