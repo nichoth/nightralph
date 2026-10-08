@@ -147,7 +147,12 @@ Small orchestrator that runs a single-agent session per issue.
   contains `/`) and exits 2, so a bad name never creates or
   checks out a branch. Under
   `--dry-run` it prints a `Provider:` line with the resolved
-  path or the same not-found wording and continues
+  path or the same not-found wording and continues. A
+  provider containing `/` is resolved against the launch
+  directory, and the resolved absolute path is the agent
+  command the runners spawn (worktrees have their own cwd, so
+  a relative path would not resolve there); a bare name is
+  still looked up on PATH at spawn time
 - **Errors**: a yargs `.fail()` handler. An error thrown or
   rejected by a command handler (for example a dirty tree
   found by `runWavesIsolated`) prints `formatErrorMessage(err)`

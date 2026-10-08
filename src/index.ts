@@ -444,6 +444,12 @@ async function runExecute (argv:{
         )
         process.exit(2)
     }
+    // Worktrees spawn with their own cwd, so a relative path must
+    // be resolved here, against the launch directory. A bare name
+    // stays a PATH lookup at spawn time.
+    const agentCmd = argv.provider.includes('/') ?
+        providerPath ?? argv.provider :
+        argv.provider
 
     const isolated = isGitRepo()
     const featureNames = [...loaded.specBodies.keys()]
@@ -563,7 +569,7 @@ async function runExecute (argv:{
             tickets:allTickets,
             specBody:fallbackSpec,
             specBodies,
-            agentCmd:argv.provider,
+            agentCmd,
             model:argv.model ?? null,
             timeout,
             logsDir,
@@ -588,7 +594,7 @@ async function runExecute (argv:{
     } else {
         result = await runWaves(
             allTickets, fallbackSpec,
-            argv.provider, argv.model ?? null,
+            agentCmd, argv.model ?? null,
             timeout,
             logsDir,
             testCmd,

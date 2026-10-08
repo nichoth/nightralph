@@ -1,7 +1,7 @@
 import { test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync,
-    appendFileSync,
+    appendFileSync, copyFileSync,
     readFileSync, existsSync, rmSync, chmodSync,
     symlinkSync, readdirSync,
 } from 'node:fs'
@@ -5021,6 +5021,42 @@ test('CLI subprocess - AC1.4 a path provider that is not ' +
         t.ok(stderr.includes('not executable'), 'says not executable')
     } finally {
         rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - a relative provider path runs from the ' +
+    'launch directory, not the worktree', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        // bin/ is ignored, so the agent exists in the launch
+        // directory only and never in a worktree
+        writeFileSync(
+            join(projectDir, '.gitignore'),
+            '.scratch/*/logs/\nbin/\n'
+        )
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        mkdirSync(join(projectDir, 'bin'))
+        const agent = join(projectDir, 'bin', 'agent.mjs')
+        copyFileSync(MOCK_AGENT, agent)
+        chmodSync(agent, 0o755)
+
+        const { code } = await spawnCli([
+            './bin/agent.mjs', ...NO_GATE_RUN_ARGS,
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.ok(
+            gitOut(projectDir, ['log', '--format=%s'])
+                .includes('mock agent change'),
+            'the ticket was merged onto the integration branch'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
     }
 })
 
