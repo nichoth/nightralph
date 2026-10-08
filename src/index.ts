@@ -434,8 +434,9 @@ async function runExecute (argv:{
     if (loaded.allTickets.length === 0) return
 
     const providerPath = resolveExecutable(argv.provider)
+    const providerIsPath = argv.provider.includes('/')
     // A path is never searched on PATH, so say what was checked
-    const providerMissing = argv.provider.includes('/') ?
+    const providerMissing = providerIsPath ?
         'not found or not executable' :
         'not found on PATH'
     if (providerPath === null && !argv.dryRun) {
@@ -447,7 +448,7 @@ async function runExecute (argv:{
     // Worktrees spawn with their own cwd, so a relative path must
     // be resolved here, against the launch directory. A bare name
     // stays a PATH lookup at spawn time.
-    const agentCmd = argv.provider.includes('/') ?
+    const agentCmd = providerIsPath ?
         providerPath ?? argv.provider :
         argv.provider
 

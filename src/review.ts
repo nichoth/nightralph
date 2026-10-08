@@ -730,7 +730,9 @@ export async function runFixer (
             )) {
                 return fail('no-commits', agent.exitCode, notes)
             }
-            if (opts.testCmd !== '' && !(await runStep(
+            if (opts.testCmd === '') {
+                opts.log('  review fix: no test gate')
+            } else if (!(await runStep(
                 opts, deps, opts.testCmd, wt.worktreePath,
                 logPath(
                     opts.logsDir, 'review-fix', attempt, '.test.log'

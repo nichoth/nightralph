@@ -241,11 +241,17 @@ test('runFixer - an empty test command writes no fixer test log ' +
             commitIn(cwd, 'fix.ts')
             return { completedItems:['first thing'] }
         })
-        const opts = passOpts(repoRoot, { testCmd:'' })
+        const lines:string[] = []
+        const opts = passOpts(repoRoot, {
+            testCmd:'',
+            log:msg => { lines.push(msg) },
+        })
         const result = await runFixer(
             opts, { spawnAgent:agent.spawnAgent }, FINDINGS
         )
         t.ok(result.merged, 'merged')
+        t.ok(lines.some(l => /no test gate/.test(l)),
+            'the skipped gate is logged')
         t.ok(existsSync(join(repoRoot, 'fix.ts')),
             'the fix is on main')
         const testLogs = readdirSync(opts.logsDir).filter(

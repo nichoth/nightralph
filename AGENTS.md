@@ -1076,7 +1076,8 @@ Small orchestrator that runs a single-agent session per issue.
   (a timeout is not one) fails the attempt; dirty
   changes are auto-committed; no new commits fails; a
   red test gate (`review-fix.test.log`) fails, and
-  `testCmd:''` skips the gate and writes no log; only then
+  `testCmd:''` skips the gate, writes no test log and logs
+  `review fix: no test gate`; only then
   is the branch merged into the base branch from the main
   checkout, and a merge conflict fails the attempt with
   git's stderr appended to the notes. A failure is one of

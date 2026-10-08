@@ -435,10 +435,10 @@ caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort low
 ```sh
 caffeinate -i npx nightralph claude -m claude-opus-5-5 --effort low
 ```
-#### Claude Sonnet 5
+#### Claude Sonnet 5.5
 
 ```sh
-caffeinate -i npx nightralph claude -m claude-sonnet-5 --effort high
+caffeinate -i npx nightralph claude -m claude-sonnet-5-5 --effort high
 ```
 
 #### Claude Haiku 5.5
