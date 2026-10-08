@@ -21,6 +21,19 @@ Small orchestrator that runs a single-agent session per issue.
   `mock-change-*.txt` in the repo root) when the run ends, pass
   or fail
 - `npm run lint` -- eslint
+- Both file lists are explicit: a new `src/` module must be
+  added to the second esbuild call in `build-esm`
+  (`package.json`) or no standalone `dist/<name>.js` is
+  emitted (the CLI bundle still inlines it), and a new
+  `test/<name>.test.ts` must be added to `TESTS` in
+  `scripts/test.sh` or it never runs
+- CLI subprocess tests in `test/integration.test.ts` use
+  `spawnCli(args, { cwd?, env?, closeStdin? })`, which runs
+  `dist/index.js` with a 30s timeout. stdin stays open unless
+  `closeStdin:true`, so a run that reaches the interactive
+  feature picker waits until the timeout; closing stdin makes
+  the prompt reject, which the `.fail()` handler turns into
+  exit 2
 - `npm publish` -- `prepublishOnly` runs `npm run build` and
   `npm test` first, so a red suite or a stale `dist/` cannot be
   published
@@ -199,7 +212,10 @@ Small orchestrator that runs a single-agent session per issue.
   `runWavesIsolated(opts)`, `HUMAN_STATUS`,
   `renderFinishSummary(tickets, totalCompleted, failedKeys)`,
   `lookupSpec(specBodies, fallback, feature)`,
-  `ticketKey(feature, num)`
+  `ticketKey(feature, num)`, `formatErrorMessage(error)`
+- **formatErrorMessage(error)**: an `Error`'s `message`, else
+  `String(error)`; no stack. The CLI's `.fail()` handler and
+  `spawnAgent`'s spawn-error report use it
 - **Supported providers**: `claude` (stdin prompt,
   stream-json output), `codex` (stdin prompt),
   `pi` (file-based prompt via `@tmpfile`, JSON
