@@ -22,6 +22,7 @@
     "clone-skills": "bash scripts/clone-skills.sh",
     "toc": "markdown-toc --maxdepth 4 -i README.md",
     "preversion": "npm run lint",
+    "prepublishOnly": "npm run build && npm test",
     "version": "npm run toc && git add README.md",
     "postversion": "git push --follow-tags && npm publish",
     "demo": "npm run build && node test/demo-display.mjs",
