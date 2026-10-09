@@ -487,6 +487,8 @@ export type SpawnAgentFn = (opts:{
     label?:string
     maxTurns?:number
     effort?:EffortLevel
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     onLine?:(line:string) => void
 }) => Promise<AgentResult>
 
@@ -514,6 +516,8 @@ export type ReviewPassOpts = {
     installCmd?:string
     maxTurns?:number
     effort?:EffortLevel
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     retries:number
     retryDelay:number
     log:(msg:string) => void
@@ -605,6 +609,7 @@ export async function runReviewer (
                     exclude:reviewExcludeFor(
                         opts.repoRoot, opts.reviewPath
                     ),
+                    preferSubagent:opts.preferSubagent,
                 }),
                 agentCmd:opts.agentCmd,
                 model:opts.model,
@@ -614,6 +619,7 @@ export async function runReviewer (
                 label:'review',
                 maxTurns:opts.maxTurns,
                 effort,
+                preferSubagent:opts.preferSubagent,
                 onLine:opts.log,
             })
             const text = collectNotes(wt.worktreePath, FINDINGS_FILE)
@@ -704,6 +710,7 @@ export async function runFixer (
                     testCmd:opts.testCmd,
                     installCmd:opts.installCmd,
                     previous,
+                    preferSubagent:opts.preferSubagent,
                 }),
                 agentCmd:opts.agentCmd,
                 model:opts.model,
@@ -715,6 +722,7 @@ export async function runFixer (
                 label:'review-fix',
                 maxTurns:opts.maxTurns,
                 effort,
+                preferSubagent:opts.preferSubagent,
                 onLine:opts.log,
             })
             // Before any auto-commit, so notes never get committed

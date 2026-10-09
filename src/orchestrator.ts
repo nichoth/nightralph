@@ -1287,7 +1287,8 @@ export function spawnAgent (opts:{
 export function dryRun (
     tickets:Array<Ticket>,
     specBody:string,
-    testCmd:string
+    testCmd:string,
+    preferSubagent?:string
 ):void {
     listTickets(tickets)
 
@@ -1308,6 +1309,7 @@ export function dryRun (
     }
 
     console.log(`\nTest command: ${testCmd || '(none)'}`)
+    console.log(`Prefer subagent: ${preferSubagent || '(none)'}`)
 
     const firstReady = findReadyTickets(tickets)
     if (firstReady.length > 0) {
@@ -1317,7 +1319,7 @@ export function dryRun (
         )
         console.log(
             renderPrompt(specBody, firstReady[0],
-                { testCmd })
+                { testCmd, preferSubagent })
         )
     }
 }
@@ -1334,6 +1336,8 @@ export function dryRunIsolated (opts:{
     retries?:number
     retryDelay?:number
     concurrency?:number
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
 }):void {
     listTickets(opts.tickets)
 
@@ -1379,6 +1383,7 @@ export function dryRunIsolated (opts:{
                 {
                     testCmd:opts.testCmd,
                     installCmd:opts.installCmd,
+                    preferSubagent:opts.preferSubagent,
                 }
             )
         )
@@ -1396,6 +1401,9 @@ export function dryRunIsolated (opts:{
     )
     console.log(
         `Effort:       ${opts.effort ?? '(provider default)'}`
+    )
+    console.log(
+        `Prefer subagent: ${opts.preferSubagent || '(none)'}`
     )
     console.log(
         `Retries:      ${opts.retries ?? DEFAULT_RETRIES}`
@@ -1510,6 +1518,8 @@ async function respawnAndRetryMerge (opts:{
     testCmd:string
     installCmd?:string
     maxTurns?:number
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     onLine?:(msg:string) => void
 }):Promise<boolean> {
     const log = (msg:string):void => {
@@ -1548,7 +1558,10 @@ async function respawnAndRetryMerge (opts:{
 
     const prompt = renderMergePrompt(
         opts.specBody, opts.ticket,
-        { installCmd:opts.installCmd }
+        {
+            installCmd:opts.installCmd,
+            preferSubagent:opts.preferSubagent,
+        }
     )
     const logPath = join(
         opts.logsDir,
@@ -1566,6 +1579,7 @@ async function respawnAndRetryMerge (opts:{
         cwd:opts.worktreePath,
         label,
         maxTurns:opts.maxTurns,
+        preferSubagent:opts.preferSubagent,
         onLine:opts.onLine,
     })
 
@@ -1735,6 +1749,8 @@ type TicketAttemptOpts = {
     installCmd?:string
     maxTurns?:number
     effort?:EffortLevel
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     learningsPath:string
     d:Display
 }
@@ -1838,6 +1854,7 @@ async function runTicketAttempt (
                 history:buildHistory(
                     opts.learningsPath, ticket, d
                 ),
+                preferSubagent:opts.preferSubagent,
             }
         ),
         agentCmd:opts.agentCmd,
@@ -1850,6 +1867,7 @@ async function runTicketAttempt (
         label:ticket.filename.replace(/\.md$/, ''),
         maxTurns:opts.maxTurns,
         effort:opts.effort,
+        preferSubagent:opts.preferSubagent,
         onLine:(line) => d.log(line),
     })
 
@@ -2321,6 +2339,8 @@ export async function runWaves (
     retries?:number,
     retryDelay?:number,
     concurrency?:number,
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string,
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
@@ -2367,7 +2387,7 @@ export async function runWaves (
         const results = await runPool(
             ready, poolSize, async t => {
                 const prompt = renderPrompt(specBody, t,
-                    { testCmd })
+                    { testCmd, preferSubagent })
                 const label = t.filename.replace(
                     /\.md$/, ''
                 )
@@ -2385,6 +2405,7 @@ export async function runWaves (
                     label,
                     maxTurns,
                     effort:level,
+                    preferSubagent,
                     onLine:(line) => d.log(line),
                 })
                 // In-place runs have no worktree or test
@@ -2426,6 +2447,7 @@ export async function runWaves (
                         label,
                         maxTurns,
                         effort:level,
+                        preferSubagent,
                         onLine:(line) => d.log(line),
                     })
                 }
@@ -2522,6 +2544,8 @@ export async function runWavesIsolated (opts:{
     retryDelay?:number
     // max agents running at once within a wave; default 5
     concurrency?:number
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     // per-feature progress paths for multi-feature runs
     progressPaths?:Map<string, string>
     // review the unreviewed work and run one fix pass at the end;
@@ -2664,6 +2688,7 @@ export async function runWavesIsolated (opts:{
                 installCmd:opts.installCmd,
                 maxTurns:opts.maxTurns,
                 effort:opts.effort,
+                preferSubagent:opts.preferSubagent,
                 learningsPath:learningsPathFor(
                     tracker.pathFor(t.feature)
                 ),
@@ -2922,6 +2947,7 @@ export async function runWavesIsolated (opts:{
                                 testCmd:opts.testCmd,
                                 installCmd:opts.installCmd,
                                 maxTurns:opts.maxTurns,
+                                preferSubagent:opts.preferSubagent,
                                 onLine:(msg) => d.log(msg),
                             }) :
                             false
@@ -3105,6 +3131,7 @@ export async function runWavesIsolated (opts:{
                 installCmd:opts.installCmd,
                 maxTurns:opts.maxTurns,
                 effort:opts.effort,
+                preferSubagent:opts.preferSubagent,
                 retries,
                 retryDelay,
                 log:(msg) => d.log(msg),

@@ -2,7 +2,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 import { select } from '@inquirer/prompts'
@@ -162,6 +162,13 @@ yargs(hideBin(process.argv))
                     'Omitted = provider default. ' +
                     'Retries step up from here.',
             })
+            .option('prefer-subagent', {
+                type:'string',
+                describe:'claude only: model that subagents ' +
+                    'default to (CLAUDE_CODE_SUBAGENT_MODEL), ' +
+                    'plus a prompt rule to hand read-only work ' +
+                    'to them. "" disables it.',
+            })
             .option('retries', {
                 type:'number',
                 default:DEFAULT_RETRIES,
@@ -206,6 +213,8 @@ yargs(hideBin(process.argv))
                     argv.turns) as number|undefined,
                 effort:argv.effort as
                     EffortLevel|undefined,
+                preferSubagent:argv.preferSubagent as
+                    string|undefined,
                 retries:argv.retries as
                     number|undefined,
                 retryDelay:argv.retryDelay as
@@ -421,6 +430,7 @@ async function runExecute (argv:{
     stopOnConflict?:boolean
     maxTurns?:number
     effort?:EffortLevel
+    preferSubagent?:string
     retries?:number
     retryDelay?:number
     concurrency?:number
@@ -451,6 +461,18 @@ async function runExecute (argv:{
     const agentCmd = providerIsPath ?
         providerPath ?? argv.provider :
         argv.provider
+
+    // claude is the only provider with subagents. Warn once here
+    // and drop the value, so no agent gets the env var or the rule.
+    let preferSubagent = argv.preferSubagent || undefined
+    const providerName = basename(argv.provider)
+    if (preferSubagent && providerName !== 'claude') {
+        console.warn(
+            '--prefer-subagent not supported by ' +
+            `${providerName}, skipping`
+        )
+        preferSubagent = undefined
+    }
 
     const isolated = isGitRepo()
     const featureNames = [...loaded.specBodies.keys()]
@@ -539,6 +561,7 @@ async function runExecute (argv:{
                 retries:argv.retries,
                 retryDelay:argv.retryDelay,
                 concurrency:argv.concurrency,
+                preferSubagent,
             })
             console.log(
                 describeIntegrationBranch(
@@ -548,7 +571,9 @@ async function runExecute (argv:{
             const reviewState = argv.review === false ? 'off' : 'on'
             console.log(`Review:       ${reviewState}`)
         } else {
-            dryRun(allTickets, fallbackSpec, testCmd)
+            dryRun(
+                allTickets, fallbackSpec, testCmd, preferSubagent
+            )
         }
         return
     }
@@ -584,6 +609,7 @@ async function runExecute (argv:{
             retries:argv.retries,
             retryDelay:argv.retryDelay,
             concurrency:argv.concurrency,
+            preferSubagent,
             progressPaths,
             review:argv.review === false ?
                 undefined :
@@ -605,6 +631,7 @@ async function runExecute (argv:{
             argv.retries,
             argv.retryDelay,
             argv.concurrency,
+            preferSubagent,
         )
     }
 
