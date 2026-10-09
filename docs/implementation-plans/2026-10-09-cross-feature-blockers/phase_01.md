@@ -45,7 +45,8 @@ This phase implements and tests:
   feature and no warning is produced
 - **cross-feature-blockers.AC1.9 Failure:** a hyphenated word that
   names no feature dir produces a typo warning, and its number
-  refers to the ticket's own feature
+  refers to the ticket's own feature. (Amended 2026-10-09: only
+  lowercase feature-shaped words warn; `FDR-018` gives none.)
 - **cross-feature-blockers.AC1.10 Edge:** the field ends at a blank
   line or the next `**Field:**` line; numbers after it are ignored
 
@@ -154,11 +155,11 @@ Rules (from the design, plus review hardening):
 - Refs are de-duplicated by `(feature ?? '', num)`, first
   occurrence wins, order preserved.
 
-Amended 2026-10-09 during review: the shipped code replaces
-`isHyphenatedWord` with `looksLikeFeature` (lowercase letters and
-digits joined by hyphens, with a letter, so `FDR-018` is not a
-typo) and passes `feature` to every number of a range. The block
-below is the original plan text; `src/blockers.ts` is authoritative.
+Amended 2026-10-09 during review: the block below is the shipped
+`src/blockers.ts`. It replaces the planned `isHyphenatedWord` with
+`looksLikeFeature` (lowercase letters and digits joined by hyphens,
+with a letter, so `FDR-018` is not a typo) and passes `feature` to
+every number of a range.
 
 Code (write it as-is, adjusting only if lint complains). This exact
 code was run against every fixture in Task 3 during planning and
@@ -176,7 +177,7 @@ export type RawRef = {
 
 export type BlockerParse = {
     refs:RawRef[];
-    typos:string[];   // hyphenated words that name no feature
+    typos:string[];   // feature-shaped words that name no feature
 }
 
 const FIELD_RE = /\*\*Blocked by:\*\*/i
@@ -226,7 +227,9 @@ function stripNotes (text:string):string {
         if (ch === '`') ticks.push(i)
     })
     for (let i = 0; i + 1 < ticks.length; i += 2) {
-        for (let j = ticks[i]; j <= ticks[i + 1]; j++) drop[j] = true
+        for (let j = ticks[i]; j <= ticks[i + 1]; j++) {
+            drop[j] = true
+        }
     }
     const open:number[] = []
     chars.forEach((ch, i) => {
@@ -241,8 +244,13 @@ function stripNotes (text:string):string {
     return chars.map((ch, i) => (drop[i] ? ' ' : ch)).join('')
 }
 
-function isHyphenatedWord (word:string):boolean {
-    return word.includes('-') && /[A-Za-z]/.test(word)
+/**
+ * A word shaped like a feature dir name: lowercase letters and
+ * digits joined by hyphens, with at least one letter. Doc IDs such
+ * as `FDR-018` are not.
+ */
+function looksLikeFeature (word:string):boolean {
+    return /^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(word) && /[a-z]/.test(word)
 }
 
 /**
@@ -250,8 +258,8 @@ function isHyphenatedWord (word:string):boolean {
  * belongs to the feature named by the word directly before it
  * when that word is in `knownFeatures` (the names of
  * `.scratch/<name>/issues` dirs); otherwise to the ticket's own
- * feature. Hyphenated words that name no feature are returned as
- * `typos`.
+ * feature. Feature-shaped words that name no feature are returned
+ * as `typos`.
  */
 export function parseBlockerField (
     body:string,
@@ -285,14 +293,13 @@ export function parseBlockerField (
                 feature = before
             } else if (
                 before !== null &&
-                isHyphenatedWord(before) &&
+                looksLikeFeature(before) &&
                 !typos.includes(before)
             ) {
                 typos.push(before)
             }
-            const [first, ...rest] = word.split('-').map(Number)
-            add(first, feature)
-            for (const n of rest) add(n)
+            // both ends of a range belong to the same feature
+            for (const n of word.split('-').map(Number)) add(n, feature)
         }
         prev = { word, end:start + word.length }
     }

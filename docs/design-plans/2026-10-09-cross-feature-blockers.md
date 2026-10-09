@@ -273,7 +273,7 @@ export type RawRef = {
 
 export type BlockerParse = {
     refs:RawRef[];
-    typos:string[];   // hyphenated words that name no feature
+    typos:string[];   // feature-shaped words that name no feature
 }
 
 export type BlockerWhere = 'run'|'done'|'pending'|'missing'
