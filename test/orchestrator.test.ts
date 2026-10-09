@@ -5152,9 +5152,11 @@ test('runWaves logs the stats line after the finish summary',
             const summaryAt = run.logs.indexOf(
                 '\n' + renderFinishSummary(run.tickets, 1, new Set())
             )
-            const statsAt = run.logs.indexOf(renderRunStats({
+            const expected = renderRunStats({
                 agentRuns:1, withCost:1, subagents:1, costUsd:0.25,
-            }) ?? '')
+            })
+            t.ok(expected !== null, 'a stats line is expected')
+            const statsAt = run.logs.indexOf(expected as string)
             t.ok(summaryAt >= 0, 'finish summary is logged')
             t.ok(statsAt > summaryAt, 'stats line follows it')
             t.deepEqual(

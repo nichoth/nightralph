@@ -404,9 +404,12 @@ test('review pass - prefer-subagent AC6.4 the stats tally counts ' +
             t.ok(result.allDone, 'tickets done')
             t.deepEqual(countRoles(h.recordDir),
                 { reviewer:1, fixer:1, ticket:1 }, 'one of each')
-            t.ok(logs.includes(renderRunStats({
+            const expected = renderRunStats({
                 agentRuns:3, withCost:3, subagents:3, costUsd:0.75,
-            }) ?? ''), 'the ticket, reviewer and fixer are tallied')
+            })
+            t.ok(expected !== null, 'a stats line is expected')
+            t.ok(logs.includes(expected as string),
+                'the ticket, reviewer and fixer are tallied')
         })
     } finally {
         rmSync(dataDir, { recursive:true, force:true })

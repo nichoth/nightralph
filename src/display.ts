@@ -150,12 +150,12 @@ const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g
 
 function rowText (ticket:DisplayTicket):string {
     const label = ticketLabel(ticket)
-    const blocked = ticket.status === 'blocked' &&
+    const base = ticket.status === 'blocked' &&
         ticket.blockedBy?.length ?
         `${label} (blocked by ${ticket.blockedBy.join(', ')})` :
         label
     const suffix = formatStats(ticket.stats)
-    return suffix === null ? blocked : `${blocked} - ${suffix}`
+    return suffix === null ? base : `${base} - ${suffix}`
 }
 
 /**

@@ -6053,10 +6053,12 @@ test('runWavesIsolated - the stats tally counts merge respawns',
 
             t.equal(tickets[1].status, 'done',
                 'ticket 2 is done after the respawn')
+            const expected = renderRunStats({
+                agentRuns:3, withCost:3, subagents:3, costUsd:0.75,
+            })
+            t.ok(expected !== null, 'a stats line is expected')
             t.ok(
-                logsOf(calls).includes(renderRunStats({
-                    agentRuns:3, withCost:3, subagents:3, costUsd:0.75,
-                }) ?? ''),
+                logsOf(calls).includes(expected as string),
                 'both tickets and the respawn are tallied'
             )
         } finally {
