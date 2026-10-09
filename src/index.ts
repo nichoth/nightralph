@@ -19,6 +19,8 @@ import {
     DEFAULT_CONCURRENCY,
     killRunningAgents,
     formatErrorMessage,
+    nothingReady,
+    renderNothingReady,
     type EffortLevel,
     type Ticket,
 } from './orchestrator.js'
@@ -36,6 +38,10 @@ import {
 import {
     getRepoRoot,
     getRepoName,
+    getCurrentBranch,
+    getDefaultBranch,
+    planIntegrationBranch,
+    localBranchExists,
     prepareIntegrationBranch,
     describeIntegrationBranch,
     type IntegrationPlan,
@@ -376,20 +382,26 @@ function loadTicketsOrExit (
     return loaded
 }
 
-// A resumed integration branch can predate the tickets or spec of
-// this run. Puts the launch branch back and exits 2 with the fix.
-function failStaleResume (
-    plan:IntegrationPlan,
-    problems:string[]
-):never {
+// Puts the launch branch back after a resume that stops early.
+// A failed checkout is reported by the caller's message.
+function checkoutLaunchBranch (plan:IntegrationPlan):void {
     try {
         execFileSync(
             'git', ['checkout', '--quiet', plan.launchBranch],
             { cwd:getRepoRoot(), stdio:'ignore' }
         )
     } catch {
-        // report the problem below either way
+        // the caller reports the stop either way
     }
+}
+
+// A resumed integration branch can predate the tickets or spec of
+// this run. Puts the launch branch back and exits 2 with the fix.
+function failStaleResume (
+    plan:IntegrationPlan,
+    problems:string[]
+):never {
+    checkoutLaunchBranch(plan)
     const n = plan.behind
     console.error(
         `Cannot resume ${plan.branch}: ` +
@@ -400,6 +412,32 @@ function failStaleResume (
         `Back on ${plan.launchBranch}.`
     )
     process.exit(2)
+}
+
+// A resumed integration branch where every ready-for-agent
+// ticket is blocked: nothing to do here, so go back and say why.
+function stopNothingReady (
+    plan:IntegrationPlan,
+    loaded:LoadedTickets
+):never {
+    checkoutLaunchBranch(plan)
+    console.log(
+        `Nothing to run on ${plan.branch}. ` +
+        `Back on ${plan.launchBranch}.\n` +
+        renderNothingReady(loaded.allTickets, loaded.warnings)
+    )
+    process.exit(0)
+}
+
+// True when this run will resume an existing integration
+// branch. Its ticket statuses can differ from the launch
+// branch's, so the zero-ready check waits for the re-scan.
+function willResume (features:ReadonlyArray<string>):boolean {
+    const root = getRepoRoot()
+    const name = planIntegrationBranch(
+        getCurrentBranch(root), getDefaultBranch(root), features
+    )
+    return name !== null && localBranchExists(root, name)
 }
 
 // One feature keeps its review log next to its progress file; a
@@ -434,6 +472,18 @@ async function runExecute (argv:{
 
     let loaded = loadTicketsOrExit(selections)
     if (loaded.allTickets.length === 0) return
+
+    // Stop before the dry run, provider lookup and any branch work
+    // when every ready-for-agent ticket is blocked. A resumed
+    // integration branch is checked after its re-scan instead.
+    const resuming = () => !argv.dryRun && isGitRepo() &&
+        willResume([...loaded.specBodies.keys()])
+    if (nothingReady(loaded.allTickets) && !resuming()) {
+        console.log(renderNothingReady(
+            loaded.allTickets, loaded.warnings
+        ))
+        return
+    }
 
     const providerPath = resolveExecutable(argv.provider)
     const providerIsPath = argv.provider.includes('/')
@@ -489,6 +539,9 @@ async function runExecute (argv:{
             }
             if (loaded.allTickets.length === 0) {
                 failStaleResume(plan, ['no tickets'])
+            }
+            if (nothingReady(loaded.allTickets)) {
+                stopNothingReady(plan, loaded)
             }
         }
     }

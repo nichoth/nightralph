@@ -460,10 +460,7 @@ test('CLI subprocess - unknown blocker keeps the ticket from running',
             // Positive control: the run loaded the ticket and ended
             // normally, so the assertions below are not explained by
             // an early failure (exit 2) or a timeout.
-            t.ok(
-                code === 0 || code === 1,
-                'the CLI ran to the end',
-            )
+            t.equal(code, 0, 'nothing to run is not an error')
             t.ok(
                 stdout.includes('Found 1 tickets'),
                 'the CLI scanned the ticket',
@@ -529,11 +526,11 @@ test('CLI subprocess - dry-run deadlock detection',
                 'output contains Deadlocked tickets',
             )
             t.ok(
-                stdout.includes('01-alpha.md'),
+                stdout.includes(`${FEAT}/01`),
                 'deadlock lists first ticket',
             )
             t.ok(
-                stdout.includes('02-beta.md'),
+                stdout.includes(`${FEAT}/02`),
                 'deadlock lists second ticket',
             )
         } finally {
@@ -5042,6 +5039,205 @@ function cliGitRepo ():{
     const { issuesDir } = scratchDirs(projectDir)
     return { projectDir, issuesDir, templateDir }
 }
+
+// Blocked by ticket 01 of other-feat, a feature outside the run.
+const BLOCKED_BODY = '# Test ticket\n\n**Status:** ready-for-agent\n' +
+    '**Blocked by:** other-feat 01\n'
+
+// cliGitRepo plus test-feat/01 (`ticket01Body`) and an unselected
+// feature other-feat whose ticket 01 has `otherStatus`, committed.
+function twoFeatureRepo (ticket01Body:string, otherStatus:string):{
+    projectDir:string
+    issuesDir:string
+    templateDir:string
+} {
+    const repo = cliGitRepo()
+    writeFileSync(join(repo.issuesDir, '01-first.md'), ticket01Body)
+    const otherDir = join(repo.projectDir, '.scratch', 'other-feat')
+    mkdirSync(join(otherDir, 'issues'), { recursive:true })
+    writeFileSync(join(otherDir, 'spec.md'), '# Other spec')
+    writeFileSync(
+        join(otherDir, 'issues', '01-other.md'),
+        makeTicketBody({ status:otherStatus })
+    )
+    commitAll(repo.projectDir, 'add tickets')
+    return repo
+}
+
+function integrationBranches (projectDir:string):string {
+    return gitOut(projectDir, [
+        'branch', '--list', '--format=%(refname:short)',
+        'nightralph--*',
+    ]).trim()
+}
+
+test('CLI subprocess - AC3.1 nothing ready stops before any branch ' +
+    'work', async t => {
+    const { projectDir, issuesDir, templateDir } =
+        twoFeatureRepo(BLOCKED_BODY, 'ready-for-agent')
+    try {
+        const { code, stdout } = await spawnCli([
+            MOCK_AGENT, '--spec', FEAT,
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.ok(stdout.includes('other-feat/01'), 'names the blocker')
+        t.equal(integrationBranches(projectDir), '', 'no new branch')
+        t.equal(headBranch(projectDir), 'main', 'still on main')
+        t.ok(
+            readFileSync(join(issuesDir, '01-first.md'), 'utf8')
+                .includes('**Status:** ready-for-agent'),
+            'the ticket is unchanged'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC3.2 nothing ready stops before provider ' +
+    'preflight', async t => {
+    const { projectDir, templateDir } =
+        twoFeatureRepo(BLOCKED_BODY, 'ready-for-agent')
+    try {
+        const { code } = await spawnCli([
+            'nightralph-no-such-provider', '--spec', FEAT,
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0 with an unknown provider')
+        t.equal(integrationBranches(projectDir), '', 'no new branch')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC3.3 a dry run with nothing ready explains ' +
+    'why', async t => {
+    const { projectDir, templateDir } =
+        twoFeatureRepo(BLOCKED_BODY, 'ready-for-agent')
+    try {
+        const { code, stdout } = await spawnCli([
+            MOCK_AGENT, '--spec', FEAT, '--dry-run',
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.ok(stdout.includes('other-feat/01'), 'names the blocker')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC3.4 a resumed branch with nothing ready ' +
+    'goes back to the launch branch', async t => {
+    const { projectDir, issuesDir, templateDir } = twoFeatureRepo(
+        makeTicketBody({ status:'ready-for-agent' }), 'ready-for-agent'
+    )
+    try {
+        execSync('git checkout -q -b nightralph--test-feat', {
+            cwd:projectDir,
+        })
+        writeFileSync(join(issuesDir, '01-first.md'), BLOCKED_BODY)
+        commitAll(projectDir, 'block ticket 01')
+        execSync('git checkout -q main', { cwd:projectDir })
+
+        const { code, stdout } = await spawnCli([
+            MOCK_AGENT, '--spec', FEAT,
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.equal(headBranch(projectDir), 'main', 'back on main')
+        t.equal(
+            integrationBranches(projectDir), 'nightralph--test-feat',
+            'the integration branch is kept'
+        )
+        t.ok(stdout.includes('other-feat/01'), 'names the blocker')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - a resumed run leaves the zero-ready check to ' +
+    'the re-scan', async t => {
+    const { projectDir, templateDir } =
+        twoFeatureRepo(BLOCKED_BODY, 'ready-for-agent')
+    try {
+        execSync('git branch nightralph--test-feat', { cwd:projectDir })
+
+        const { code, stdout } = await spawnCli([
+            MOCK_AGENT, '--spec', FEAT,
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.equal(headBranch(projectDir), 'main', 'back on main')
+        t.ok(stdout.includes('Resumed'), 'the branch was resumed first')
+        t.ok(stdout.includes('other-feat/01'), 'names the blocker')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC3.5 a resumed branch with no open tickets ' +
+    'carries on', async t => {
+    const { projectDir, issuesDir, templateDir } = twoFeatureRepo(
+        makeTicketBody({ status:'ready-for-agent' }), 'ready-for-agent'
+    )
+    try {
+        execSync('git checkout -q -b nightralph--test-feat', {
+            cwd:projectDir,
+        })
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'done' })
+        )
+        commitAll(projectDir, 'finish ticket 01')
+        execSync('git checkout -q main', { cwd:projectDir })
+
+        const { code } = await spawnCli([
+            MOCK_AGENT, '--spec', FEAT,
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.equal(
+            headBranch(projectDir), 'nightralph--test-feat',
+            'the run stayed on the integration branch'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - AC3.6 a ready ticket runs as before', async t => {
+    const { projectDir, templateDir } =
+        twoFeatureRepo(BLOCKED_BODY, 'done')
+    try {
+        const { code } = await spawnCli([
+            MOCK_AGENT, '--spec', FEAT,
+            '--retry-delay', '0', '--test-cmd', 'true', '--no-review',
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.equal(
+            integrationBranches(projectDir), 'nightralph--test-feat',
+            'the integration branch was created'
+        )
+        t.ok(
+            gitOut(projectDir, [
+                'show',
+                'nightralph--test-feat:.scratch/test-feat/issues/' +
+                    '01-first.md',
+            ]).includes('**Status:** done'),
+            'the ticket is done on the integration branch'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
 
 test('CLI subprocess - AC1.4 a provider not on PATH fails before ' +
     'git state changes', async t => {
