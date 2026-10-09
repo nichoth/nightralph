@@ -148,22 +148,21 @@ Rules (from the design, plus review hardening):
 - A number token's feature is the token directly before it, but
   only when the gap between the two tokens is whitespace only
   (newlines count) and that token is in `knownFeatures`. The
-  feature applies to the token's first number only. Otherwise the
-  number refers to the ticket's own feature (`feature` absent). If
-  that directly preceding token contains a `-` and a letter but is
-  not a known feature, it is reported once in `typos`.
+  feature applies to every number in the token, so both ends of a
+  range. Otherwise the number refers to the ticket's own feature
+  (`feature` absent). If that directly preceding token is shaped
+  like a feature name (lowercase letters and digits joined by
+  hyphens, with at least one letter) but is not a known feature, it
+  is reported once in `typos`.
 - Refs are de-duplicated by `(feature ?? '', num)`, first
   occurrence wins, order preserved.
 
-Amended 2026-10-09 during review: the block below is the shipped
-`src/blockers.ts`. It replaces the planned `isHyphenatedWord` with
-`looksLikeFeature` (lowercase letters and digits joined by hyphens,
-with a letter, so `FDR-018` is not a typo) and passes `feature` to
-every number of a range.
-
-Code (write it as-is, adjusting only if lint complains). This exact
-code was run against every fixture in Task 3 during planning and
-produced the expected results:
+Amended 2026-10-09 during review: the range and typo rules above,
+and the block below, describe the shipped `src/blockers.ts`. The
+original plan applied a feature to a range's first number only and
+reported any hyphenated word with a letter (`isHyphenatedWord`);
+review replaced that with `looksLikeFeature`, so `FDR-018` is not a
+typo. The shipped code passes every fixture in Task 3:
 
 ```ts
 // Blocker references in a ticket's **Blocked by:** field. Pure:
