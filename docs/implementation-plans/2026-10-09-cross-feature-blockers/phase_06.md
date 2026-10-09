@@ -73,9 +73,10 @@ written directly before each number it applies to (so
 `newsletter-audit 15, 16`); text in paired `(...)` and paired backticks is
 ignored; the list may wrap onto following lines and ends at a blank
 line, the next `**Field:**` line, a heading or a checklist item;
-`03-05` is read as 3 and 5; `None` means no blockers. A
-hyphenated word before a number that names no feature dir is
-reported as a likely typo.
+`03-05` is read as 3 and 5, and a feature written before a range
+applies to both; `None` means no blockers. A lowercase hyphenated
+word (shaped like a feature dir name, so not `FDR-018`) before a
+number that names no feature dir is reported as a likely typo.
 
 `AGENTS.md` (repo root): sections `## Project Structure`,
 `## Contracts` with one `###` per module (setup, CLI, orchestrator,
@@ -109,7 +110,8 @@ There is no resolve module contract yet.
   suggest titles.
 - In both docs (L62 of the skill and the `issue-tracker.md`
   paragraph) add: "List every number; a range like `03-05` is not
-  expanded. Repeat the feature name before each number in another
+  expanded; a feature name before a range applies to both ends.
+  Repeat the feature name before each number in another
   feature." and "The list ends at a blank line, the next
   `**Field:**` line, a heading or a checklist item."
 - `issue-tracker.md` L14-16: same rules in one short paragraph,
@@ -141,8 +143,10 @@ not expanded.
    `provisionalRefs(raw, ownFeature)`. State the parse rules (field
    extent including the heading and checklist stops, paired
    `(...)` and backtick stripping with unpaired delimiters left as
-   text, `None`, whole-word numbers and `03-05` as 3 and 5, the
-   word-directly-before rule, typo rule, de-duplication) and the four `where` values. Guarantees: pure,
+   text, `None`, whole-word numbers and `03-05` as 3 and 5 with a
+   feature applying to both ends, the word-directly-before rule,
+   typo rule limited to lowercase feature-shaped words,
+   de-duplication) and the four `where` values. Guarantees: pure,
    imports nothing, never throws.
 4. New `### resolve module (\`src/resolve.ts\`)` contract:
    `loadSelection(scratchDir, names)` (known features from

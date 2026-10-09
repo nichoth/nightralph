@@ -168,8 +168,34 @@ test('ranges expand to their endpoints', t => {
     const featureRange = parse('newsletter-audit 03-05')
     t.deepEqual(featureRange.refs, [
         { feature:'newsletter-audit', num:3 },
-        { num:5 },
-    ], 'feature range')
+        { feature:'newsletter-audit', num:5 },
+    ], 'a feature applies to both ends of a range')
+
+    const list = parse('newsletter-audit 16, 17')
+    t.deepEqual(list.refs, [
+        { feature:'newsletter-audit', num:16 },
+        { num:17 },
+    ], 'a feature applies only to the number right after it')
+})
+
+test('nested and code-guarded parentheses', t => {
+    const nested = parse('03 (a (b) 04) 05')
+    t.deepEqual(nested.refs.map(r => r.num), [3, 5], 'nested parens')
+
+    const code = parse('03 (x `)` 04) 05')
+    t.deepEqual(
+        code.refs.map(r => r.num), [3, 5], 'a ) in code does not close'
+    )
+})
+
+test('the field name is matched in any case', t => {
+    const p = parseBlockerField('**blocked BY:** 07', KNOWN)
+    t.deepEqual(p.refs, [{ num:7 }], 'lowercase field name')
+})
+
+test('only feature-shaped words are typos', t => {
+    const doc = parse('FDR-018 03')
+    t.deepEqual(doc, { refs:[{ num:3 }], typos:[] }, 'doc id is prose')
 })
 
 test('unpaired delimiters do not hide text', t => {

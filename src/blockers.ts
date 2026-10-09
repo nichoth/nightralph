@@ -9,7 +9,7 @@ export type RawRef = {
 
 export type BlockerParse = {
     refs:RawRef[];
-    typos:string[];   // hyphenated words that name no feature
+    typos:string[];   // feature-shaped words that name no feature
 }
 
 const FIELD_RE = /\*\*Blocked by:\*\*/i
@@ -76,8 +76,13 @@ function stripNotes (text:string):string {
     return chars.map((ch, i) => (drop[i] ? ' ' : ch)).join('')
 }
 
-function isHyphenatedWord (word:string):boolean {
-    return word.includes('-') && /[A-Za-z]/.test(word)
+/**
+ * A word shaped like a feature dir name: lowercase letters and
+ * digits joined by hyphens, with at least one letter. Doc IDs such
+ * as `FDR-018` are not.
+ */
+function looksLikeFeature (word:string):boolean {
+    return /^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(word) && /[a-z]/.test(word)
 }
 
 /**
@@ -85,8 +90,8 @@ function isHyphenatedWord (word:string):boolean {
  * belongs to the feature named by the word directly before it
  * when that word is in `knownFeatures` (the names of
  * `.scratch/<name>/issues` dirs); otherwise to the ticket's own
- * feature. Hyphenated words that name no feature are returned as
- * `typos`.
+ * feature. Feature-shaped words that name no feature are returned
+ * as `typos`.
  */
 export function parseBlockerField (
     body:string,
@@ -120,14 +125,13 @@ export function parseBlockerField (
                 feature = before
             } else if (
                 before !== null &&
-                isHyphenatedWord(before) &&
+                looksLikeFeature(before) &&
                 !typos.includes(before)
             ) {
                 typos.push(before)
             }
-            const [first, ...rest] = word.split('-').map(Number)
-            add(first, feature)
-            for (const n of rest) add(n)
+            // both ends of a range belong to the same feature
+            for (const n of word.split('-').map(Number)) add(n, feature)
         }
         prev = { word, end:start + word.length }
     }
