@@ -93,6 +93,8 @@ type Harness = {
 const ENV_KEYS = [
     'MOCK_RECORD_DIR', 'MOCK_REVIEW', 'MOCK_FIX', 'MOCK_TICKET',
     'FAKE_CLAUDE_DELEGATE', 'FAKE_CLAUDE_ENV_LOG', 'FAKE_CLAUDE_STREAM',
+    'FAKE_CLAUDE_PROMPT_DIR', 'FAKE_CLAUDE_HANG',
+    'CLAUDE_CODE_SUBAGENT_MODEL',
 ] as const
 
 async function withHarness (
@@ -124,6 +126,9 @@ async function withHarness (
         git(projectDir, ['commit', '-m', 'init'])
         git(projectDir, ['branch', '-M', 'main'])
 
+        // Start from a clean slate so values exported in the shell
+        // cannot leak into the mocks
+        for (const k of ENV_KEYS) Reflect.deleteProperty(process.env, k)
         process.env.MOCK_RECORD_DIR = recordDir
         for (const [k, v] of Object.entries(env)) process.env[k] = v
         process.chdir(projectDir)
