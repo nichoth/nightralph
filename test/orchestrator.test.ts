@@ -3448,7 +3448,7 @@ test('formatStreamLine - ignores wrong-typed JSON values', t => {
 })
 
 test('formatStreamLine - does not throw on crafted text fields', t => {
-    const lines = [
+    const assistantLines = [
         JSON.stringify({
             type:'assistant',
             message:{ content:[{ type:'text', text:{ toString:1 } }] },
@@ -3457,17 +3457,21 @@ test('formatStreamLine - does not throw on crafted text fields', t => {
             type:'assistant',
             message:{ content:[{ type:'text', text:['a'] }] },
         }),
-        JSON.stringify({
-            type:'system',
-            subtype:'api_retry',
-            error:{ toString:1 },
-        }),
     ]
-    for (const line of lines) {
-        const out = formatStreamLine(line)
-        t.ok(out === null || typeof out === 'string',
-            'should return text or null without throwing')
+    for (const line of assistantLines) {
+        t.equal(formatStreamLine(line), null,
+            'should skip a text block whose text is not a string')
     }
+
+    const retry = JSON.stringify({
+        type:'system',
+        subtype:'api_retry',
+        error:{ toString:1 },
+    })
+    const out = formatStreamLine(retry)
+    t.equal(typeof out, 'string', 'should still report the retry')
+    t.ok(!String(out).includes('[object'),
+        'should not print a coerced object')
 })
 
 test('formatStreamLine - skips subagent assistant text', t => {
