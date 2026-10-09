@@ -55,6 +55,7 @@ import { runTestCmd } from './testcmd.js'
 import {
     readDocsRule,
     installRule,
+    subagentRule,
     testGateRule,
     LINT_RULE,
     integrityRule,
@@ -530,6 +531,7 @@ export function renderPrompt (
         testCmd:string
         installCmd?:string
         history?:string
+        preferSubagent?:string
     }
 ):string {
     return [
@@ -553,6 +555,7 @@ export function renderPrompt (
             'via web search. Use the spec and ticket ' +
             'body as your sole reference for API shapes.',
         ...installRule(opts.installCmd),
+        ...subagentRule(opts.preferSubagent),
         '- Use /tdd for every checklist item. For ' +
             'each item, write a failing test at the ' +
             'seams named in the spec\'s Testing ' +
@@ -580,7 +583,7 @@ export function renderPrompt (
 export function renderMergePrompt (
     specBody:string,
     ticket:Ticket,
-    opts:{ installCmd?:string } = {}
+    opts:{ installCmd?:string; preferSubagent?:string } = {}
 ):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -611,6 +614,7 @@ export function renderMergePrompt (
         '',
         'Do NOT re-implement the ticket from scratch.',
         ...installRule(opts.installCmd),
+        ...subagentRule(opts.preferSubagent),
         'Do NOT read or modify files outside your ' +
             'current directory (the worktree).',
         'Do NOT run git push.',
