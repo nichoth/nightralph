@@ -65,6 +65,11 @@ import {
 } from './rules.js'
 import { runReviewPass, renderReviewSummary } from './review.js'
 import {
+    emptyStreamStats,
+    nextStreamStats,
+    type SubagentStats,
+} from './stats.js'
+import {
     EFFORT_LADDERS,
     escalateEffort,
     retryDelayFor,
@@ -730,20 +735,36 @@ export function getProviderArgs (cmd:string):string[] {
 export function formatStreamLine (
     line:string
 ):string|null {
-    let obj:Record<string, unknown>
+    let value:unknown
     try {
-        obj = JSON.parse(line) as Record<string, unknown>
+        value = JSON.parse(line)
     } catch {
         return line
     }
+    return formatStreamObject(value)
+}
+
+// Renders one parsed claude stream-json message. Values that are
+// not objects (a bare `null` or number line) and fields of the
+// wrong type are ignored rather than thrown on, since one bad line
+// must not crash the run.
+function formatStreamObject (value:unknown):string|null {
+    if (!isRecord(value)) return null
+    const obj = value
 
     if (obj.type === 'assistant') {
-        const msg = obj.message as
-            Record<string, unknown>|undefined
-        const content = msg?.content as
-            Array<Record<string, unknown>>|undefined
+        // Subagent output is not the main agent's checklist
+        // progress, so it stays out of the ticket log.
+        if (obj.parent_tool_use_id != null) return null
+        const msg = isRecord(obj.message) ?
+            obj.message :
+            undefined
+        const content = Array.isArray(msg?.content) ?
+            msg.content :
+            undefined
         if (!content) return null
         for (const block of content) {
+            if (!isRecord(block)) continue
             if (block.type === 'text') {
                 return String(block.text)
             }
@@ -752,9 +773,13 @@ export function formatStreamLine (
     }
 
     if (obj.type === 'result') {
-        const sub = obj.subtype as string|undefined ?? 'done'
-        const cost = obj.total_cost_usd as number|undefined
-        const costStr = cost != null ?
+        const sub = typeof obj.subtype === 'string' ?
+            obj.subtype :
+            'done'
+        const cost = typeof obj.total_cost_usd === 'number' ?
+            obj.total_cost_usd :
+            undefined
+        const costStr = cost !== undefined ?
             ` ($${cost.toFixed(2)})` :
             ''
         return `${sub}${costStr}`
@@ -769,6 +794,10 @@ export function formatStreamLine (
     }
 
     return null
+}
+
+function isRecord (value:unknown):value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null
 }
 
 export type PiStreamFormatter = {
@@ -889,6 +918,10 @@ export type AgentResult = {
     // true when the orchestrator killed the agent at
     // the timeout; exitCode is non-zero in that case
     timedOut:boolean
+    // claude only: how many subagents the agent spawned, and the
+    // run cost reported by its result message when there is one
+    subagents?:number
+    costUsd?:number
 }
 
 // How long to wait after the process exits before giving up on a
@@ -945,6 +978,10 @@ export function spawnAgent (opts:{
     maxTurns?:number
     effort?:EffortLevel
     onLine?:(line:string) => void
+    // claude only: sets CLAUDE_CODE_SUBAGENT_MODEL for the agent
+    preferSubagent?:string
+    // claude only: called each time the subagent stats change
+    onStats?:(stats:SubagentStats) => void
 }):Promise<AgentResult> {
     const args:string[] = [
         ...getProviderArgs(opts.agentCmd),
@@ -1011,10 +1048,20 @@ export function spawnAgent (opts:{
         opts.logPath,
         { flags:'w' }
     )
+    // The subagent model is a default: CLAUDE_CODE_SUBAGENT_MODEL_FORCE
+    // is never set, so a model the user exported still wins when the
+    // option is absent.
+    const env = isClaude && opts.preferSubagent ?
+        {
+            ...process.env,
+            CLAUDE_CODE_SUBAGENT_MODEL:opts.preferSubagent,
+        } :
+        undefined
     const proc = spawn(opts.agentCmd, args, {
         stdio:['pipe', 'pipe', 'pipe'],
         cwd:opts.cwd,
         detached:true,
+        ...(env ? { env } : {}),
     })
 
     if (proc.pid !== undefined) runningAgents.add(proc.pid)
@@ -1047,10 +1094,30 @@ export function spawnAgent (opts:{
         }
     }
 
+    let streamStats = emptyStreamStats()
+
+    // Formats one claude stream-json line and tracks subagent stats.
+    // The stats are read from the raw object, so subagent text is
+    // formatted away but still counted.
+    function formatClaudeLine (line:string):string|null {
+        let obj:unknown
+        try {
+            obj = JSON.parse(line)
+        } catch {
+            return line
+        }
+        const next = nextStreamStats(streamStats, obj)
+        if (next !== streamStats) {
+            streamStats = next
+            opts.onStats?.(next.stats)
+        }
+        return formatStreamObject(obj)
+    }
+
     const rl = createInterface({ input:proc.stdout })
     rl.on('line', line => {
         if (isClaude) {
-            const formatted = formatStreamLine(line)
+            const formatted = formatClaudeLine(line)
             if (formatted !== null) {
                 collectCompleted(formatted)
                 const output = `${prefix}${formatted}`
@@ -1156,7 +1223,12 @@ export function spawnAgent (opts:{
             rlErr.close()
             logStream.end()
             if (promptFile) cleanupPromptFile(promptFile)
-            resolve({ exitCode, completedItems, timedOut })
+            resolve({
+                exitCode,
+                completedItems,
+                timedOut,
+                ...(isClaude ? streamStats.stats : {}),
+            })
         }
 
         // The process itself has exited, but 'close' waits for its
