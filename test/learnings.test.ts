@@ -1387,3 +1387,108 @@ test('collectNotes - reads a named file and removes the dir', t => {
         rmSync(dir, { recursive:true, force:true })
     }
 })
+
+// -- Subagent stats in agent summaries --
+
+type StatsRun = { subagents?:number; costUsd?:number }
+
+function statsEntry (
+    outcome:'done'|'exit'|'no-commits'|'tests',
+    stats:StatsRun
+):EntryInput {
+    const base = {
+        key:'f:1',
+        label:'f/01',
+        attempt:1,
+        now:new Date('2026-10-09T10:00:00'),
+        run:{
+            exitCode:0,
+            completedItems:[],
+            timedOut:false,
+            notes:null,
+            ...stats,
+        },
+    }
+    return outcome === 'tests' ?
+        { ...base, outcome, logName:'f-01.test.log', logTail:'fail' } :
+        { ...base, outcome }
+}
+
+const AGENT_OUTCOMES = ['done', 'exit', 'no-commits', 'tests'] as const
+
+test('AC4.1: agent entries show subagent count and cost', t => {
+    for (const outcome of AGENT_OUTCOMES) {
+        const text = renderEntry(
+            statsEntry(outcome, { subagents:3, costUsd:0.42 })
+        )
+        t.ok(text.includes('Subagents: 3.'),
+            `${outcome}: includes the subagent count`)
+        t.ok(text.includes('Cost: $0.42.'),
+            `${outcome}: includes the cost`)
+    }
+})
+
+test('AC4.2: each stats line is omitted when absent', t => {
+    for (const outcome of AGENT_OUTCOMES) {
+        const zero = renderEntry(statsEntry(outcome, { subagents:0 }))
+        t.ok(zero.includes('Subagents: 0.'),
+            `${outcome}: a zero count is still shown`)
+        t.ok(!zero.includes('Cost:'),
+            `${outcome}: no cost line without a cost`)
+
+        const none = renderEntry(statsEntry(outcome, {}))
+        t.ok(!none.includes('Subagents:'),
+            `${outcome}: no subagents line without a count`)
+        t.ok(!none.includes('Cost:'),
+            `${outcome}: no cost line without a cost`)
+    }
+})
+
+test('AC4.3: install, error and merge entries carry no stats', t => {
+    const base = {
+        key:'f:1',
+        label:'f/01',
+        attempt:1,
+        now:new Date('2026-10-09T10:00:00'),
+    }
+    const entries:EntryInput[] = [
+        { ...base, outcome:'install', logName:'i.log', logTail:'x' },
+        { ...base, outcome:'error', error:'boom' },
+        { ...base, attempt:0, outcome:'merge', stderr:'CONFLICT' },
+    ]
+    for (const entry of entries) {
+        const text = renderEntry(entry)
+        t.ok(!text.includes('Subagents:'),
+            `${entry.outcome}: no subagents line`)
+        t.ok(!text.includes('Cost:'), `${entry.outcome}: no cost line`)
+    }
+})
+
+test('AC4.4: entries with stats round-trip through parseEntries', t => {
+    const parsed = parseEntries(renderEntry(
+        statsEntry('done', { subagents:2, costUsd:1.5 })
+    ))
+    t.equal(parsed.length, 1, 'parses one entry')
+    t.equal(parsed[0].key, 'f:1', 'key matches')
+    t.equal(parsed[0].attempt, 1, 'attempt matches')
+    t.equal(parsed[0].outcome, 'done', 'outcome matches')
+})
+
+test('AC4.4: entries written before stats still parse', t => {
+    const old = [
+        '<!-- nightralph:entry ticket=f:1 attempt=1 outcome=done -->',
+        '## 2026-10-01 09:00 -- f/01 attempt 1 -- done',
+        '',
+        'Agent exit: 0. Checked items: none.',
+        '',
+        'The agent left no notes.',
+        '',
+        '---',
+        '',
+    ].join('\n')
+    const parsed = parseEntries(old)
+    t.equal(parsed.length, 1, 'parses one entry')
+    t.equal(parsed[0].key, 'f:1', 'key matches')
+    t.equal(parsed[0].attempt, 1, 'attempt matches')
+    t.equal(parsed[0].outcome, 'done', 'outcome matches')
+})

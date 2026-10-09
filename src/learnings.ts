@@ -53,6 +53,9 @@ export type AgentRunRecord = {
     completedItems:string[]
     timedOut:boolean
     notes:string|null
+    // claude only; absent = not reported
+    subagents?:number
+    costUsd?:number
 }
 
 type AgentFields = { run:AgentRunRecord; effort?:string }
@@ -107,6 +110,14 @@ function renderAgentSummary (
 
     const exitLine = `Agent exit: ${run.exitCode}.`
 
+    const subagentsLine = run.subagents === undefined ?
+        '' :
+        `Subagents: ${run.subagents}.`
+
+    const costLine = run.costUsd === undefined ?
+        '' :
+        `Cost: $${run.costUsd.toFixed(2)}.`
+
     const itemsText = run.completedItems.length > 0 ?
         run.completedItems.map(item =>
             `"${sanitize(item)}"`
@@ -118,6 +129,8 @@ function renderAgentSummary (
     return [
         effortLine,
         exitLine,
+        subagentsLine,
+        costLine,
         itemsLine,
     ].filter(Boolean).join(' ')
 }

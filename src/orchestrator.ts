@@ -1887,6 +1887,12 @@ async function runTicketAttempt (
         completedItems:agentResult.completedItems,
         timedOut:agentResult.timedOut,
         notes,
+        ...(agentResult.subagents === undefined ?
+            {} :
+            { subagents:agentResult.subagents }),
+        ...(agentResult.costUsd === undefined ?
+            {} :
+            { costUsd:agentResult.costUsd }),
     }
 
     // A timeout kill is not the agent reporting failure.
