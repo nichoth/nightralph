@@ -12,6 +12,7 @@ PATH="$PWD/node_modules/.bin:$PATH"
 
 TESTS=(
     setup
+    blockers
     orchestrator
     retry
     worktree

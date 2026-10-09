@@ -17,7 +17,7 @@
     "lint": "eslint \"./**/*.{ts,js}\"",
     "start": "npm run build && node dist/index.js",
     "build": "mkdir -p ./dist && rm -rf ./dist/* && npm run build-esm && npm run copy",
-    "build-esm": "esbuild src/index.ts --bundle --format=esm --platform=node --packages=external --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outfile=./dist/index.js --sourcemap && esbuild src/orchestrator.ts src/setup.ts src/resolve.ts src/worktree.ts src/progress.ts src/merge.ts src/display.ts src/testcmd.ts src/preflight.ts src/learnings.ts src/retry.ts src/rules.ts src/review.ts --format=esm --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json",
+    "build-esm": "esbuild src/index.ts --bundle --format=esm --platform=node --packages=external --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outfile=./dist/index.js --sourcemap && esbuild src/orchestrator.ts src/setup.ts src/resolve.ts src/worktree.ts src/progress.ts src/merge.ts src/display.ts src/testcmd.ts src/preflight.ts src/learnings.ts src/retry.ts src/rules.ts src/review.ts src/blockers.ts --format=esm --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json",
     "copy": "mkdir -p ./dist/skills ./dist/docs-templates && cp -r ./src/skills/* ./dist/skills && cp -r ./src/docs-templates/* ./dist/docs-templates",
     "clone-skills": "bash scripts/clone-skills.sh",
     "toc": "markdown-toc --maxdepth 4 -i README.md",
