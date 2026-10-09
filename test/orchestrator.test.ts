@@ -43,6 +43,7 @@ import {
     type EffortLevel,
 } from '../src/orchestrator.js'
 import { NOTES_PATH } from '../src/learnings.js'
+import { subagentRule } from '../src/rules.js'
 
 // -- helpers --
 
@@ -1569,6 +1570,83 @@ test('renderPrompt includes spec and ticket', t => {
         prompt.includes('AGENT INSTRUCTIONS'),
         'contains instructions'
     )
+})
+
+// -- subagentRule --
+
+test('subagentRule is empty without a model', t => {
+    t.deepEqual(subagentRule(), [], 'undefined gives no lines')
+    t.deepEqual(subagentRule(''), [], 'empty string gives no lines')
+    t.deepEqual(subagentRule('', true), [],
+        'empty string gives no lines when read-only')
+})
+
+test('subagentRule returns rule lines for a model', t => {
+    const full = subagentRule('haiku')
+    t.ok(full.length > 0, 'has lines')
+    t.ok(full.every(line => line.startsWith('- ')),
+        'every line is a rule bullet')
+})
+
+test('subagentRule read-only drops exactly one line', t => {
+    const full = subagentRule('haiku')
+    const readOnly = subagentRule('haiku', true)
+    t.equal(readOnly.length, full.length - 1, 'one line fewer')
+    t.ok(readOnly.every(line => full.includes(line)),
+        'every read-only line is in the full rule')
+})
+
+test('renderPrompt is unchanged without preferSubagent', t => {
+    const ticket = makeTicket({ num:1, filename:'01-thing.md' })
+    const base = renderPrompt('spec', ticket, { testCmd:'npm test' })
+    t.equal(
+        renderPrompt('spec', ticket,
+            { testCmd:'npm test', preferSubagent:'' }),
+        base,
+        'empty string renders the same prompt'
+    )
+    t.equal(
+        renderPrompt('spec', ticket,
+            { testCmd:'npm test', preferSubagent:undefined }),
+        base,
+        'undefined renders the same prompt'
+    )
+    t.ok(subagentRule('haiku').every(line => !base.includes(line)),
+        'no subagent rule lines')
+})
+
+test('renderPrompt includes the subagent rule when set', t => {
+    const ticket = makeTicket({ num:1, filename:'01-thing.md' })
+    const prompt = renderPrompt('spec', ticket,
+        { testCmd:'npm test', preferSubagent:'haiku' })
+    t.ok(subagentRule('haiku').every(line => prompt.includes(line)),
+        'every subagent rule line')
+})
+
+test('renderMergePrompt is unchanged without preferSubagent', t => {
+    const ticket = makeTicket({ num:1, filename:'01-thing.md' })
+    const base = renderMergePrompt('spec', ticket)
+    t.equal(
+        renderMergePrompt('spec', ticket, { preferSubagent:'' }),
+        base,
+        'empty string renders the same prompt'
+    )
+    t.equal(
+        renderMergePrompt('spec', ticket,
+            { preferSubagent:undefined }),
+        base,
+        'undefined renders the same prompt'
+    )
+    t.ok(subagentRule('haiku').every(line => !base.includes(line)),
+        'no subagent rule lines')
+})
+
+test('renderMergePrompt includes the subagent rule when set', t => {
+    const ticket = makeTicket({ num:1, filename:'01-thing.md' })
+    const prompt = renderMergePrompt('spec', ticket,
+        { preferSubagent:'haiku' })
+    t.ok(subagentRule('haiku').every(line => prompt.includes(line)),
+        'every subagent rule line')
 })
 
 test('lookupSpec returns per-feature spec when available', t => {
