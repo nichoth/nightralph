@@ -8,7 +8,6 @@ import { hideBin } from 'yargs/helpers'
 import { select } from '@inquirer/prompts'
 import { setup, checkGhAuth, type TrackerKind } from './setup.js'
 import {
-    scanTickets,
     dryRun,
     dryRunIsolated,
     runWaves,
@@ -20,6 +19,8 @@ import {
     DEFAULT_CONCURRENCY,
     killRunningAgents,
     formatErrorMessage,
+    nothingReady,
+    renderNothingReady,
     type EffortLevel,
     type Ticket,
 } from './orchestrator.js'
@@ -30,11 +31,17 @@ import {
     findFeatureDirs,
     resolveIssuesDir,
     getScriptDir,
+    loadSelection,
     type FeatureSelection,
+    type BlockerWarning,
 } from './resolve.js'
 import {
     getRepoRoot,
     getRepoName,
+    getCurrentBranch,
+    getDefaultBranch,
+    planIntegrationBranch,
+    localBranchExists,
     prepareIntegrationBranch,
     describeIntegrationBranch,
     type IntegrationPlan,
@@ -270,13 +277,16 @@ type LoadedTickets = {
     firstLogsDir:string
     // paths a selection needs that are not in the working tree
     missing:string[]
+    // blockers that match no ticket, and likely feature-name typos
+    warnings:BlockerWarning[]
 }
 
 // Scans every selected feature's tickets from the working tree.
-// `log` is a no-op for the silent re-scan after resuming an
-// integration branch. A selection whose issues dir or spec is
-// absent is skipped and reported in `missing`; the caller decides
-// whether that is fatal.
+// Blockers are resolved by `loadSelection`, across features, and
+// the problems it finds come back as `warnings`. `log` is a no-op
+// for the silent re-scan after resuming an integration branch. A
+// selection whose issues dir or spec is absent is skipped and
+// reported in `missing`; the caller decides whether that is fatal.
 function loadTickets (
     selections:FeatureSelection[],
     log:(msg:string) => void
@@ -289,6 +299,8 @@ function loadTickets (
     let firstLogsDir = ''
     const missing:string[] = []
 
+    const valid:FeatureSelection[] = []
+    const specs = new Map<string, string>()
     for (const selection of selections) {
         const { dir, spec, name } = selection
 
@@ -301,11 +313,25 @@ function loadTickets (
             continue
         }
 
-        const specBody = stripSpecSection(
+        specs.set(name, stripSpecSection(
             readFileSync(spec, 'utf8'),
             'User Stories'
-        )
-        const tickets = scanTickets(dir, name)
+        ))
+        valid.push(selection)
+    }
+
+    // process.cwd() is the base resolveIssuesDir uses; a nested
+    // --spec name (a/b) only round-trips through the true scratch
+    // dir, not dirname(dirname(dir)).
+    const loaded = valid.length > 0 ?
+        loadSelection(
+            join(process.cwd(), '.scratch'),
+            valid.map(s => s.name)
+        ) :
+        { tickets:[], warnings:[] }
+
+    for (const { dir, spec, name } of valid) {
+        const tickets = loaded.tickets.filter(t => t.feature === name)
 
         if (tickets.length === 0) {
             log(
@@ -319,26 +345,7 @@ function loadTickets (
             `[${name}] Found ${tickets.length} tickets`
         )
 
-        const knownNums = new Set(
-            tickets.map(t => t.num)
-        )
-        for (const t of tickets) {
-            const unknown = t.blockers.filter(
-                b => !knownNums.has(b)
-            )
-            if (unknown.length > 0) {
-                log(
-                    `${t.filename}: blockers ` +
-                    `[${unknown.join(', ')}] ` +
-                    'not found in directory'
-                )
-            }
-            t.blockers = t.blockers.filter(
-                b => knownNums.has(b)
-            )
-        }
-
-        specBodies.set(name, specBody)
+        specBodies.set(name, specs.get(name)!)
         progressPaths.set(
             name, join(dirname(dir), 'progress.md')
         )
@@ -359,6 +366,7 @@ function loadTickets (
         firstFeatureName,
         firstLogsDir,
         missing,
+        warnings:loaded.warnings,
     }
 }
 
@@ -374,20 +382,26 @@ function loadTicketsOrExit (
     return loaded
 }
 
-// A resumed integration branch can predate the tickets or spec of
-// this run. Puts the launch branch back and exits 2 with the fix.
-function failStaleResume (
-    plan:IntegrationPlan,
-    problems:string[]
-):never {
+// Puts the launch branch back after a resume that stops early.
+// A failed checkout is reported by the caller's message.
+function checkoutLaunchBranch (plan:IntegrationPlan):void {
     try {
         execFileSync(
             'git', ['checkout', '--quiet', plan.launchBranch],
             { cwd:getRepoRoot(), stdio:'ignore' }
         )
     } catch {
-        // report the problem below either way
+        // the caller reports the stop either way
     }
+}
+
+// A resumed integration branch can predate the tickets or spec of
+// this run. Puts the launch branch back and exits 2 with the fix.
+function failStaleResume (
+    plan:IntegrationPlan,
+    problems:string[]
+):never {
+    checkoutLaunchBranch(plan)
     const n = plan.behind
     console.error(
         `Cannot resume ${plan.branch}: ` +
@@ -398,6 +412,32 @@ function failStaleResume (
         `Back on ${plan.launchBranch}.`
     )
     process.exit(2)
+}
+
+// A resumed integration branch where every ready-for-agent
+// ticket is blocked: nothing to do here, so go back and say why.
+function stopNothingReady (
+    plan:IntegrationPlan,
+    loaded:LoadedTickets
+):never {
+    checkoutLaunchBranch(plan)
+    console.log(
+        `Nothing to run on ${plan.branch}. ` +
+        `Back on ${plan.launchBranch}.\n` +
+        renderNothingReady(loaded.allTickets, loaded.warnings)
+    )
+    process.exit(0)
+}
+
+// True when this run will resume an existing integration
+// branch. Its ticket statuses can differ from the launch
+// branch's, so the zero-ready check waits for the re-scan.
+function willResume (features:ReadonlyArray<string>):boolean {
+    const root = getRepoRoot()
+    const name = planIntegrationBranch(
+        getCurrentBranch(root), getDefaultBranch(root), features
+    )
+    return name !== null && localBranchExists(root, name)
 }
 
 // One feature keeps its review log next to its progress file; a
@@ -432,6 +472,18 @@ async function runExecute (argv:{
 
     let loaded = loadTicketsOrExit(selections)
     if (loaded.allTickets.length === 0) return
+
+    // Stop before the dry run, provider lookup and any branch work
+    // when every ready-for-agent ticket is blocked. A resumed
+    // integration branch is checked after its re-scan instead.
+    const resuming = () => !argv.dryRun && isGitRepo() &&
+        willResume([...loaded.specBodies.keys()])
+    if (nothingReady(loaded.allTickets) && !resuming()) {
+        console.log(renderNothingReady(
+            loaded.allTickets, loaded.warnings
+        ))
+        return
+    }
 
     const providerPath = resolveExecutable(argv.provider)
     const providerIsPath = argv.provider.includes('/')
@@ -487,6 +539,9 @@ async function runExecute (argv:{
             }
             if (loaded.allTickets.length === 0) {
                 failStaleResume(plan, ['no tickets'])
+            }
+            if (nothingReady(loaded.allTickets)) {
+                stopNothingReady(plan, loaded)
             }
         }
     }
@@ -585,6 +640,7 @@ async function runExecute (argv:{
             retryDelay:argv.retryDelay,
             concurrency:argv.concurrency,
             progressPaths,
+            warnings:loaded.warnings,
             review:argv.review === false ?
                 undefined :
                 {
@@ -605,6 +661,7 @@ async function runExecute (argv:{
             argv.retries,
             argv.retryDelay,
             argv.concurrency,
+            loaded.warnings,
         )
     }
 

@@ -11,7 +11,6 @@ import { randomUUID } from 'node:crypto'
 import {
     parseTicketFilename,
     parseStatus,
-    parseBlockers,
     scanTickets,
     findReadyTickets,
     findBlockedTickets,
@@ -38,11 +37,22 @@ import {
     renderFinishSummary,
     lookupSpec,
     ticketKey,
+    blockerSatisfied,
+    blockerLabel,
+    historyFor,
+    nothingReady,
+    renderNothingReady,
     HUMAN_STATUS,
     type Ticket,
     type EffortLevel,
 } from '../src/orchestrator.js'
-import { NOTES_PATH } from '../src/learnings.js'
+import {
+    NOTES_PATH,
+    appendEntry,
+    renderEntry,
+} from '../src/learnings.js'
+import type { BlockerRef } from '../src/blockers.js'
+import { ticketLabel } from '../src/display.js'
 
 // -- helpers --
 
@@ -96,10 +106,17 @@ function makeTicketBody (opts:{
     return lines.join('\n')
 }
 
-function makeTicket (overrides:Partial<Ticket>&{
+function makeTicket (overrides:Omit<Partial<Ticket>, 'blockers'>&{
     num:number;
     filename:string;
+    blockers?:Array<number|BlockerRef>;
 }):Ticket {
+    const feature = overrides.feature ?? ''
+    const blockers = (overrides.blockers ?? []).map(b => (
+        typeof b === 'number' ?
+            { feature, num:b, where:'run' as const } :
+            b
+    ))
     return {
         slug:overrides.filename.replace(
             /^\d+-(.+)\.md$/, '$1'
@@ -109,9 +126,9 @@ function makeTicket (overrides:Partial<Ticket>&{
             status:overrides.status ?? 'ready-for-agent',
         }),
         status:overrides.status ?? 'ready-for-agent',
-        blockers:overrides.blockers ?? [],
-        feature:overrides.feature ?? '',
+        feature,
         ...overrides,
+        blockers,
     }
 }
 
@@ -179,37 +196,45 @@ test('parseStatus works in multi-line body', t => {
     t.equal(parseStatus(body), 'ready-for-agent')
 })
 
-// -- parseBlockers --
+// -- scanTickets blocker refs --
 
-test('parseBlockers extracts blocker numbers', t => {
-    t.deepEqual(
-        parseBlockers('**Blocked by:** 1, 2, 3'),
-        [1, 2, 3],
-        'comma-separated'
+test('scanTickets reads blockers as refs in its feature', t => {
+    const dir = tmp()
+    writeFileSync(
+        join(dir, '01-a.md'),
+        makeTicketBody({ status:'ready-for-agent', blockers:[1, 2, 3] })
     )
-    t.deepEqual(
-        parseBlockers('**Blocked by:** #4 and #5'),
-        [4, 5],
-        'hash-prefixed'
-    )
+    const [ticket] = scanTickets(dir, 'f')
+    t.deepEqual(ticket.blockers, [
+        { feature:'f', num:1, where:'run' },
+        { feature:'f', num:2, where:'run' },
+        { feature:'f', num:3, where:'run' },
+    ], 'three run refs in feature f')
 })
 
-test('parseBlockers returns empty for none', t => {
-    t.deepEqual(
-        parseBlockers('**Blocked by:** none'),
-        [],
-        'explicit none'
+test('scanTickets reads a cross-feature blocker', t => {
+    const dir = tmp()
+    writeFileSync(
+        join(dir, '01-a.md'),
+        '**Status:** ready-for-agent\n' +
+        '**Blocked by:** newsletter-audit 16\n'
     )
-    t.deepEqual(
-        parseBlockers('**Blocked by:** None'),
-        [],
-        'case-insensitive none'
+    const [ticket] = scanTickets(
+        dir, 'f', new Set(['newsletter-audit'])
     )
-    t.deepEqual(
-        parseBlockers('no blockers field at all'),
-        [],
-        'missing field'
+    t.deepEqual(ticket.blockers, [
+        { feature:'newsletter-audit', num:16, where:'run' },
+    ], 'ref in the named feature')
+})
+
+test('scanTickets reads None as no blockers', t => {
+    const dir = tmp()
+    writeFileSync(
+        join(dir, '01-a.md'),
+        '**Status:** ready-for-agent\n**Blocked by:** None\n'
     )
+    const [ticket] = scanTickets(dir, 'f')
+    t.deepEqual(ticket.blockers, [], 'no refs')
 })
 
 // -- scanTickets --
@@ -252,7 +277,7 @@ test('scanTickets reads and parses ticket files', t => {
     t.equal(tickets[1].num, 2, 'second ticket num')
     t.deepEqual(
         tickets[1].blockers,
-        [1],
+        [{ feature:'', num:1, where:'run' }],
         'second blocked by 1'
     )
 })
@@ -539,6 +564,9 @@ test(
 
 // -- findBlockedTickets --
 
+const keysOf = (refs?:BlockerRef[]) =>
+    (refs ?? []).map(r => ticketKey(r.feature, r.num))
+
 test('findBlockedTickets: direct blocker failed', t => {
     const tickets:Ticket[] = [
         makeTicket({
@@ -561,7 +589,7 @@ test('findBlockedTickets: direct blocker failed', t => {
     t.equal(blocked.size, 1, 'one ticket blocked')
     t.ok(blocked.has('f:2'), 'f:2 is blocked')
     t.deepEqual(
-        blocked.get('f:2'),
+        keysOf(blocked.get('f:2')),
         ['f:1'],
         'f:2 blocked by f:1'
     )
@@ -597,13 +625,13 @@ test('findBlockedTickets: chain through ready ticket', t => {
     t.equal(blocked.size, 2, 'two tickets blocked')
     t.ok(blocked.has('f:2'), 'f:2 is blocked')
     t.ok(blocked.has('f:3'), 'f:3 is blocked')
-    const f2Blocked = [...(blocked.get('f:2') ?? [])]
+    const f2Blocked = keysOf(blocked.get('f:2'))
     t.deepEqual(
         f2Blocked.sort(),
         ['f:1'],
         'f:2 blocked by f:1'
     )
-    const f3Blocked = [...(blocked.get('f:3') ?? [])]
+    const f3Blocked = keysOf(blocked.get('f:3'))
     t.deepEqual(
         f3Blocked.sort(),
         ['f:1'],
@@ -642,7 +670,7 @@ test('findBlockedTickets: multiple failed blockers', t => {
     )
     t.equal(blocked.size, 1, 'one ticket blocked')
     t.ok(blocked.has('f:3'), 'f:3 is blocked')
-    const f3Blocked = [...(blocked.get('f:3') ?? [])]
+    const f3Blocked = keysOf(blocked.get('f:3'))
     t.deepEqual(
         f3Blocked.sort(),
         ['f:1', 'f:2'],
@@ -708,7 +736,7 @@ test('findBlockedTickets: human status blocker', t => {
     t.equal(blocked.size, 1, 'one ticket blocked')
     t.ok(blocked.has('f:2'), 'f:2 is blocked')
     t.deepEqual(
-        blocked.get('f:2'),
+        keysOf(blocked.get('f:2')),
         ['f:1'],
         'f:2 blocked by human f:1'
     )
@@ -769,12 +797,12 @@ test('findBlockedTickets: chain to human ticket', t => {
     t.ok(blocked.has('f:2'), 'f:2 is blocked')
     t.ok(blocked.has('f:3'), 'f:3 is blocked')
     t.deepEqual(
-        blocked.get('f:2'),
+        keysOf(blocked.get('f:2')),
         ['f:1'],
         'f:2 blocked by human f:1'
     )
     t.deepEqual(
-        blocked.get('f:3'),
+        keysOf(blocked.get('f:3')),
         ['f:1'],
         'f:3 blocked by human f:1 (chain)'
     )
@@ -849,11 +877,11 @@ test('findBlockedTickets: diamond pattern', t => {
     t.ok(blocked.has('f:2'), 'f:2 is blocked')
     t.ok(blocked.has('f:3'), 'f:3 is blocked')
     t.ok(blocked.has('f:4'), 'f:4 is blocked')
-    const f2Blocked = [...(blocked.get('f:2') ?? [])]
+    const f2Blocked = keysOf(blocked.get('f:2'))
     t.deepEqual(f2Blocked.sort(), ['f:1'], 'f:2 blocked by f:1')
-    const f3Blocked = [...(blocked.get('f:3') ?? [])]
+    const f3Blocked = keysOf(blocked.get('f:3'))
     t.deepEqual(f3Blocked.sort(), ['f:1'], 'f:3 blocked by f:1')
-    const f4Blocked = [...(blocked.get('f:4') ?? [])]
+    const f4Blocked = keysOf(blocked.get('f:4'))
     t.deepEqual(
         f4Blocked.sort(),
         ['f:1'],
@@ -926,11 +954,248 @@ test('findBlockedTickets: dense graph', t => {
             `f:${i} is blocked`
         )
         t.deepEqual(
-            blocked.get(`f:${i}`),
+            keysOf(blocked.get(`f:${i}`)),
             ['f:1'],
             `f:${i} maps to f:1`
         )
     }
+})
+
+// -- cross-feature blocker refs --
+
+function captureDryRun (tickets:Array<Ticket>):string[] {
+    const output:Array<string> = []
+    const originalLog = console.log
+    console.log = function (msg:unknown) {
+        output.push(String(msg))
+    }
+    try {
+        dryRun(tickets, 'spec', '')
+    } finally {
+        console.log = originalLog
+    }
+    return output.join('\n').split('\n')
+}
+
+function lineWith (lines:string[], prefix:string):string {
+    return lines.find(l => l.trim().startsWith(prefix)) ?? ''
+}
+
+test('blockerSatisfied decides each kind of ref', t => {
+    const doneKeys = new Set(['a:1'])
+    t.ok(
+        blockerSatisfied({ feature:'a', num:1, where:'run' }, doneKeys),
+        'run ref to a done ticket'
+    )
+    t.ok(
+        !blockerSatisfied({ feature:'a', num:2, where:'run' }, doneKeys),
+        'run ref to an unfinished ticket'
+    )
+    t.ok(
+        blockerSatisfied({ feature:'b', num:1, where:'done' }, doneKeys),
+        'done outside the run'
+    )
+    t.ok(
+        !blockerSatisfied(
+            { feature:'b', num:1, where:'pending' }, doneKeys
+        ),
+        'pending outside the run'
+    )
+    t.ok(
+        !blockerSatisfied(
+            { feature:'b', num:1, where:'missing' }, doneKeys
+        ),
+        'missing'
+    )
+})
+
+test('AC2.1: a done blocker outside the run lets a ticket run', t => {
+    const ticket = makeTicket({
+        num:2,
+        filename:'02-x.md',
+        feature:'a',
+        blockers:[{ feature:'b', num:1, where:'done', status:'done' }],
+    })
+    t.deepEqual(
+        findReadyTickets([ticket]).map(x => x.num), [2], 'ready'
+    )
+})
+
+test('AC2.2: an unfinished blocker outside the run blocks', t => {
+    const ref:BlockerRef = {
+        feature:'b', num:1, where:'pending', status:'ready-for-agent',
+    }
+    const ticket = makeTicket({
+        num:2, filename:'02-x.md', feature:'a', blockers:[ref],
+    })
+    t.deepEqual(findReadyTickets([ticket]), [], 'not ready')
+    t.deepEqual(
+        findBlockedTickets([ticket], new Set()).get('a:2'),
+        [ref],
+        'blocked by the outside ref'
+    )
+    const label = blockerLabel(ref)
+    t.ok(label.includes('b/01'), 'label names the blocker')
+    t.ok(label.includes('ready-for-agent'), 'label names its status')
+})
+
+test('AC2.3: a selected cross-feature blocker runs first', t => {
+    const b1 = makeTicket({ num:1, filename:'01-first.md', feature:'b' })
+    const a2 = makeTicket({
+        num:2,
+        filename:'02-second.md',
+        feature:'a',
+        blockers:[{ feature:'b', num:1, where:'run' }],
+    })
+    t.deepEqual(
+        findReadyTickets([b1, a2]).map(x => x.filename),
+        ['01-first.md'],
+        'only the blocker is ready'
+    )
+    t.deepEqual(
+        findReadyTickets([{ ...b1, status:'done' }, a2])
+            .map(x => x.filename),
+        ['02-second.md'],
+        'the dependent is ready once the blocker is done'
+    )
+
+    const lines = captureDryRun([b1, a2])
+    t.ok(
+        lineWith(lines, 'Wave 1:').includes('01-first.md'),
+        'blocker in wave 1'
+    )
+    t.ok(
+        lineWith(lines, 'Wave 2:').includes('02-second.md'),
+        'dependent in wave 2'
+    )
+})
+
+test('AC2.4: a blocker that matches no ticket blocks', t => {
+    const other:BlockerRef = { feature:'b', num:9, where:'missing' }
+    const own:BlockerRef = { feature:'a', num:9, where:'missing' }
+    const tickets = [
+        makeTicket({
+            num:2, filename:'02-x.md', feature:'a', blockers:[other],
+        }),
+        makeTicket({
+            num:3, filename:'03-y.md', feature:'a', blockers:[own],
+        }),
+    ]
+    t.deepEqual(findReadyTickets(tickets), [], 'neither is ready')
+    const blocked = findBlockedTickets(tickets, new Set())
+    t.ok(blocked.has('a:2'), 'other-feature miss is blocked')
+    t.ok(blocked.has('a:3'), 'own-feature miss is blocked')
+    t.ok(blockerLabel(other).includes('(not found)'), 'label says why')
+})
+
+test('AC2.5: a chain is blocked by the outside ticket', t => {
+    const tickets = [
+        makeTicket({
+            num:1,
+            filename:'01-x.md',
+            feature:'a',
+            blockers:[{ feature:'a', num:2, where:'run' }],
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-y.md',
+            feature:'a',
+            blockers:[{
+                feature:'b', num:5, where:'pending', status:'claimed',
+            }],
+        }),
+    ]
+    const blocked = findBlockedTickets(tickets, new Set())
+    t.deepEqual(keysOf(blocked.get('a:1')), ['b:5'], 'a/01 by b/05')
+    t.deepEqual(keysOf(blocked.get('a:2')), ['b:5'], 'a/02 by b/05')
+})
+
+test('AC2.6: a human ticket blocks only its own feature', t => {
+    const tickets = [
+        makeTicket({
+            num:2,
+            filename:'02-human.md',
+            feature:'a',
+            status:HUMAN_STATUS,
+        }),
+        makeTicket({
+            num:2, filename:'02-done.md', feature:'b', status:'done',
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-waits.md',
+            feature:'b',
+            blockers:[{ feature:'b', num:2, where:'run' }],
+        }),
+        makeTicket({
+            num:4,
+            filename:'04-needs-human.md',
+            feature:'b',
+            blockers:[{ feature:'a', num:2, where:'run' }],
+        }),
+    ]
+    const summary = renderFinishSummary(tickets, 0, new Set())
+    t.ok(
+        summary.includes('04-needs-human.md'),
+        'b/04, which lists a/02, is blocked by a human'
+    )
+    t.ok(
+        !summary.includes('03-waits.md'),
+        'b/03 is not listed as blocked by a human'
+    )
+    t.ok(
+        !findBlockedTickets(tickets, new Set()).has('b:3'),
+        'b/03 is not blocked'
+    )
+})
+
+test('AC2.8: dry run waves agree with readiness', t => {
+    const pending:BlockerRef = {
+        feature:'b', num:4, where:'pending', status:'ready-for-agent',
+    }
+    const tickets = [
+        makeTicket({
+            num:1,
+            filename:'01-free.md',
+            feature:'a',
+            blockers:[{ feature:'b', num:1, where:'done', status:'done' }],
+        }),
+        makeTicket({
+            num:2, filename:'02-stuck.md', feature:'a', blockers:[pending],
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-after.md',
+            feature:'a',
+            blockers:[{ feature:'a', num:1, where:'run' }],
+        }),
+    ]
+    t.deepEqual(
+        findReadyTickets(tickets).map(x => x.filename),
+        ['01-free.md'],
+        'only a/01 is ready'
+    )
+
+    const lines = captureDryRun(tickets)
+    const wave1 = lineWith(lines, 'Wave 1:')
+    t.ok(wave1.includes('01-free.md'), 'a/01 in wave 1')
+    t.ok(!wave1.includes('03-after.md'), 'a/03 not in wave 1')
+    t.ok(
+        lineWith(lines, 'Wave 2:').includes('03-after.md'),
+        'a/03 in wave 2'
+    )
+    t.ok(
+        !lines.some(l => l.includes('Wave') && l.includes('02-stuck.md')),
+        'a/02 is in no wave'
+    )
+    t.ok(
+        lineWith(lines, 'Deadlocked tickets:').includes('02-stuck.md'),
+        'a/02 is deadlocked'
+    )
+    t.ok(
+        lineWith(lines, '02-stuck.md').includes(blockerLabel(pending)),
+        'the listing shows the blocker label'
+    )
 })
 
 // -- simulateWaves / detectDeadlocks (via dryRun) --
@@ -4308,6 +4573,56 @@ test('renderFinishSummary is one line with no human tickets', t => {
     t.ok(!out.includes(HUMAN_STATUS), 'no human section')
 })
 
+test('renderFinishSummary AC2.2: names a blocker outside the run',
+    t => {
+        const ref:BlockerRef = {
+            feature:'b', num:1, where:'pending', status:'ready-for-agent',
+        }
+        const ticket = makeTicket({
+            num:2, filename:'02-x.md', feature:'a', blockers:[ref],
+        })
+        const out = renderFinishSummary([ticket], 0, new Set())
+        t.ok(out.includes(ticketLabel(ticket)), 'names the ticket')
+        t.ok(out.includes(blockerLabel(ref)), 'names the blocker')
+    })
+
+test('renderFinishSummary AC2.4: lists a blocker that matches no ticket',
+    t => {
+        const ref:BlockerRef = { feature:'a', num:9, where:'missing' }
+        const ticket = makeTicket({
+            num:3, filename:'03-x.md', feature:'a', blockers:[ref],
+        })
+        const out = renderFinishSummary([ticket], 0, new Set())
+        t.ok(out.includes(ticketLabel(ticket)), 'names the ticket')
+        t.ok(out.includes(blockerLabel(ref)), 'names the blocker')
+    })
+
+test('renderFinishSummary leaves failed tickets out of the blocker ' +
+    'paragraph', t => {
+    const ref:BlockerRef = {
+        feature:'b', num:1, where:'pending', status:'ready-for-agent',
+    }
+    const ticket = makeTicket({
+        num:2, filename:'02-x.md', feature:'a', blockers:[ref],
+    })
+    const out = renderFinishSummary(
+        [ticket], 0, new Set([ticketKey('a', 2)])
+    )
+    t.ok(!out.includes(blockerLabel(ref)), 'failed ticket not listed')
+    t.equal(out.split('\n').length, 1, 'only the counts line')
+})
+
+test('renderFinishSummary AC2.9: repeats typo warnings', t => {
+    const ticket = makeTicket({
+        num:4, filename:'04-x.md', feature:'a', status:'done',
+    })
+    const out = renderFinishSummary([ticket], 1, new Set(), [
+        { ticket:'a/04', kind:'typo', text:'nwsletter-audit' },
+    ])
+    t.ok(out.includes('nwsletter-audit'), 'names the word')
+    t.ok(out.includes('a/04'), 'names the ticket')
+})
+
 test('renderFinishSummary names every ready-for-human ticket', t => {
     const tickets = [
         makeTicket({ num:1, filename:'01-a.md', status:'done' }),
@@ -4602,3 +4917,234 @@ test('runWaves with only human tickets logs them and is allDone',
             'summary names the status')
     }
 )
+
+// -- historyFor --
+
+// Appends a done entry whose notes are `marker` to a learnings log.
+function appendDone (
+    path:string,
+    feature:string,
+    num:number,
+    marker:string
+):void {
+    appendEntry(path, renderEntry({
+        key:ticketKey(feature, num),
+        label:`${feature}/${String(num).padStart(2, '0')}`,
+        attempt:1,
+        now:new Date('2026-10-09T00:00:00Z'),
+        outcome:'done',
+        run:{
+            exitCode:0, completedItems:[], timedOut:false, notes:marker,
+        },
+    }))
+}
+
+// A ticket at <scratch>/<feature>/issues/02-x.md with these refs.
+function historyTicket (
+    scratch:string,
+    feature:string,
+    blockers:BlockerRef[]
+):Ticket {
+    const issues = join(scratch, feature, 'issues')
+    mkdirSync(issues, { recursive:true })
+    const filepath = join(issues, '02-x.md')
+    writeFileSync(filepath, '**Status:** ready-for-agent\n')
+    return makeTicket({
+        num:2, filename:'02-x.md', feature, filepath, blockers,
+    })
+}
+
+test('historyFor AC2.7: reads a cross-feature blocker\'s done entry',
+    t => {
+        const scratch = join(tmp(), '.scratch')
+        mkdirSync(join(scratch, 'b'), { recursive:true })
+        appendDone(
+            join(scratch, 'b', 'learnings.md'), 'b', 1,
+            'marker-b-01-notes'
+        )
+        const ticket = historyTicket(scratch, 'a', [
+            { feature:'b', num:1, where:'done', status:'done' },
+        ])
+        const out = historyFor(join(scratch, 'a', 'learnings.md'), ticket)
+        t.ok(out.includes('marker-b-01-notes'), 'b/01 notes are included')
+    })
+
+test('historyFor still reads a same-feature blocker', t => {
+    const scratch = join(tmp(), '.scratch')
+    const ticket = historyTicket(scratch, 'a', [
+        { feature:'a', num:1, where:'run' },
+    ])
+    const learnings = join(scratch, 'a', 'learnings.md')
+    appendDone(learnings, 'a', 1, 'marker-a-01-notes')
+    t.ok(
+        historyFor(learnings, ticket).includes('marker-a-01-notes'),
+        'a/01 notes are included'
+    )
+})
+
+test('historyFor: a feature with no learnings.md is no error', t => {
+    const scratch = join(tmp(), '.scratch')
+    const ticket = historyTicket(scratch, 'a', [
+        { feature:'b', num:1, where:'done', status:'done' },
+    ])
+    t.equal(
+        historyFor(join(scratch, 'a', 'learnings.md'), ticket),
+        '',
+        'no history'
+    )
+})
+
+test('historyFor: a nested feature reads blockers beside .scratch',
+    t => {
+        const scratch = join(tmp(), '.scratch')
+        mkdirSync(join(scratch, 'b'), { recursive:true })
+        appendDone(
+            join(scratch, 'b', 'learnings.md'), 'b', 1,
+            'marker-nested-notes'
+        )
+        const ticket = historyTicket(scratch, 'x/y', [
+            { feature:'b', num:1, where:'done', status:'done' },
+        ])
+        const out = historyFor(
+            join(scratch, 'x', 'y', 'learnings.md'), ticket
+        )
+        t.ok(out.includes('marker-nested-notes'), 'b/01 notes are included')
+    })
+
+// -- nothingReady / renderNothingReady --
+
+const OUTSIDE:BlockerRef = {
+    feature:'b', num:1, where:'pending', status:'ready-for-agent',
+}
+
+test('nothingReady stops only when a ready-for-agent ticket waits',
+    t => {
+        t.equal(nothingReady([]), false, 'no tickets')
+        t.equal(nothingReady([
+            makeTicket({ num:1, filename:'01-a.md', status:'done' }),
+        ]), false, 'all done')
+        t.equal(nothingReady([
+            makeTicket({
+                num:1, filename:'01-a.md', status:HUMAN_STATUS,
+            }),
+        ]), false, 'only human work')
+        const blocked = makeTicket({
+            num:1, filename:'01-a.md', feature:'a', blockers:[OUTSIDE],
+        })
+        t.equal(nothingReady([blocked]), true, 'one blocked ticket')
+        const free = makeTicket({
+            num:2, filename:'02-b.md', feature:'a',
+        })
+        t.equal(
+            nothingReady([blocked, free]), false,
+            'one ticket can start'
+        )
+    })
+
+test('renderNothingReady names a blocker outside the run', t => {
+    const out = renderNothingReady([
+        makeTicket({
+            num:1, filename:'01-a.md', feature:'a', blockers:[OUTSIDE],
+        }),
+    ], [])
+    t.ok(out.includes(blockerLabel(OUTSIDE)), 'names the blocker')
+})
+
+test('renderNothingReady reports a cycle', t => {
+    const tickets = [
+        makeTicket({
+            num:1, filename:'01-a.md', feature:'a', blockers:[2],
+        }),
+        makeTicket({
+            num:2, filename:'02-b.md', feature:'a', blockers:[1],
+        }),
+    ]
+    const out = renderNothingReady(tickets, [])
+    t.ok(out.includes('Deadlocked tickets'), 'reports the cycle')
+    t.ok(out.includes(ticketLabel(tickets[0])), 'names a/01')
+    t.ok(out.includes(ticketLabel(tickets[1])), 'names a/02')
+})
+
+test('renderNothingReady reports human work, not a cycle', t => {
+    const human = makeTicket({
+        num:1,
+        filename:'01-human.md',
+        feature:'a',
+        status:HUMAN_STATUS,
+    })
+    const out = renderNothingReady([
+        human,
+        makeTicket({
+            num:2, filename:'02-waits.md', feature:'a', blockers:[1],
+        }),
+    ], [])
+    t.ok(out.includes('01-human.md'), 'names the human ticket')
+    t.ok(!out.includes('Deadlocked tickets'), 'no cycle line')
+    t.ok(
+        !out.includes(`${ticketLabel(human)} (${HUMAN_STATUS})`),
+        'the human blocker is not listed as another status'
+    )
+})
+
+test('renderNothingReady lists a ticket that waits on human work ' +
+    'through another ticket', t => {
+    const out = renderNothingReady([
+        makeTicket({
+            num:1,
+            filename:'01-human.md',
+            feature:'a',
+            status:HUMAN_STATUS,
+        }),
+        makeTicket({
+            num:2, filename:'02-direct.md', feature:'a', blockers:[1],
+        }),
+        makeTicket({
+            num:3, filename:'03-chained.md', feature:'a', blockers:[2],
+        }),
+    ], [])
+    t.ok(out.includes('02-direct.md'), 'names the direct waiter')
+    t.ok(out.includes('03-chained.md'), 'names the chained waiter')
+})
+
+test('renderNothingReady lists a ticket that waits on a blocker ' +
+    'outside the run through another ticket', t => {
+    const chained = makeTicket({
+        num:3, filename:'03-chained.md', feature:'a', blockers:[2],
+    })
+    const out = renderNothingReady([
+        makeTicket({
+            num:2,
+            filename:'02-direct.md',
+            feature:'a',
+            blockers:[OUTSIDE],
+        }),
+        chained,
+    ], [])
+    t.ok(
+        out.includes(`${ticketLabel(chained)} waits on ` +
+            blockerLabel(OUTSIDE)),
+        'names the chained waiter and the outside blocker'
+    )
+})
+
+test('renderNothingReady names a blocker in another status', t => {
+    const triage = makeTicket({
+        num:1,
+        filename:'01-triage.md',
+        feature:'a',
+        status:'needs-triage',
+    })
+    const out = renderNothingReady([
+        triage,
+        makeTicket({
+            num:2, filename:'02-waits.md', feature:'a', blockers:[1],
+        }),
+    ], [])
+    t.ok(out.includes(ticketLabel(triage)), 'names the blocker')
+    t.ok(out.includes('needs-triage'), 'names its status')
+    // Pins the format the human-work test's negative check relies on
+    t.ok(
+        out.includes(`${ticketLabel(triage)} (needs-triage)`),
+        'lists the blocker as label (status)'
+    )
+})

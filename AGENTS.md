@@ -1,6 +1,6 @@
 # nightralph
 
-Last verified: 2026-10-08
+Last verified: 2026-10-09
 
 Small orchestrator that runs a single-agent session per issue.
 
@@ -60,7 +60,10 @@ Small orchestrator that runs a single-agent session per issue.
 - `src/testcmd.ts` -- test command detection and execution
 - `src/preflight.ts` -- provider executable lookup
 - `src/resolve.ts` -- feature selection (`.scratch/<feature>/`
-  discovery and the interactive picker)
+  discovery and the interactive picker) and `loadSelection`,
+  the one ticket loader the run and the picker share
+- `src/blockers.ts` -- `**Blocked by:**` field parsing and
+  blocker ref resolution (pure)
 - `src/skills/` -- bundled skill definitions
 - `src/docs-templates/` -- doc templates copied to target projects
 
@@ -138,8 +141,30 @@ Small orchestrator that runs a single-agent session per issue.
   layout when inside one; also prints the branch
   decision (`describeIntegrationBranch`) and whether
   review is on or off
+- **Ticket loading**: `loadTickets` checks each selection's
+  issues dir and spec, then loads every valid selection in one
+  `loadSelection(<cwd>/.scratch, names)` call, so blockers are
+  resolved across features. It returns the loader's
+  `warnings`, which both runners pass to the finish summary.
+  A blocker that matches no ticket is kept (as a `missing`
+  ref), so its ticket stays unready
+- **Zero-ready stop**: right after the first scan, before
+  provider preflight, `--dry-run` output and any branch work,
+  a run where `nothingReady` holds prints `renderNothingReady`
+  and exits 0, creating and checking out nothing. When a
+  git-repo run outside `--dry-run` will resume an existing
+  integration branch (checked only when `nothingReady`
+  holds, from `planIntegrationBranch` and
+  `localBranchExists`), the first-scan check is skipped
+  and the resume re-scan decides: if `nothingReady` holds
+  there, the CLI checks the launch branch back out (the same
+  checkout `failStaleResume` uses), prints `Nothing to run on
+  <branch>. Back on <launch>.` and the explanation, and exits
+  0. A re-scan with no ready-for-agent ticket left continues
+  into the run and the review pass as before
 - **Provider preflight**: after the first ticket scan (and
-  only when it found tickets) and before
+  only when it found tickets and the zero-ready stop did not
+  fire) and before
   `prepareIntegrationBranch`, `runExecute` calls
   `resolveExecutable(provider)`. `null` prints
   `Provider '<name>' not found on PATH` (or `Provider
@@ -202,9 +227,13 @@ Small orchestrator that runs a single-agent session per issue.
   `DEFAULT_RETRIES`, `DEFAULT_RETRY_DELAY`,
   `DEFAULT_CONCURRENCY`, `runPool(items, limit, fn)`,
   `escalateEffort(provider, level?)`, `retryDelayFor(base, attempt)`,
-  `scanTickets(dir)`,
+  `scanTickets(dir, feature?, knownFeatures?)`,
   `findReadyTickets(tickets)`,
   `findBlockedTickets(tickets, failedKeys)`,
+  `blockerSatisfied(ref, doneKeys)`, `blockerLabel(ref)`,
+  `historyFor(learningsPath, ticket)`,
+  `nothingReady(tickets)`,
+  `renderNothingReady(tickets, warnings)`,
   `checkItems(ticket, items)`,
   `markDone(ticket)`,
   `renderPrompt(specBody, ticket, opts)`,
@@ -215,7 +244,8 @@ Small orchestrator that runs a single-agent session per issue.
   `dryRun(tickets, specBody, testCmd)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
   `runWavesIsolated(opts)`, `HUMAN_STATUS`,
-  `renderFinishSummary(tickets, totalCompleted, failedKeys)`,
+  `renderFinishSummary(tickets, totalCompleted, failedKeys,
+  warnings?)`,
   `lookupSpec(specBodies, fallback, feature)`,
   `ticketKey(feature, num)`, `formatErrorMessage(error)`
 - **formatErrorMessage(error)**: an `Error`'s `message`, else
@@ -232,17 +262,33 @@ Small orchestrator that runs a single-agent session per issue.
   checklist items the agent has completed. Collected
   per line (a whole multi-line text block counts as
   multiple reports) and deduplicated
+- **Ticket.blockers**: `BlockerRef[]` (see the blockers
+  module). `scanTickets(dir, feature = '', knownFeatures =
+  new Set())` fills them provisionally, every ref
+  `where:'run'`, so a bare scan treats a ref to a ticket not
+  in the list as never satisfied; `loadSelection` replaces
+  them with resolved refs
+- **blockerSatisfied(ref, doneKeys)**: the one readiness
+  predicate; `findReadyTickets`, `simulateWaves` and
+  `detectDeadlocks` all use it, so readiness, dry-run waves
+  and deadlocks agree. `run` -> its ticket's key is in
+  `doneKeys`; `done` -> true; `pending`/`missing` -> false
+- **blockerLabel(ref)**: `<feature>/<NN>` (`<NN>` alone for
+  feature `''`), plus ` (<status>, not in run)` for
+  `pending` and ` (not found)` for `missing`
 - **findBlockedTickets(tickets, failedKeys)**: pure;
-  returns `Map<string, string[]>` from the `ticketKey`
+  returns `Map<string, BlockerRef[]>` from the `ticketKey`
   of each `ready-for-agent` ticket not in `failedKeys`
-  to the keys of the dead tickets upstream of it,
-  following blockers directly or through a chain,
-  within its own feature only. Dead means in
-  `failedKeys`, or a status that is neither `done` nor
-  `ready-for-agent` (e.g. `ready-for-human`); the walk
-  stops at a dead or done ticket. Tickets with no dead
-  upstream are omitted. A blocker number with no
-  matching ticket is not dead; cycles terminate
+  to the dead refs upstream of it, following in-run refs
+  directly or through a chain, across features. Dead
+  means a `pending` or `missing` ref, or an in-run ticket
+  in `failedKeys` or in a status that is neither `done`
+  nor `ready-for-agent` (e.g. `ready-for-human`); a
+  `done` ref or done ticket ends the walk. So A waiting on
+  in-run B waiting on outside pending C is blocked by C.
+  Tickets with no dead upstream are omitted. An in-run ref
+  with no matching ticket (bare scans only) is not dead;
+  cycles terminate
 - **checkItems(ticket, items)**: checks off specific
   `- [ ]` items in a ticket file by matching text;
   called with completed items from agent output.
@@ -455,11 +501,12 @@ Small orchestrator that runs a single-agent session per issue.
   number. `startRun` is called with it exactly once,
   when wave 1 starts, and never for a run with nothing
   ready. Blocked tickets (`findBlockedTickets`) are
-  reported via `setBlocked` with `ticketLabel` names
-  right after `startRun`, at the top of every later
-  loop iteration, and once more after the loop, so
-  the `-X` stop and the no-progress breaks still
-  report them. The `progress` passed to `startWave`
+  reported via `setBlocked` with `ticketLabel` names for
+  in-run blockers and `blockerLabel` text for outside or
+  missing ones, right after `startRun`, at the top of
+  every later loop iteration, and once more after the
+  loop, so the `-X` stop and the no-progress breaks
+  still report them. The `progress` passed to `startWave`
   counts only the session set (`completed` = session
   tickets now `done`, `total` = session size)
 - **Integration branch and review**: `runWavesIsolated`
@@ -549,7 +596,11 @@ Small orchestrator that runs a single-agent session per issue.
   history from the log, so a retry sees the entry its
   previous attempt just wrote: the ticket's last
   `MAX_OWN_ENTRIES` entries, plus the latest `done`
-  entry of each direct blocker in the same feature.
+  entry of each direct blocker. A blocker in another
+  feature is read from that feature's `learnings.md`
+  (`historyFor`: `.scratch/<other>/learnings.md`, found by
+  climbing one dir per segment of the ticket's own feature
+  name, so a nested `--spec a/b` still reaches it).
   Right after each wave's pool settles, every touched
   learnings file that is a regular file is committed
   (`nightralph: record attempt learnings`), so the
@@ -579,10 +630,29 @@ Small orchestrator that runs a single-agent session per issue.
   ticket is `ready-for-human` it adds a paragraph
   naming those tickets, saying an agent cannot finish
   them, listing any `ready-for-agent` tickets blocked
-  on them, and telling the user to do the work and set
-  the status to done. This is why a run whose only
+  on them (directly or through other in-run tickets,
+  as `findBlockedTickets` walks), and telling the user to do the work and set
+  the status to done; humans are matched by `ticketKey`,
+  so a human `a/02` never blocks `b/03` that lists `02`.
+  A second paragraph lists open tickets waiting on
+  `pending` refs (also through in-run tickets), the `missing` refs of open tickets,
+  and the `typo` entries of `warnings` (default `[]`);
+  each part is omitted when empty, so a run with
+  nothing to explain gets no extra paragraph.
+  `runWaves` takes `warnings` as a trailing positional
+  argument and `runWavesIsolated` as `opts.warnings`.
+  This is why a run whose only
   open tickets are human ones exits 0 with an
   explanation instead of silently
+- **nothingReady(tickets)**: pure; true when no ticket is
+  ready and at least one is `ready-for-agent`. A run with
+  nothing open, or only human work, is not a stop
+- **renderNothingReady(tickets, warnings)**: pure; the
+  zero-ready explanation: a header line, the finish
+  summary's explanatory paragraphs, tickets waiting on an
+  in-run ticket in another non-human status (as
+  `<label> (<status>)`), and a `Deadlocked tickets` line
+  for tickets that wait on each other in a cycle
 - **dryRun(tickets, specBody, testCmd)**: in-place dry run;
   prints the wave order, `Test command: <cmd>` (`(none)` for
   `''`) and the first ready ticket's prompt
@@ -592,6 +662,68 @@ Small orchestrator that runs a single-agent session per issue.
   `installCmd`, `effort`, `retries`,
   `retryDelay`, and `concurrency` in opts and prints
   them
+
+### blockers module (`src/blockers.ts`)
+- **Exposes**: types `RawRef` (`{ feature?, num }`),
+  `BlockerParse` (`{ refs, typos }`), `BlockerWhere`,
+  `BlockerRef` (`{ feature, num, where, status? }`),
+  `BlockerWarning` (`{ ticket, kind:'missing'|'typo',
+  text }`); `parseBlockerField(body, knownFeatures)`,
+  `resolveBlockers(raw, ownFeature, selected, lookup)`,
+  `provisionalRefs(raw, ownFeature)`
+- **parseBlockerField**: the field starts after the first
+  `**Blocked by:**` (any case) and runs across continuation
+  lines until a blank line, a `**Field:**` line (optionally
+  bulleted), a heading or a checklist item; CRLF is fine.
+  Paired backtick spans and paired `(...)` spans (nested,
+  across lines, a `)` inside code does not close) are
+  removed; an unpaired delimiter stays as text. Text
+  starting with `None` means no refs. A number is a whole
+  token of digits; `03-05` is 3 and 5. The word directly
+  before a number (whitespace gap only) is its feature when
+  it is in `knownFeatures`, and applies to every number of
+  a range; otherwise the number is the ticket's own feature
+  (`feature` absent). A word may contain `/`, so a nested
+  feature such as `a/b` is one word. A lowercase hyphenated
+  word, or a `/` path of lowercase segments, with a letter
+  (feature-shaped, so not `FDR-018`) before a number that
+  is not a known feature is reported once in `typos`.
+  Refs are de-duplicated by (feature, num)
+- **BlockerWhere**: `run` (a ticket in this run; its live
+  status decides), `done` (outside the run, done when
+  loaded), `pending` (outside, not done: dead this
+  session), `missing` (no ticket matches: dead, reported)
+- **resolveBlockers**: fills in the own feature, then
+  classifies: a feature in `selected` -> `run` when it has
+  the number, else `missing`; any other feature -> `done`
+  or `pending` from `lookup`'s status, or `missing` when
+  `lookup` returns undefined
+- **provisionalRefs**: every ref `run`, for bare scans
+- **Guarantees**: pure, imports nothing, never throws
+
+### resolve module (`src/resolve.ts`)
+- **Exposes**: `FeatureSelection`, `getScriptDir`,
+  `findFeatureDirs(cwd)`, `resolveIssuesDir(specName, cwd?)`,
+  `LoadedSelection`, `BlockerWarning` (re-exported),
+  `loadSelection(scratchDir, names)`, `FeatureCounts`,
+  `featureCounts(scratchDir, name)`,
+  `featureChoiceLabel(scratchDir, name)`
+- **loadSelection**: known features are the dirs under
+  `<scratchDir>`, at any depth, with an `issues` subdir
+  (complete or not), named by their path (`a/b`, the name
+  `--spec` takes). Scans each selected feature, scans an unselected
+  feature only when a ref points into it (once, cached),
+  resolves every ticket's refs with `resolveBlockers`, and
+  returns `{ tickets, warnings }`: the selected features'
+  tickets only, plus one `missing` warning per missing ref
+  and one `typo` warning per typo. The CLI run and the
+  picker both load through it
+- **Picker label**: `featureChoiceLabel` is
+  `<name> (R/T ready[, N bad blocker(s)])` from
+  `featureCounts`, which runs `loadSelection` on that one
+  feature, so R is what a `--spec <name>` run would find
+  ready. Only `missing` refs count as bad; an unfinished
+  ticket outside the run does not
 
 ### testcmd module (`src/testcmd.ts`)
 - **Exposes**: `TestResult`,
@@ -664,9 +796,11 @@ Small orchestrator that runs a single-agent session per issue.
   `renderDot` draws them as a dim empty dot, then
   yellow, cyan, green, red and dim filled dots.
   `blocked` means an upstream ticket failed or is not
-  agent work, so the ticket cannot run this session;
-  the row names those tickets as
-  `(blocked by a/01, a/02)`. `in-progress` means the
+  agent work, or the ticket waits on a ticket outside
+  the run or on a ref that matches no ticket, so it
+  cannot run this session; the row names the blockers as
+  `(blocked by a/01, b/16 (ready-for-agent, not in run),
+  a/09 (not found))`. `in-progress` means the
   ticket holds a concurrency slot (agent running, test
   gate running, or waiting out a retry backoff), so at
   most `concurrency` dots are yellow at once.
@@ -1137,22 +1271,6 @@ Small orchestrator that runs a single-agent session per issue.
   `rebaseBranch` aborts and checks out the base
   branch on failure; stderr captures git's stdout
   (conflict info) or stderr (fatal errors)
-
-## Agent skills
-
-### Issue tracker
-
-Issues are tracked as local markdown files under
-`.scratch/`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default label vocabulary.
-See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context layout. See `docs/agents/domain.md`.
 
 <!-- nightralph:start -->
 ## Agent skills

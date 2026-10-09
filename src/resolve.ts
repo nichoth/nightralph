@@ -3,7 +3,20 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkbox, Separator } from '@inquirer/prompts'
 import { isSpecComplete } from './progress.js'
-import { scanTickets, findReadyTickets } from './orchestrator.js'
+import {
+    scanTickets,
+    findReadyTickets,
+    blockerLabel,
+    type Ticket,
+} from './orchestrator.js'
+import { ticketLabel } from './display.js'
+import {
+    parseBlockerField,
+    resolveBlockers,
+    type BlockerWarning,
+} from './blockers.js'
+
+export type { BlockerWarning }
 
 export type FeatureSelection = {
     dir:string;
@@ -49,6 +62,123 @@ export function findFeatureDirs (cwd:string):{
     return results
 }
 
+export type LoadedSelection = {
+    tickets:Ticket[];
+    warnings:BlockerWarning[];
+}
+
+// Names of the features under scratchDir: dirs with an issues
+// subdir, complete or not, at any depth. A nested feature's name
+// is its path, e.g. `rollout/billing`, the same name `--spec`
+// takes.
+function knownFeatureNames (scratchDir:string):Set<string> {
+    const names = new Set<string>()
+    const walk = (rel:string) => {
+        const dir = rel === '' ? scratchDir : join(scratchDir, rel)
+        for (const e of readdirSync(dir, { withFileTypes:true })) {
+            if (!e.isDirectory() || e.name === 'issues') continue
+            const name = rel === '' ? e.name : `${rel}/${e.name}`
+            if (existsSync(join(scratchDir, name, 'issues'))) {
+                names.add(name)
+            }
+            walk(name)
+        }
+    }
+    if (existsSync(scratchDir)) walk('')
+    return names
+}
+
+/**
+ * Tickets of the named features with every blocker resolved, and
+ * the problems found on the way. An unselected feature is scanned
+ * only when a ref points into it, once.
+ */
+export function loadSelection (
+    scratchDir:string,
+    names:ReadonlyArray<string>
+):LoadedSelection {
+    const known = knownFeatureNames(scratchDir)
+    const issuesDir = (name:string) => join(scratchDir, name, 'issues')
+
+    const tickets:Ticket[] = []
+    const selected = new Map<string, Set<number>>()
+    for (const name of new Set(names)) {
+        const dir = issuesDir(name)
+        const found = existsSync(dir) ?
+            scanTickets(dir, name, known) :
+            []
+        selected.set(name, new Set(found.map(t => t.num)))
+        tickets.push(...found)
+    }
+
+    const outside = new Map<string, Map<number, string>>()
+    const lookup = (feature:string, num:number) => {
+        if (!known.has(feature)) return undefined
+        let statuses = outside.get(feature)
+        if (!statuses) {
+            statuses = new Map(
+                scanTickets(issuesDir(feature), feature)
+                    .map(t => [t.num, t.status])
+            )
+            outside.set(feature, statuses)
+        }
+        return statuses.get(num)
+    }
+
+    const warnings:BlockerWarning[] = []
+    for (const t of tickets) {
+        const parsed = parseBlockerField(t.body, known)
+        t.blockers = resolveBlockers(
+            parsed.refs, t.feature, selected, lookup
+        )
+        const ticket = ticketLabel(t)
+        for (const word of parsed.typos) {
+            warnings.push({ ticket, kind:'typo', text:word })
+        }
+        for (const ref of t.blockers) {
+            if (ref.where !== 'missing') continue
+            warnings.push({
+                ticket, kind:'missing', text:blockerLabel(ref),
+            })
+        }
+    }
+    return { tickets, warnings }
+}
+
+export type FeatureCounts = {
+    ready:number;
+    total:number;
+    badBlockers:number;   // refs that match no ticket
+}
+
+/**
+ * Counts for one feature as if it ran alone: the same
+ * loadSelection a `--spec <name>` run uses.
+ */
+export function featureCounts (
+    scratchDir:string,
+    name:string
+):FeatureCounts {
+    const { tickets, warnings } = loadSelection(scratchDir, [name])
+    return {
+        ready:findReadyTickets(tickets).length,
+        total:tickets.length,
+        badBlockers:warnings.filter(w => w.kind === 'missing').length,
+    }
+}
+
+export function featureChoiceLabel (
+    scratchDir:string,
+    name:string
+):string {
+    const c = featureCounts(scratchDir, name)
+    const bad = c.badBlockers === 0 ?
+        '' :
+        `, ${c.badBlockers} bad blocker` +
+            (c.badBlockers === 1 ? '' : 's')
+    return `${name} (${c.ready}/${c.total} ready${bad})`
+}
+
 const ALL_VALUE = '__all__'
 
 export async function resolveIssuesDir (
@@ -80,14 +210,11 @@ export async function resolveIssuesDir (
         return [{ dir:f.dir, spec:f.spec, name:f.name }]
     }
 
-    const featureChoices = features.map(f => {
-        const tickets = scanTickets(f.dir)
-        const ready = findReadyTickets(tickets).length
-        return {
-            name:`${f.name} (${ready}/${tickets.length} ready)`,
-            value:f.name,
-        }
-    })
+    const scratchDir = join(cwd, '.scratch')
+    const featureChoices = features.map(f => ({
+        name:featureChoiceLabel(scratchDir, f.name),
+        value:f.name,
+    }))
 
     while (true) {
         const selected = await checkbox({

@@ -96,6 +96,12 @@ import {
     type AgentRunRecord,
     type EntryInput,
 } from './learnings.js'
+import {
+    parseBlockerField,
+    provisionalRefs,
+    type BlockerRef,
+    type BlockerWarning,
+} from './blockers.js'
 
 export type Ticket = {
     num:number
@@ -104,7 +110,7 @@ export type Ticket = {
     filepath:string
     body:string
     status:string
-    blockers:number[]
+    blockers:BlockerRef[]
     feature:string
 }
 
@@ -185,23 +191,16 @@ export function parseStatus (body:string):string {
     return m ? m[1].trim().toLowerCase() : ''
 }
 
-export function parseBlockers (body:string):number[] {
-    const m = body.match(/\*\*Blocked by:\*\*\s*(.+)/i)
-    if (!m) return []
-    const text = m[1]
-    if (/none/i.test(text)) return []
-    const nums:number[] = []
-    const re = /(\d+)/g
-    let match
-    while ((match = re.exec(text))) {
-        nums.push(Number(match[1]))
-    }
-    return nums
-}
-
+/**
+ * Reads every ticket file in `dir`. Blocker refs are provisional
+ * (every ref `where:'run'`) until `loadSelection` resolves them
+ * against the run; a word in `knownFeatures` before a number names
+ * that number's feature.
+ */
 export function scanTickets (
     dir:string,
-    feature:string = ''
+    feature:string = '',
+    knownFeatures:ReadonlySet<string> = new Set()
 ):Ticket[] {
     const files = readdirSync(dir)
         .filter(f => TICKET_RE.test(f))
@@ -222,7 +221,10 @@ export function scanTickets (
             filepath,
             body,
             status:parseStatus(body),
-            blockers:parseBlockers(body),
+            blockers:provisionalRefs(
+                parseBlockerField(body, knownFeatures).refs,
+                feature
+            ),
             feature,
         }
     })
@@ -230,6 +232,38 @@ export function scanTickets (
 
 export function ticketKey (feature:string, num:number):string {
     return `${feature}:${num}`
+}
+
+/**
+ * Whether one blocker ref lets its dependent run. `run` refs are
+ * decided by the live status of the ticket in this run; refs
+ * outside the run were classified at load time.
+ */
+export function blockerSatisfied (
+    ref:BlockerRef,
+    doneKeys:ReadonlySet<string>
+):boolean {
+    switch (ref.where) {
+        case 'run':
+            return doneKeys.has(ticketKey(ref.feature, ref.num))
+        case 'done': return true
+        case 'pending':
+        case 'missing': return false
+    }
+}
+
+/**
+ * Display name of a blocker: `<feature>/<NN>`, plus why it is dead
+ * when it is outside the run.
+ */
+export function blockerLabel (ref:BlockerRef):string {
+    const nn = String(ref.num).padStart(2, '0')
+    const base = ref.feature ? `${ref.feature}/${nn}` : nn
+    if (ref.where === 'pending') {
+        return `${base} (${ref.status ?? 'not done'}, not in run)`
+    }
+    if (ref.where === 'missing') return `${base} (not found)`
+    return base
 }
 
 export function findReadyTickets (
@@ -242,25 +276,25 @@ export function findReadyTickets (
     )
     return tickets.filter(t => {
         if (t.status !== 'ready-for-agent') return false
-        return t.blockers.every(b =>
-            doneKeys.has(ticketKey(t.feature, b))
-        )
+        return t.blockers.every(r => blockerSatisfied(r, doneKeys))
     })
 }
 
 /**
- * Tickets that cannot run this session because a ticket they
- * depend on (directly or through a chain, within their own
- * feature) is dead: in `failedKeys`, or in a status that is
- * neither done nor ready-for-agent, e.g. ready-for-human.
- * Returns ticketKey -> dead upstream ticketKeys. Only
- * ready-for-agent tickets that have not failed are keys. A
- * blocker number with no matching ticket is not dead.
+ * Tickets that cannot run this session because a blocker they
+ * depend on, directly or through a chain of in-run refs (across
+ * features), is dead. Dead means a `pending` or `missing` ref, or
+ * an in-run ticket that is in `failedKeys` or whose status is
+ * neither done nor ready-for-agent, e.g. ready-for-human. A `done`
+ * ref, or a done in-run ticket, ends the walk. An in-run ref with
+ * no matching ticket (bare scans only) is not dead.
+ * Returns ticketKey -> dead upstream refs. Only ready-for-agent
+ * tickets that have not failed are keys.
  */
 export function findBlockedTickets (
     tickets:ReadonlyArray<Ticket>,
     failedKeys:ReadonlySet<string>,
-):Map<string, Array<string>> {
+):Map<string, BlockerRef[]> {
     const byKey = new Map(
         tickets.map(t => [ticketKey(t.feature, t.num), t])
     )
@@ -268,33 +302,38 @@ export function findBlockedTickets (
     function collectDead (
         ticket:Ticket,
         visited:Set<string>,
-        found:Set<string>,
+        found:Map<string, BlockerRef>,
     ):void {
-        for (const b of ticket.blockers) {
-            const key = ticketKey(ticket.feature, b)
+        for (const ref of ticket.blockers) {
+            const key = ticketKey(ref.feature, ref.num)
             if (visited.has(key)) continue
             visited.add(key)
+            if (ref.where === 'done') continue
+            if (ref.where === 'pending' || ref.where === 'missing') {
+                found.set(key, ref)
+                continue
+            }
             const blocker = byKey.get(key)
             if (!blocker || blocker.status === 'done') continue
             if (
                 failedKeys.has(key) ||
                 blocker.status !== 'ready-for-agent'
             ) {
-                found.add(key)
+                found.set(key, ref)
                 continue
             }
             collectDead(blocker, visited, found)
         }
     }
 
-    const blocked = new Map<string, Array<string>>()
+    const blocked = new Map<string, BlockerRef[]>()
     for (const t of tickets) {
         const key = ticketKey(t.feature, t.num)
         if (t.status !== 'ready-for-agent') continue
         if (failedKeys.has(key)) continue
-        const found = new Set<string>()
+        const found = new Map<string, BlockerRef>()
         collectDead(t, new Set([key]), found)
-        if (found.size > 0) blocked.set(key, [...found])
+        if (found.size > 0) blocked.set(key, [...found.values()])
     }
     return blocked
 }
@@ -615,7 +654,7 @@ function listTickets (tickets:ReadonlyArray<Ticket>):void {
     console.log('\nTickets:')
     for (const t of tickets) {
         const blockerStr = t.blockers.length > 0 ?
-            `blocked by [${t.blockers.join(', ')}]` :
+            `blocked by [${t.blockers.map(blockerLabel).join(', ')}]` :
             'no blockers'
         console.log(
             `  ${t.filename} ` +
@@ -645,11 +684,7 @@ function * simulateWaves (
             if (sim.get(key) !== 'ready-for-agent') {
                 return false
             }
-            return t.blockers.every(b =>
-                doneKeys.has(
-                    ticketKey(t.feature, b)
-                )
-            )
+            return t.blockers.every(r => blockerSatisfied(r, doneKeys))
         })
         if (ready.length === 0) break
         yield { wave, ready }
@@ -685,10 +720,8 @@ function detectDeadlocks (
             const ticket = tickets.find(t =>
                 ticketKey(t.feature, t.num) === key
             )!
-            if (ticket.blockers.every(b =>
-                doneKeys.has(
-                    ticketKey(ticket.feature, b)
-                )
+            if (ticket.blockers.every(r =>
+                blockerSatisfied(r, doneKeys)
             )) {
                 doneKeys.add(key)
                 readyKeys.delete(key)
@@ -1663,24 +1696,51 @@ type TicketAttemptOpts = {
     d:Display
 }
 
-// The ticket's own earlier attempts and its direct blockers'
-// last successful runs, rendered for the prompt. Learnings are
-// advisory, so an unreadable log means no history, not a failure.
+/**
+ * The ticket's own earlier attempts and its direct blockers' last
+ * successful runs, rendered for the prompt. A blocker in another
+ * feature is read from that feature's learnings.md, under the same
+ * .scratch dir as this ticket's feature. Throws when a log cannot
+ * be read.
+ */
+export function historyFor (
+    learningsPath:string,
+    ticket:Ticket
+):string {
+    // <scratch>/<feature>/issues/<file>.md; a nested feature name
+    // (a/b) is several dirs deep, so climb one level per segment.
+    const featureDir = dirname(dirname(ticket.filepath))
+    const scratchDir = ticket.feature ?
+        join(featureDir, ...ticket.feature.split('/').map(() => '..')) :
+        dirname(featureDir)
+    const others = new Set(
+        ticket.blockers
+            .map(r => r.feature)
+            .filter(f => f !== ticket.feature)
+    )
+    const entries = [
+        ...readEntries(learningsPath),
+        ...[...others].flatMap(f => readEntries(
+            join(scratchDir, f, 'learnings.md')
+        )),
+    ]
+    return renderHistory(selectHistory(entries, {
+        key:ticketKey(ticket.feature, ticket.num),
+        blockerKeys:ticket.blockers.map(r => {
+            return ticketKey(r.feature, r.num)
+        }),
+    }))
+}
+
+// Learnings are advisory, so an unreadable log means no history,
+// not a failure.
 function buildHistory (
     learningsPath:string,
     ticket:Ticket,
     d:Display
 ):string {
     try {
-        return renderHistory(selectHistory(
-            readEntries(learningsPath),
-            {
-                key:ticketKey(ticket.feature, ticket.num),
-                blockerKeys:ticket.blockers.map(b => {
-                    return ticketKey(ticket.feature, b)
-                }),
-            }
-        ))
+        return historyFor(learningsPath, ticket)
     } catch (err) {
         d.log(
             `  ${ticket.filename}: could not read ` +
@@ -2096,26 +2156,137 @@ function indentFilenames (tickets:ReadonlyArray<Ticket>):string {
 }
 
 /**
+ * The paragraphs that explain why open tickets did not run, each
+ * preceded by a blank line: ready-for-human tickets and what they
+ * block, then tickets waiting on blockers outside the run, blocker
+ * refs that match no ticket, and likely feature-name typos. A
+ * ticket counts as blocked by human or outside work when it waits
+ * on it directly or through other in-run tickets.
+ * Returns [] when there is nothing to explain.
+ */
+function explainOpen (
+    tickets:ReadonlyArray<Ticket>,
+    failedKeys:ReadonlySet<string>,
+    warnings:ReadonlyArray<BlockerWarning>,
+):string[] {
+    const remaining = tickets.filter(
+        t => t.status === 'ready-for-agent'
+    )
+    const open = remaining.filter(
+        t => !failedKeys.has(ticketKey(t.feature, t.num))
+    )
+    // Dead refs upstream of each open ticket, through chains of
+    // in-run tickets, so A waiting on B waiting on a human ticket
+    // is listed too, not only B.
+    const dead = findBlockedTickets(tickets, failedKeys)
+    const deadRefs = (t:Ticket) => (
+        dead.get(ticketKey(t.feature, t.num)) ?? []
+    )
+    const lines:string[] = []
+
+    const human = tickets.filter(t => t.status === HUMAN_STATUS)
+    if (human.length > 0) {
+        const humanKeys = new Set(
+            human.map(t => ticketKey(t.feature, t.num))
+        )
+        const blockedByHuman = open.filter(t => deadRefs(t).some(
+            r => humanKeys.has(ticketKey(r.feature, r.num))
+        ))
+        const noun = human.length === 1 ?
+            'ticket is' :
+            'tickets are'
+        lines.push(
+            '',
+            (remaining.length === 0 && failedKeys.size === 0 ?
+                `All remaining ${noun} marked ${HUMAN_STATUS}. ` :
+                `${human.length} ${noun} marked ${HUMAN_STATUS}. `) +
+            'nightralph only runs ready-for-agent tickets, ' +
+            'so an agent cannot finish these:',
+            indentFilenames(human),
+        )
+        if (blockedByHuman.length > 0) {
+            const n = blockedByHuman.length
+            lines.push(
+                `${n} ready-for-agent ticket` +
+                `${n === 1 ? ' is' : 's are'} ` +
+                'blocked until they are done:',
+                indentFilenames(blockedByHuman),
+            )
+        }
+        lines.push(
+            'Do that work by hand, then set each ticket\'s ' +
+            '**Status:** to done' +
+            (blockedByHuman.length > 0 ?
+                ' and run nightralph again.' :
+                '.')
+        )
+    }
+
+    const blockers:string[] = []
+    const outside = open.filter(
+        t => deadRefs(t).some(r => r.where === 'pending')
+    )
+    if (outside.length > 0) {
+        const n = outside.length
+        blockers.push(
+            `${n} ready-for-agent ticket` +
+            `${n === 1 ? ' waits' : 's wait'} on tickets outside ` +
+            'this run. Select those features too, or finish them ' +
+            'first:',
+            ...outside.map(t => (
+                `  ${ticketLabel(toRef(t))} waits on ` +
+                deadRefs(t)
+                    .filter(r => r.where === 'pending')
+                    .map(blockerLabel)
+                    .join(', ')
+            )),
+        )
+    }
+    const missing = open.flatMap(t => t.blockers
+        .filter(r => r.where === 'missing')
+        .map(r => `  ${ticketLabel(toRef(t))}: ${blockerLabel(r)}`))
+    if (missing.length > 0) {
+        const n = missing.length
+        blockers.push(
+            `${n} blocker reference${n === 1 ? '' : 's'} match no ` +
+            'ticket. Fix the **Blocked by:** line:',
+            ...missing,
+        )
+    }
+    const typos = warnings.filter(w => w.kind === 'typo')
+    if (typos.length > 0) {
+        const n = typos.length
+        blockers.push(
+            `${n} word${n === 1 ? '' : 's'} in a **Blocked by:** ` +
+            `line look${n === 1 ? 's' : ''} like a feature name but ` +
+            'match no .scratch/<name>/issues directory:',
+            ...typos.map(w => `  ${w.ticket}: ${w.text}`),
+        )
+    }
+    if (blockers.length > 0) lines.push('', ...blockers)
+
+    return lines
+}
+
+/**
  * The text logged when a run ends. The first line is the
- * count summary. When tickets marked ready-for-human are
- * still open, further lines name them and say that an
- * agent cannot finish them, so a run that exits with open
+ * count summary. Further paragraphs (`explainOpen`) name
+ * open ready-for-human tickets and say that an agent cannot
+ * finish them, list tickets waiting on blockers outside the
+ * run and blocker refs that match no ticket, and repeat the
+ * typo `warnings` from loading, so a run that exits with open
  * tickets never looks like it silently gave up.
  */
 export function renderFinishSummary (
     tickets:ReadonlyArray<Ticket>,
     totalCompleted:number,
     failedKeys:ReadonlySet<string>,
+    warnings:ReadonlyArray<BlockerWarning> = [],
 ):string {
     const remaining = tickets.filter(
         t => t.status === 'ready-for-agent'
     )
     const human = tickets.filter(t => t.status === HUMAN_STATUS)
-    const humanNums = new Set(human.map(t => t.num))
-    const blockedByHuman = remaining.filter(t =>
-        !failedKeys.has(ticketKey(t.feature, t.num)) &&
-        t.blockers.some(b => humanNums.has(b))
-    )
 
     const counts = `Finished: ${totalCompleted} completed` +
         (remaining.length > 0 ?
@@ -2157,35 +2328,82 @@ export function renderFinishSummary (
         }
     }
 
-    if (human.length === 0) return lines.join('\n')
+    lines.push(...explainOpen(tickets, failedKeys, warnings))
+    return lines.join('\n')
+}
 
-    const noun = human.length === 1 ?
-        'ticket is' :
-        'tickets are'
-    lines.push(
-        '',
-        (remaining.length === 0 && failedKeys.size === 0 ?
-            `All remaining ${noun} marked ${HUMAN_STATUS}. ` :
-            `${human.length} ${noun} marked ${HUMAN_STATUS}. `) +
-        'nightralph only runs ready-for-agent tickets, ' +
-        'so an agent cannot finish these:',
-        indentFilenames(human),
+/**
+ * The zero-ready stop rule: nothing can start, yet a
+ * ready-for-agent ticket is waiting on a blocker. A run with no
+ * ready-for-agent ticket left (all done, or only human work) is
+ * not a stop: it still gets its finish summary and review.
+ */
+export function nothingReady (
+    tickets:ReadonlyArray<Ticket>
+):boolean {
+    return findReadyTickets(tickets).length === 0 &&
+        tickets.some(t => t.status === 'ready-for-agent')
+}
+
+/**
+ * Why nothing can run: the same paragraphs as the finish summary
+ * (human work, tickets outside the run, refs that match nothing,
+ * typos), plus tickets waiting on an in-run ticket in another
+ * status (e.g. needs-triage) and tickets that wait on each other
+ * in a cycle.
+ */
+export function renderNothingReady (
+    tickets:ReadonlyArray<Ticket>,
+    warnings:ReadonlyArray<BlockerWarning>
+):string {
+    const lines = [
+        'Nothing to run: every ready-for-agent ticket is ' +
+        'waiting on a blocker.',
+        ...explainOpen(tickets, new Set(), warnings),
+    ]
+    const dead = findBlockedTickets(tickets, new Set())
+    const byKey = new Map(
+        tickets.map(t => [ticketKey(t.feature, t.num), t])
     )
-    if (blockedByHuman.length > 0) {
-        const n = blockedByHuman.length
+    // Human blockers are explained by explainOpen; any other
+    // in-run dead blocker is a status an agent will not pick up.
+    const other:string[] = []
+    for (const [key, refs] of dead) {
+        const stuck = refs.flatMap(r => {
+            const b = byKey.get(ticketKey(r.feature, r.num))
+            return b && b.status !== HUMAN_STATUS ?
+                [`${ticketLabel(toRef(b))} (${b.status})`] :
+                []
+        })
+        const t = byKey.get(key)
+        if (t && stuck.length > 0) {
+            other.push(
+                `  ${ticketLabel(toRef(t))} waits on ` +
+                stuck.join(', ')
+            )
+        }
+    }
+    if (other.length > 0) {
         lines.push(
-            `${n} ready-for-agent ticket${n === 1 ? ' is' : 's are'} ` +
-            'blocked until they are done:',
-            indentFilenames(blockedByHuman),
+            '',
+            'These tickets wait on tickets that are not ' +
+            'ready-for-agent:',
+            ...other,
+            'Set those tickets to ready-for-agent or done, or ' +
+            'fix the **Blocked by:** lines.'
         )
     }
-    lines.push(
-        'Do that work by hand, then set each ticket\'s ' +
-        '**Status:** to done' +
-        (blockedByHuman.length > 0 ?
-            ' and run nightralph again.' :
-            '.')
-    )
+    const cycle = detectDeadlocks(tickets).filter(t => (
+        !dead.has(ticketKey(t.feature, t.num))
+    ))
+    if (cycle.length > 0) {
+        lines.push(
+            '',
+            'Deadlocked tickets (waiting on each other): ' +
+            cycle.map(t => ticketLabel(toRef(t))).join(', ') +
+            '. Fix their **Blocked by:** lines.'
+        )
+    }
     return lines.join('\n')
 }
 
@@ -2216,10 +2434,10 @@ function reportBlocked (
     )) {
         const ticket = byKey.get(key)
         if (!ticket) continue
-        const labels = dead
-            .map(k => byKey.get(k))
-            .filter((t):t is Ticket => t !== undefined)
-            .map(t => ticketLabel(toRef(t)))
+        const labels = dead.map(ref => {
+            const t = byKey.get(ticketKey(ref.feature, ref.num))
+            return t ? ticketLabel(toRef(t)) : blockerLabel(ref)
+        })
         d.setBlocked(ticket.num, ticket.feature, labels)
     }
 }
@@ -2245,6 +2463,8 @@ export async function runWaves (
     retries?:number,
     retryDelay?:number,
     concurrency?:number,
+    // blocker problems found while loading, for the finish summary
+    warnings:ReadonlyArray<BlockerWarning> = [],
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
@@ -2415,7 +2635,7 @@ export async function runWaves (
         t => t.status === 'ready-for-agent'
     )
     d.log('\n' + renderFinishSummary(
-        tickets, totalCompleted, failedKeys
+        tickets, totalCompleted, failedKeys, warnings
     ))
     d.cleanup()
 
@@ -2448,6 +2668,8 @@ export async function runWavesIsolated (opts:{
     concurrency?:number
     // per-feature progress paths for multi-feature runs
     progressPaths?:Map<string, string>
+    // blocker problems found while loading, for the finish summary
+    warnings?:ReadonlyArray<BlockerWarning>
     // review the unreviewed work and run one fix pass at the end;
     // unset = no review
     review?:{
@@ -3045,7 +3267,7 @@ export async function runWavesIsolated (opts:{
         t => t.status === 'ready-for-agent'
     )
     d.log('\n' + renderFinishSummary(
-        opts.tickets, totalCompleted, failedKeys
+        opts.tickets, totalCompleted, failedKeys, opts.warnings ?? []
     ))
     if (reviewLine) d.log(reviewLine)
     d.log(`Work is on ${baseBranch}`)

@@ -33,8 +33,9 @@ updated to match.
    Blocked-by text into de-duplicated `{ feature, num }` refs. The
    parser strips `(...)` and backtick spans, reads wrapped lines,
    and treats a word as a feature only when
-   `.scratch/<word>/issues` exists. A hyphenated word that names
-   no dir gets a typo warning.
+   `.scratch/<word>/issues` exists. A lowercase hyphenated word
+   (shaped like a feature dir name) that names no dir gets a typo
+   warning.
 2. Readiness, `findBlockedTickets`, dry run, the finish summary
    and learnings history all key blockers by the blocker's own
    feature. An unknown blocker, or a not-done blocker in an
@@ -74,7 +75,10 @@ Out of scope: editing the rebase.blog ticket files themselves.
   feature and no warning is produced
 - **cross-feature-blockers.AC1.9 Failure:** a hyphenated word that
   names no feature dir produces a typo warning, and its number
-  refers to the ticket's own feature
+  refers to the ticket's own feature. (Amended 2026-10-09 during
+  Phase 1 review: only lowercase feature-shaped words, letters and
+  digits joined by hyphens with at least one letter, warn, so a doc
+  ID such as `FDR-018` gives no warning.)
 - **cross-feature-blockers.AC1.10 Edge:** the field ends at a blank
   line or the next `**Field:**` line; numbers after it are ignored
 - **cross-feature-blockers.AC1.11 Success:** the picker's ready
@@ -180,9 +184,9 @@ Out of scope: editing the rebase.blog ticket files themselves.
   decides); `done` is outside the run and finished; `pending` is
   outside the run and unfinished, so dead this session; `missing`
   matches no ticket.
-- **Typo warning**: A warning for a hyphenated word before a number
-  that matches no feature directory, such as a misspelled feature
-  name.
+- **Typo warning**: A warning for a lowercase hyphenated word before
+  a number that matches no feature directory, such as a misspelled
+  feature name.
 - **`loadSelection`**: The single function that scans the selected
   features, scans an unselected feature only when a blocker points
   into it, resolves every blocker, and returns tickets plus warnings.
@@ -250,8 +254,11 @@ field and returns raw references plus typo warnings.
 - The word directly before a number is its feature when that word is
   in `knownFeatures` (the names of `.scratch/<name>/issues` dirs).
   Any other word is prose and the number refers to the ticket's own
-  feature. A hyphenated word that is not a known feature is reported
-  in `typos`.
+  feature. A lowercase hyphenated word that is not a known feature
+  is reported in `typos`. A feature before a range (`03-05`)
+  applies to both ends; in a comma list it applies only to the
+  number right after it. (Both rules amended 2026-10-09 during
+  Phase 1 review.)
 - Refs are de-duplicated by `(feature, num)`.
 
 `resolveBlockers(raw, ownFeature, selected, lookup)` turns raw refs
@@ -266,7 +273,7 @@ export type RawRef = {
 
 export type BlockerParse = {
     refs:RawRef[];
-    typos:string[];   // hyphenated words that name no feature
+    typos:string[];   // feature-shaped words that name no feature
 }
 
 export type BlockerWhere = 'run'|'done'|'pending'|'missing'
