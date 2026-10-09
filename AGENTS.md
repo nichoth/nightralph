@@ -504,9 +504,8 @@ Small orchestrator that runs a single-agent session per issue.
   in-run blockers and `blockerLabel` text for outside or
   missing ones, right after `startRun`, at the top of
   every later loop iteration, and once more after the
-  loop, so
-  the `-X` stop and the no-progress breaks still
-  report them. The `progress` passed to `startWave`
+  loop, so the `-X` stop and the no-progress breaks
+  still report them. The `progress` passed to `startWave`
   counts only the session set (`completed` = session
   tickets now `done`, `total` = session size)
 - **Integration branch and review**: `runWavesIsolated`
