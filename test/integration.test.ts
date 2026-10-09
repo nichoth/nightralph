@@ -5326,6 +5326,43 @@ test('CLI subprocess - AC2.4 --test-cmd "" completes a ticket ' +
     }
 })
 
+test('CLI subprocess - AC2.9 an isolated run repeats a typo ' +
+    'warning in the finish summary', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writePackageJson(projectDir, NO_TEST_SCRIPT)
+        writeFileSync(
+            join(issuesDir, '01-done.md'),
+            makeTicketBody({ status:'done' })
+        )
+        // The typo ref falls back to own ticket 01, which is done.
+        writeFileSync(
+            join(issuesDir, '02-typo.md'),
+            '# Test ticket\n\n**Status:** ready-for-agent\n' +
+            '**Blocked by:** nwsletter-audit 01\n'
+        )
+        commitAll(projectDir, 'add tickets')
+
+        const { code, stdout, stderr } = await spawnCli([
+            MOCK_AGENT, ...NO_GATE_RUN_ARGS, '--test-cmd', '',
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit 0')
+        t.ok(
+            gitOut(projectDir, ['log', '--oneline'])
+                .includes('mock agent change'),
+            'the ticket ran in a worktree and merged'
+        )
+        t.ok(
+            (stdout + stderr).includes('nwsletter-audit'),
+            'the summary names the misspelt feature'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
 test('CLI subprocess - AC2.5 no flag and no test script warns ' +
     'once and completes the ticket', async t => {
     const { projectDir, issuesDir, templateDir } = cliGitRepo()
