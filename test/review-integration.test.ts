@@ -10,6 +10,7 @@ import type { Display } from '../src/display.js'
 import { runWavesIsolated, scanTickets } from '../src/orchestrator.js'
 import { parseReviewEntries } from '../src/review.js'
 import { subagentRule } from '../src/rules.js'
+import { renderRunStats } from '../src/stats.js'
 
 const MOCK = join(process.cwd(), 'test', 'mock-agent-review.js')
 const FAKE_CLAUDE = join(process.cwd(), 'test', 'fake-claude', 'claude')
@@ -362,4 +363,52 @@ test('review pass - a reviewer that writes no findings file is ' +
         t.equal(countRoles(h.recordDir).reviewer, 2,
             'the unreviewed range is reviewed again')
     })
+})
+
+test('review pass - prefer-subagent AC6.4 the stats tally counts ' +
+    'the reviewer and the fixer', async t => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'nightralph-stream-'))
+    const streamFile = join(dataDir, 'stream.jsonl')
+    writeFileSync(streamFile, [
+        {
+            type:'assistant',
+            message:{
+                content:[{
+                    type:'tool_use', id:'toolu_1', name:'Agent', input:{},
+                }],
+            },
+        },
+        {
+            type:'result',
+            subtype:'success',
+            total_cost_usd:0.25,
+            subagent_stats:{ spawned:1 },
+        },
+    ].map(line => JSON.stringify(line)).join('\n') + '\n')
+    try {
+        await withHarness({
+            MOCK_REVIEW:'findings',
+            MOCK_FIX:'pass',
+            MOCK_TICKET:'pass',
+            FAKE_CLAUDE_DELEGATE:MOCK,
+            FAKE_CLAUDE_STREAM:streamFile,
+        }, async h => {
+            const logs:string[] = []
+            const display = {
+                ...quietDisplay(),
+                log:(m:string) => { logs.push(m) },
+            }
+            const result = await h.run(true, display, undefined, {
+                agentCmd:FAKE_CLAUDE,
+            })
+            t.ok(result.allDone, 'tickets done')
+            t.deepEqual(countRoles(h.recordDir),
+                { reviewer:1, fixer:1, ticket:1 }, 'one of each')
+            t.ok(logs.includes(renderRunStats({
+                agentRuns:3, withCost:3, subagents:3, costUsd:0.75,
+            }) ?? ''), 'the ticket, reviewer and fixer are tallied')
+        })
+    } finally {
+        rmSync(dataDir, { recursive:true, force:true })
+    }
 })

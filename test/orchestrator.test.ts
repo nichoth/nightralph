@@ -44,6 +44,7 @@ import {
 } from '../src/orchestrator.js'
 import { NOTES_PATH } from '../src/learnings.js'
 import { subagentRule } from '../src/rules.js'
+import { renderRunStats } from '../src/stats.js'
 
 // -- helpers --
 
@@ -5067,5 +5068,147 @@ test('runWaves with only human tickets logs them and is allDone',
             'summary names the human ticket')
         t.ok(all.includes(HUMAN_STATUS),
             'summary names the status')
+    }
+)
+
+// -- subagent stats tally (in-place runWaves) --
+
+const MOCK_NOOP = join(process.cwd(), 'test', 'mock-agent-noop.js')
+
+// One main-loop `Agent` call and a result: each run reports
+// `{ subagents:1, costUsd:0.25 }`
+const ONE_SUBAGENT_STREAM = [
+    agentLine('toolu_1'),
+    {
+        type:'result',
+        subtype:'success',
+        total_cost_usd:0.25,
+        subagent_stats:{ spawned:1 },
+    },
+]
+
+// One ticket through in-place `runWaves`. Neither agent touches
+// files, so running in a temp dir is safe.
+async function runOneInPlace (
+    agentCmd:string,
+    env:Record<string, string|undefined>
+):Promise<{
+    tickets:Ticket[]
+    allDone:boolean
+    logs:string[]
+    stats:unknown[]
+}> {
+    const base = tmp()
+    const issuesDir = join(base, 'issues')
+    mkdirSync(issuesDir)
+    writeFileSync(
+        join(issuesDir, '01-only.md'),
+        makeTicketBody({ status:'ready-for-agent' })
+    )
+    const tickets = scanTickets(issuesDir, 'feat')
+    const logs:string[] = []
+    const stats:unknown[] = []
+    const display = {
+        startRun () {},
+        startWave () {},
+        setTicketStatus () {},
+        setBlocked () {},
+        setTicketStats (_num:number, _feature:string, s:unknown) {
+            stats.push(s)
+        },
+        log (m:string) { logs.push(m) },
+        cleanup () {},
+    }
+    const originalCwd = process.cwd()
+    let allDone = false
+    try {
+        process.chdir(base)
+        await withFakeEnv(env, async () => {
+            const result = await runWaves(
+                tickets, 'test spec',
+                agentCmd, null, 10, join(base, 'logs'),
+                '', display,
+            )
+            allDone = result.allDone
+        })
+    } finally {
+        process.chdir(originalCwd)
+        rmSync(base, { recursive:true, force:true })
+    }
+    return { tickets, allDone, logs, stats }
+}
+
+test('runWaves logs the stats line after the finish summary',
+    async t => {
+        const dir = tmp()
+        try {
+            const streamFile = writeStreamFile(dir, ONE_SUBAGENT_STREAM)
+            const run = await runOneInPlace(FAKE_CLAUDE, {
+                FAKE_CLAUDE_STREAM:streamFile,
+            })
+
+            t.equal(run.tickets[0].status, 'done', 'ticket is done')
+            t.equal(run.allDone, true, 'allDone')
+            const summaryAt = run.logs.indexOf(
+                '\n' + renderFinishSummary(run.tickets, 1, new Set())
+            )
+            const statsAt = run.logs.indexOf(renderRunStats({
+                agentRuns:1, withCost:1, subagents:1, costUsd:0.25,
+            }) ?? '')
+            t.ok(summaryAt >= 0, 'finish summary is logged')
+            t.ok(statsAt > summaryAt, 'stats line follows it')
+            t.deepEqual(
+                run.stats[run.stats.length - 1],
+                { subagents:1, costUsd:0.25 },
+                'the row shows the run total'
+            )
+        } finally {
+            rmSync(dir, { recursive:true, force:true })
+        }
+    }
+)
+
+test('runWaves outcome ignores an error result and bad lines',
+    async t => {
+        const dir = tmp()
+        try {
+            const streamFile = writeStreamFile(dir, [
+                agentLine('toolu_1'),
+                'not json at all',
+                {
+                    type:'result',
+                    subtype:'error_max_turns',
+                    is_error:true,
+                    total_cost_usd:0.25,
+                },
+            ])
+            const run = await runOneInPlace(FAKE_CLAUDE, {
+                FAKE_CLAUDE_STREAM:streamFile,
+            })
+
+            t.equal(run.tickets[0].status, 'done', 'ticket is done')
+            t.equal(run.allDone, true, 'allDone')
+            t.ok(
+                run.logs.includes('\n' + renderFinishSummary(
+                    run.tickets, 1, new Set()
+                )),
+                'finish summary is unchanged'
+            )
+        } finally {
+            rmSync(dir, { recursive:true, force:true })
+        }
+    }
+)
+
+test('runWaves logs no stats line for a non-claude agent',
+    async t => {
+        const run = await runOneInPlace(MOCK_NOOP, {})
+
+        t.equal(run.tickets[0].status, 'done', 'ticket is done')
+        t.equal(
+            run.logs[run.logs.length - 1],
+            '\n' + renderFinishSummary(run.tickets, 1, new Set()),
+            'the finish summary is the last log'
+        )
     }
 )

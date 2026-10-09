@@ -25,12 +25,14 @@ import {
     killRunningAgents,
     killProcessGroup,
     ticketKey,
+    renderFinishSummary,
     type Ticket,
 } from '../src/orchestrator.js'
 import { parseEntries, readEntries } from '../src/learnings.js'
 import { readProgress } from '../src/progress.js'
 import { parseReviewEntries } from '../src/review.js'
 import { subagentRule } from '../src/rules.js'
+import { renderRunStats } from '../src/stats.js'
 
 function tmp ():string {
     return mkdtempSync(
@@ -5893,3 +5895,251 @@ test('runWavesIsolated - prefer-subagent AC1.6 reaches ticket and ' +
         rmSync(templateDir, { recursive:true, force:true })
     }
 })
+
+// -- subagent stats tally (runWavesIsolated) --
+
+// One main-loop `Agent` call and a result: each fake claude run
+// reports `{ subagents:1, costUsd:0.25 }`
+function writeOneSubagentStream (dir:string):string {
+    const path = join(dir, 'stream.jsonl')
+    const lines = [
+        {
+            type:'assistant',
+            message:{
+                content:[{
+                    type:'tool_use', id:'toolu_1', name:'Agent', input:{},
+                }],
+            },
+        },
+        {
+            type:'result',
+            subtype:'success',
+            total_cost_usd:0.25,
+            subagent_stats:{ spawned:1 },
+        },
+    ]
+    writeFileSync(path, lines.map(l => JSON.stringify(l)).join('\n') + '\n')
+    return path
+}
+
+// Runs `fn` with only `values` set among the fake claude keys,
+// restoring every key afterwards
+async function withFakeClaude (
+    values:Record<string, string>,
+    fn:() => Promise<void>
+):Promise<void> {
+    const saved = FAKE_CLAUDE_KEYS.map(key => {
+        return [key, process.env[key]] as const
+    })
+    try {
+        for (const key of FAKE_CLAUDE_KEYS) delete process.env[key]
+        for (const [key, value] of Object.entries(values)) {
+            process.env[key] = value
+        }
+        await fn()
+    } finally {
+        for (const [key, value] of saved) {
+            if (value === undefined) delete process.env[key]
+            else process.env[key] = value
+        }
+    }
+}
+
+function logsOf (calls:ReadonlyArray<DisplayCall>):string[] {
+    return calls
+        .filter(c => c.method === 'log')
+        .map(c => String(c.args[0]))
+}
+
+test('runWavesIsolated - logs the stats line after the finish summary',
+    async t => {
+        const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+        const projectDir = initTempGitRepo({ templateDir })
+        const dataDir = tmp()
+        const originalCwd = process.cwd()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            mkdirSync(issuesDir)
+            writeFileSync(
+                join(issuesDir, '01-only.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
+            const { display, calls } = recordingDisplay()
+
+            await withFakeClaude({
+                FAKE_CLAUDE_STREAM:writeOneSubagentStream(dataDir),
+                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+            }, async () => {
+                process.chdir(projectDir)
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:FAKE_CLAUDE,
+                    model:null,
+                    timeout:10,
+                    logsDir:join(projectDir, '.logs'),
+                    featureName:'test-feature-stats-line',
+                    conflictStrategy:'respawn',
+                    testCmd:'true',
+                    display,
+                })
+            })
+
+            t.equal(tickets[0].status, 'done', 'ticket is done')
+            const logs = logsOf(calls)
+            const summaryAt = logs.indexOf(
+                '\n' + renderFinishSummary(tickets, 1, new Set())
+            )
+            t.ok(summaryAt >= 0, 'finish summary is logged')
+            t.equal(
+                logs[summaryAt + 1],
+                renderRunStats({
+                    agentRuns:1, withCost:1, subagents:1, costUsd:0.25,
+                }),
+                'the stats line follows the finish summary'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            removeWorktreesAndRepo(projectDir)
+            rmSync(dataDir, { recursive:true, force:true })
+            rmSync(templateDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test('runWavesIsolated - the stats tally counts merge respawns',
+    async t => {
+        const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+        const projectDir = initTempGitRepo({ templateDir })
+        const dataDir = tmp()
+        const repoName = basename(projectDir)
+        const fakeGit = installMergeFailOnceGit(`${repoName}--02-second`)
+        const originalCwd = process.cwd()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            mkdirSync(issuesDir)
+            writeFileSync(
+                join(issuesDir, '01-first.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            writeFileSync(
+                join(issuesDir, '02-second.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
+            const { display, calls } = recordingDisplay()
+
+            await withFakeClaude({
+                FAKE_CLAUDE_STREAM:writeOneSubagentStream(dataDir),
+                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+            }, async () => {
+                process.chdir(projectDir)
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:FAKE_CLAUDE,
+                    model:null,
+                    timeout:10,
+                    logsDir:join(projectDir, '.logs'),
+                    featureName:'test-feature-stats-respawn',
+                    conflictStrategy:'respawn',
+                    testCmd:'true',
+                    display,
+                })
+            })
+
+            t.equal(tickets[1].status, 'done',
+                'ticket 2 is done after the respawn')
+            t.ok(
+                logsOf(calls).includes(renderRunStats({
+                    agentRuns:3, withCost:3, subagents:3, costUsd:0.75,
+                }) ?? ''),
+                'both tickets and the respawn are tallied'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            fakeGit.restore()
+            removeWorktreesAndRepo(projectDir)
+            rmSync(dataDir, { recursive:true, force:true })
+            rmSync(templateDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test('runWavesIsolated - a ticket row shows the total across attempts',
+    async t => {
+        const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+        const projectDir = initTempGitRepo({ templateDir })
+        const dataDir = tmp()
+        const originalCwd = process.cwd()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            const logsDir = join(projectDir, '.logs')
+            mkdirSync(issuesDir)
+            writeFileSync(
+                join(issuesDir, '01-only.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
+            const { display, calls } = recordingDisplay()
+
+            await withFakeClaude({
+                FAKE_CLAUDE_STREAM:writeOneSubagentStream(dataDir),
+                FAKE_CLAUDE_FAIL_ONCE:join(dataDir, 'failed-once'),
+                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+            }, async () => {
+                process.chdir(projectDir)
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:FAKE_CLAUDE,
+                    model:null,
+                    timeout:10,
+                    logsDir,
+                    featureName:'test-feature-stats-retry',
+                    conflictStrategy:'respawn',
+                    testCmd:'true',
+                    retries:1,
+                    retryDelay:0,
+                    display,
+                })
+            })
+
+            t.equal(tickets[0].status, 'done',
+                'ticket is done on the second attempt')
+            const stats = calls
+                .filter(c => c.method === 'setTicketStats')
+                .filter(c => c.args[0] === 1)
+                .map(c => c.args[2])
+            t.deepEqual(
+                stats[stats.length - 1],
+                { subagents:2, costUsd:0.5 },
+                'the last row stats are both attempts together'
+            )
+            t.ok(
+                stats.some(s => {
+                    return JSON.stringify(s) ===
+                        JSON.stringify({ subagents:2, costUsd:0.25 })
+                }),
+                'the retry adds its live count to the first attempt'
+            )
+            const entries = parseEntries(readFileSync(
+                join(projectDir, 'learnings.md'), 'utf8'
+            ))
+            t.equal(entries.length, 2, 'one entry per attempt')
+            t.ok(
+                entries.every(e => e.body.includes('Subagents: 1.')),
+                'each entry records its own subagent count'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            removeWorktreesAndRepo(projectDir)
+            rmSync(dataDir, { recursive:true, force:true })
+            rmSync(templateDir, { recursive:true, force:true })
+        }
+    }
+)

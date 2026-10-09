@@ -66,9 +66,13 @@ import {
 } from './rules.js'
 import { runReviewPass, renderReviewSummary } from './review.js'
 import {
+    addRun,
+    addStats,
+    emptyRunStats,
     emptyStreamStats,
     isRecord,
     nextStreamStats,
+    renderRunStats,
     type SubagentStats,
 } from './stats.js'
 import {
@@ -1521,6 +1525,8 @@ async function respawnAndRetryMerge (opts:{
     // claude only: model for subagents; unset = off
     preferSubagent?:string
     onLine?:(msg:string) => void
+    // called with every agent result, for the run's stats tally
+    onAgentRun?:(result:AgentResult) => void
 }):Promise<boolean> {
     const log = (msg:string):void => {
         if (opts.onLine) {
@@ -1582,6 +1588,7 @@ async function respawnAndRetryMerge (opts:{
         preferSubagent:opts.preferSubagent,
         onLine:opts.onLine,
     })
+    opts.onAgentRun?.(result)
 
     if (result.exitCode !== 0) {
         const msg2 = `  ${opts.ticket.filename}: respawned agent ` +
@@ -1753,6 +1760,8 @@ type TicketAttemptOpts = {
     preferSubagent?:string
     learningsPath:string
     d:Display
+    // called with every agent result, for the run's stats tally
+    onAgentRun?:(result:AgentResult) => void
 }
 
 // The ticket's own earlier attempts and its direct blockers'
@@ -1786,7 +1795,11 @@ function buildHistory (
 // and the checks that decide whether the branch can merge.
 // A failed attempt removes its worktree before returning.
 async function runTicketAttempt (
-    opts:TicketAttemptOpts&{ attempt:number }
+    opts:TicketAttemptOpts&{
+        attempt:number
+        // live stats from this attempt's agent, as they change
+        onStats?:(stats:SubagentStats) => void
+    }
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
 
@@ -1868,8 +1881,10 @@ async function runTicketAttempt (
         maxTurns:opts.maxTurns,
         effort:opts.effort,
         preferSubagent:opts.preferSubagent,
+        onStats:opts.onStats,
         onLine:(line) => d.log(line),
     })
+    opts.onAgentRun?.(agentResult)
 
     // Collect before anything commits or removes the worktree,
     // so the notes never reach the timeout auto-commit.
@@ -2098,6 +2113,11 @@ async function runTicketAttempts (
     opts:TicketAttemptOpts&{ retries:number; retryDelay:number }
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
+    // The row shows every attempt's subagents and cost so far.
+    let prior:SubagentStats = { subagents:0 }
+    const showStats = (stats:SubagentStats):void => {
+        d.setTicketStats(ticket.num, ticket.feature, stats)
+    }
     return runWithRetries<TicketOutcome>({
         maxAttempts:opts.retries + 1,
         retryDelay:opts.retryDelay,
@@ -2120,7 +2140,14 @@ async function runTicketAttempts (
         let outcome:TicketOutcome
         try {
             outcome = await runTicketAttempt({
-                ...opts, attempt, effort,
+                ...opts,
+                attempt,
+                effort,
+                onStats:stats => showStats(addStats(prior, stats)),
+                onAgentRun:result => {
+                    prior = addStats(prior, result)
+                    opts.onAgentRun?.(result)
+                },
             })
         } catch (error) {
             d.log(
@@ -2363,6 +2390,8 @@ export async function runWaves (
     let waveNum = 0
     const failedKeys = new Set<string>()
     const session = sessionTickets(tickets)
+    // Every agent the run spawns, for the stats line at the end
+    let runStats = emptyRunStats()
 
     while (true) {
         if (waveNum > 0) reportBlocked(d, tickets, failedKeys)
@@ -2401,6 +2430,18 @@ export async function runWaves (
                     t.num, 'in-progress', t.feature
                 )
                 d.log(`  Starting ${t.filename}`)
+                // The row shows every attempt's subagents and
+                // cost so far.
+                let prior:SubagentStats = { subagents:0 }
+                const onStats = (stats:SubagentStats):void => {
+                    d.setTicketStats(
+                        t.num, t.feature, addStats(prior, stats)
+                    )
+                }
+                const tally = (r:AgentResult):void => {
+                    prior = addStats(prior, r)
+                    runStats = addRun(runStats, r)
+                }
                 let level = effort
                 let result = await spawnAgent({
                     prompt,
@@ -2412,8 +2453,10 @@ export async function runWaves (
                     maxTurns,
                     effort:level,
                     preferSubagent,
+                    onStats,
                     onLine:(line) => d.log(line),
                 })
+                tally(result)
                 // In-place runs have no worktree or test
                 // gate, so a non-zero exit is the only
                 // failure that can be retried here.
@@ -2454,8 +2497,10 @@ export async function runWaves (
                         maxTurns,
                         effort:level,
                         preferSubagent,
+                        onStats,
                         onLine:(line) => d.log(line),
                     })
+                    tally(result)
                 }
                 return { ticket:t, result }
             }
@@ -2521,6 +2566,8 @@ export async function runWaves (
     d.log('\n' + renderFinishSummary(
         tickets, totalCompleted, failedKeys
     ))
+    const statsLine = renderRunStats(runStats)
+    if (statsLine) d.log(statsLine)
     d.cleanup()
 
     return { allDone:remaining.length === 0 }
@@ -2647,6 +2694,11 @@ export async function runWavesIsolated (opts:{
     let waveNum = 0
     const failedKeys = new Set<string>()
     const session = sessionTickets(opts.tickets)
+    // Every agent the run spawns, for the stats line at the end
+    let runStats = emptyRunStats()
+    const onAgentRun = (result:AgentResult):void => {
+        runStats = addRun(runStats, result)
+    }
 
     while (true) {
         if (waveNum > 0) reportBlocked(d, opts.tickets, failedKeys)
@@ -2701,6 +2753,7 @@ export async function runWavesIsolated (opts:{
                 retries,
                 retryDelay,
                 d,
+                onAgentRun,
             })
         )
 
@@ -2955,6 +3008,7 @@ export async function runWavesIsolated (opts:{
                                 maxTurns:opts.maxTurns,
                                 preferSubagent:opts.preferSubagent,
                                 onLine:(msg) => d.log(msg),
+                                onAgentRun,
                             }) :
                             false
 
@@ -3141,7 +3195,14 @@ export async function runWavesIsolated (opts:{
                 retries,
                 retryDelay,
                 log:(msg) => d.log(msg),
-            }, { spawnAgent, registry:runningAgents })
+            }, {
+                spawnAgent:async spawnOpts => {
+                    const result = await spawnAgent(spawnOpts)
+                    onAgentRun(result)
+                    return result
+                },
+                registry:runningAgents,
+            })
             reviewLine = renderReviewSummary(
                 outcome, relative(repoRoot, opts.review.reviewPath)
             )
@@ -3156,6 +3217,8 @@ export async function runWavesIsolated (opts:{
     d.log('\n' + renderFinishSummary(
         opts.tickets, totalCompleted, failedKeys
     ))
+    const statsLine = renderRunStats(runStats)
+    if (statsLine) d.log(statsLine)
     if (reviewLine) d.log(reviewLine)
     d.log(`Work is on ${baseBranch}`)
     d.cleanup()
