@@ -151,10 +151,11 @@ Small orchestrator that runs a single-agent session per issue.
 - **Zero-ready stop**: right after the first scan, before
   provider preflight, `--dry-run` output and any branch work,
   a run where `nothingReady` holds prints `renderNothingReady`
-  and exits 0, creating and checking out nothing. When the
-  run will resume an existing integration branch (checked
-  only when `nothingReady` holds, from `planIntegrationBranch`
-  and `localBranchExists`), the first-scan check is skipped
+  and exits 0, creating and checking out nothing. When a
+  git-repo run outside `--dry-run` will resume an existing
+  integration branch (checked only when `nothingReady`
+  holds, from `planIntegrationBranch` and
+  `localBranchExists`), the first-scan check is skipped
   and the resume re-scan decides: if `nothingReady` holds
   there, the CLI checks the launch branch back out (the same
   checkout `failStaleResume` uses), prints `Nothing to run on
