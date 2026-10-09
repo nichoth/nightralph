@@ -11,6 +11,7 @@ import { runWavesIsolated, scanTickets } from '../src/orchestrator.js'
 import { parseReviewEntries } from '../src/review.js'
 
 const MOCK = join(process.cwd(), 'test', 'mock-agent-review.js')
+const FAKE_CLAUDE = join(process.cwd(), 'test', 'fake-claude', 'claude')
 const FEAT = 'feat'
 
 const GIT_ENV = {
@@ -52,6 +53,8 @@ function countRoles (recordDir:string):Roles {
     return counts
 }
 
+type RunOpts = Parameters<typeof runWavesIsolated>[0]
+
 type Harness = {
     projectDir:string
     recordDir:string
@@ -59,7 +62,9 @@ type Harness = {
     run:(
         review?:boolean,
         display?:Display,
-        forkedFrom?:string
+        forkedFrom?:string,
+        // spread last, over the harness defaults
+        extra?:Partial<RunOpts>
     ) => Promise<{
         allDone:boolean
         branch:string
@@ -68,6 +73,7 @@ type Harness = {
 
 const ENV_KEYS = [
     'MOCK_RECORD_DIR', 'MOCK_REVIEW', 'MOCK_FIX', 'MOCK_TICKET',
+    'FAKE_CLAUDE_DELEGATE', 'FAKE_CLAUDE_ENV_LOG', 'FAKE_CLAUDE_STREAM',
 ] as const
 
 async function withHarness (
@@ -108,7 +114,12 @@ async function withHarness (
             projectDir,
             recordDir,
             reviewPath,
-            run:(review = true, display = quietDisplay(), forkedFrom) => {
+            run:(
+                review = true,
+                display = quietDisplay(),
+                forkedFrom,
+                extra = {}
+            ) => {
                 return runWavesIsolated({
                     tickets:scanTickets(issuesDir, FEAT),
                     specBody:'SPEC',
@@ -127,6 +138,7 @@ async function withHarness (
                     retries:0,
                     retryDelay:0,
                     review:review ? { reviewPath, forkedFrom } : undefined,
+                    ...extra,
                 })
             },
         })
@@ -172,6 +184,37 @@ test('review pass - AC6.1 AC7.1 a fix merges and the log is ' +
         t.equal(entries[0].to, git(h.projectDir, ['rev-parse', 'HEAD~1']),
             'marker is the tip after the fix, before the log commit')
     })
+})
+
+test('review pass - prefer-subagent AC1.6 reaches the reviewer ' +
+    'and the fixer', async t => {
+    const logDir = mkdtempSync(join(tmpdir(), 'nightralph-envlog-'))
+    const envLog = join(logDir, 'env.log')
+    try {
+        await withHarness({
+            MOCK_REVIEW:'findings',
+            MOCK_FIX:'pass',
+            MOCK_TICKET:'pass',
+            FAKE_CLAUDE_DELEGATE:MOCK,
+            FAKE_CLAUDE_ENV_LOG:envLog,
+        }, async h => {
+            const result = await h.run(true, quietDisplay(), undefined, {
+                agentCmd:FAKE_CLAUDE,
+                preferSubagent:'haiku',
+            })
+            t.ok(result.allDone, 'tickets done')
+            t.deepEqual(countRoles(h.recordDir),
+                { reviewer:1, fixer:1, ticket:1 }, 'one of each')
+            const values = readFileSync(envLog, 'utf8')
+                .split('\n')
+                .filter(line => line !== '')
+                .map(line => JSON.parse(line))
+            t.deepEqual(values, ['haiku', 'haiku', 'haiku'],
+                'the ticket, reviewer and fixer agents get the model')
+        })
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
 })
 
 test('review pass - AC6.2 AC6.3 a red fix merges nothing but ' +

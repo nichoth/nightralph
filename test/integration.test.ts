@@ -1,4 +1,4 @@
-import { test } from '@substrate-system/tapzero'
+import { test, type Test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync,
     appendFileSync, copyFileSync,
@@ -30,6 +30,7 @@ import {
 import { parseEntries, readEntries } from '../src/learnings.js'
 import { readProgress } from '../src/progress.js'
 import { parseReviewEntries } from '../src/review.js'
+import { subagentRule } from '../src/rules.js'
 
 function tmp ():string {
     return mkdtempSync(
@@ -5555,5 +5556,278 @@ test('CLI subprocess - AC3.3 a closed feature prompt exits 2 with ' +
         t.ok(!hasStackLine(stderr), 'no stack frames on stderr')
     } finally {
         rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+// -- --prefer-subagent --
+
+const FAKE_CLAUDE = join(process.cwd(), 'test', 'fake-claude', 'claude')
+const SUBAGENT_RULE = subagentRule('haiku')
+const FAKE_CLAUDE_KEYS = [
+    'CLAUDE_CODE_SUBAGENT_MODEL',
+    'FAKE_CLAUDE_DELEGATE',
+    'FAKE_CLAUDE_ENV_LOG',
+    'FAKE_CLAUDE_HANG',
+    'FAKE_CLAUDE_STREAM',
+]
+
+function hasEveryRuleLine (text:string):boolean {
+    return SUBAGENT_RULE.every(line => text.includes(line))
+}
+
+function hasNoRuleLine (text:string):boolean {
+    return SUBAGENT_RULE.every(line => !text.includes(line))
+}
+
+// The CLI's env without anything the fake claude reads, plus `extra`
+function fakeClaudeEnv (
+    extra:Record<string, string> = {}
+):NodeJS.ProcessEnv {
+    const env = { ...process.env }
+    for (const key of FAKE_CLAUDE_KEYS) delete env[key]
+    return { ...env, ...extra }
+}
+
+function readEnvLog (path:string):unknown[] {
+    return readFileSync(path, 'utf8')
+        .split('\n')
+        .filter(line => line !== '')
+        .map(line => JSON.parse(line))
+}
+
+// The dry-run cases for one project: the flag, no flag, and `""`
+async function checkPreferSubagentDryRun (
+    t:Test,
+    projectDir:string
+):Promise<void> {
+    const base = [FAKE_CLAUDE, '--spec', FEAT, '--dry-run']
+    const env = fakeClaudeEnv()
+
+    const on = await spawnCli(
+        [...base, '--prefer-subagent', 'haiku'],
+        { cwd:projectDir, env }
+    )
+    t.equal(on.code, 0, 'AC1.1 exit 0')
+    t.ok(on.stdout.includes('Prefer subagent: haiku'),
+        'AC1.1 the dry run names the model')
+    t.ok(hasEveryRuleLine(on.stdout),
+        'AC1.1 the printed prompt carries the subagent rule')
+
+    const off = await spawnCli(base, { cwd:projectDir, env })
+    t.equal(off.code, 0, 'AC1.2 exit 0')
+    t.ok(off.stdout.includes('Prefer subagent: (none)'),
+        'AC1.2 the dry run says none')
+    t.ok(hasNoRuleLine(off.stdout),
+        'AC1.2 the printed prompt has no subagent rule')
+
+    const empty = await spawnCli(
+        [...base, '--prefer-subagent', ''],
+        { cwd:projectDir, env }
+    )
+    t.equal(empty.code, 0, 'AC1.7 exit 0')
+    t.equal(empty.stdout, off.stdout,
+        'AC1.7 an empty value prints what no flag prints')
+}
+
+test('CLI subprocess - prefer-subagent AC1.1 AC1.2 AC1.7 in-place ' +
+    'dry run', async t => {
+    const projectDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        await checkPreferSubagentDryRun(t, projectDir)
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - prefer-subagent AC1.1 AC1.2 AC1.7 isolated ' +
+    'dry run', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        await checkPreferSubagentDryRun(t, projectDir)
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - prefer-subagent AC1.3 AC1.7 other providers ' +
+    'warn once and drop it', async t => {
+    const projectDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const env = fakeClaudeEnv()
+
+        for (const provider of ['codex', 'pi']) {
+            const { code, stdout, stderr } = await spawnCli([
+                provider, '--spec', FEAT, '--dry-run',
+                '--prefer-subagent', 'haiku',
+            ], { cwd:projectDir, env })
+            t.equal(code, 0, `AC1.3 ${provider}: exit 0`)
+            t.equal(stderr.split('--prefer-subagent').length, 2,
+                `AC1.3 ${provider}: one warning`)
+            t.ok(stdout.includes('Prefer subagent: (none)'),
+                `AC1.3 ${provider}: the value is dropped`)
+            t.ok(hasNoRuleLine(stdout),
+                `AC1.3 ${provider}: the prompt has no subagent rule`)
+        }
+
+        const { code, stderr } = await spawnCli([
+            'codex', '--spec', FEAT, '--dry-run',
+            '--prefer-subagent', '',
+        ], { cwd:projectDir, env })
+        t.equal(code, 0, 'AC1.7 codex with "": exit 0')
+        t.ok(!stderr.includes('--prefer-subagent'),
+            'AC1.7 codex with "": no warning')
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - prefer-subagent AC1.6 AC1.7 in-place run ' +
+    'passes the model to the agent', async t => {
+    const projectDir = tmp()
+    const logDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        const ticketPath = join(issuesDir, '01-task.md')
+        const run = async (value:string, envLog:string) => {
+            writeFileSync(
+                ticketPath,
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            return spawnCli([
+                FAKE_CLAUDE, '--spec', FEAT, '--timeout', '10',
+                '--prefer-subagent', value, '--test-cmd', '',
+            ], {
+                cwd:projectDir,
+                env:fakeClaudeEnv({ FAKE_CLAUDE_ENV_LOG:envLog }),
+            })
+        }
+
+        const onLog = join(logDir, 'on.log')
+        const on = await run('haiku', onLog)
+        t.equal(on.code, 0, 'AC1.6 exit 0')
+        t.deepEqual(readEnvLog(onLog), ['haiku'],
+            'AC1.6 the agent gets the model')
+
+        const emptyLog = join(logDir, 'empty.log')
+        const empty = await run('', emptyLog)
+        t.equal(empty.code, 0, 'AC1.7 exit 0')
+        t.deepEqual(readEnvLog(emptyLog), [null],
+            'AC1.7 an empty value sets nothing')
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - prefer-subagent AC1.6 isolated run passes ' +
+    'the model to the agent', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    const logDir = tmp()
+    try {
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        const envLog = join(logDir, 'env.log')
+
+        const { code } = await spawnCli([
+            FAKE_CLAUDE, '--spec', FEAT, '--timeout', '10',
+            '--prefer-subagent', 'haiku', '--test-cmd', '',
+            '--no-review',
+        ], {
+            cwd:projectDir,
+            env:fakeClaudeEnv({
+                FAKE_CLAUDE_ENV_LOG:envLog,
+                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+            }),
+        })
+
+        t.equal(code, 0, 'exit 0')
+        t.deepEqual(readEnvLog(envLog), ['haiku'],
+            'the agent gets the model')
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+test('runWavesIsolated - prefer-subagent AC1.6 reaches ticket and ' +
+    'merge-respawn agents', async t => {
+    const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+    const projectDir = initTempGitRepo({ templateDir })
+    const logDir = tmp()
+    const repoName = basename(projectDir)
+    const fakeGit = installMergeFailOnceGit(`${repoName}--02-second`)
+    const saved = FAKE_CLAUDE_KEYS.map(key => {
+        return [key, process.env[key]] as const
+    })
+    const originalCwd = process.cwd()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-second.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const envLog = join(logDir, 'env.log')
+        for (const key of FAKE_CLAUDE_KEYS) delete process.env[key]
+        process.env.FAKE_CLAUDE_ENV_LOG = envLog
+        process.env.FAKE_CLAUDE_DELEGATE = MOCK_PASS
+        process.chdir(projectDir)
+
+        await runWavesIsolated({
+            tickets,
+            specBody:'test spec',
+            agentCmd:FAKE_CLAUDE,
+            model:null,
+            timeout:10,
+            logsDir,
+            featureName:'test-feature-prefer-subagent',
+            conflictStrategy:'respawn',
+            testCmd:'true',
+            preferSubagent:'haiku',
+        })
+
+        t.equal(tickets[0].status, 'done', 'ticket 1 is done')
+        t.equal(tickets[1].status, 'done',
+            'ticket 2 is done after the respawn')
+        t.deepEqual(readEnvLog(envLog), ['haiku', 'haiku', 'haiku'],
+            'both tickets and the respawn get the model')
+    } finally {
+        process.chdir(originalCwd)
+        for (const [key, value] of saved) {
+            if (value === undefined) delete process.env[key]
+            else process.env[key] = value
+        }
+        fakeGit.restore()
+        removeWorktreesAndRepo(projectDir)
+        rmSync(logDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive:true, force:true })
     }
 })
