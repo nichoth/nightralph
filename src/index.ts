@@ -587,6 +587,7 @@ async function runExecute (argv:{
             retryDelay:argv.retryDelay,
             concurrency:argv.concurrency,
             progressPaths,
+            warnings:loaded.warnings,
             review:argv.review === false ?
                 undefined :
                 {
@@ -607,6 +608,7 @@ async function runExecute (argv:{
             argv.retries,
             argv.retryDelay,
             argv.concurrency,
+            loaded.warnings,
         )
     }
 

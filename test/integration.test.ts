@@ -451,7 +451,7 @@ test('CLI subprocess - unknown blocker keeps the ticket from running',
                 }),
             )
 
-            const { code, stdout } = await spawnCli([
+            const { code, stdout, stderr } = await spawnCli([
                 MOCK_AGENT,
                 '--spec', FEAT,
                 '--timeout', '10',
@@ -467,6 +467,15 @@ test('CLI subprocess - unknown blocker keeps the ticket from running',
             t.ok(
                 stdout.includes('Found 1 tickets'),
                 'the CLI scanned the ticket',
+            )
+            const combined = stdout + stderr
+            t.ok(
+                combined.includes('99'),
+                'the summary names blocker 99',
+            )
+            t.ok(
+                combined.includes('not found'),
+                'the summary says it was not found',
             )
 
             const ticket = readFileSync(
@@ -533,6 +542,40 @@ test('CLI subprocess - dry-run deadlock detection',
             })
         }
     })
+
+test('CLI subprocess - AC2.9: the finish summary repeats a typo ' +
+    'warning', async t => {
+    const projectDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+
+        writeFileSync(
+            join(issuesDir, '01-done.md'),
+            makeTicketBody({ status:'done' }),
+        )
+        // The typo ref falls back to own ticket 01, which is done,
+        // so 02 runs and the warning only shows in the summary.
+        writeFileSync(
+            join(issuesDir, '02-typo.md'),
+            '# Test ticket\n\n**Status:** ready-for-agent\n' +
+            '**Blocked by:** nwsletter-audit 01\n',
+        )
+
+        const { code, stdout, stderr } = await spawnCli([
+            MOCK_AGENT,
+            '--spec', FEAT,
+            '--timeout', '10',
+        ], { cwd:projectDir })
+
+        t.equal(code, 0, 'exit code 0')
+        t.ok(
+            (stdout + stderr).includes('nwsletter-audit'),
+            'the summary names the misspelt feature',
+        )
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
 
 test('CLI subprocess - execute smoke test', async t => {
     const projectDir = tmp()

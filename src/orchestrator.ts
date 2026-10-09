@@ -100,6 +100,7 @@ import {
     parseBlockerField,
     provisionalRefs,
     type BlockerRef,
+    type BlockerWarning,
 } from './blockers.js'
 
 export type Ticket = {
@@ -1695,24 +1696,51 @@ type TicketAttemptOpts = {
     d:Display
 }
 
-// The ticket's own earlier attempts and its direct blockers'
-// last successful runs, rendered for the prompt. Learnings are
-// advisory, so an unreadable log means no history, not a failure.
+/**
+ * The ticket's own earlier attempts and its direct blockers' last
+ * successful runs, rendered for the prompt. A blocker in another
+ * feature is read from that feature's learnings.md, under the same
+ * .scratch dir as this ticket's feature. Throws when a log cannot
+ * be read.
+ */
+export function historyFor (
+    learningsPath:string,
+    ticket:Ticket
+):string {
+    // <scratch>/<feature>/issues/<file>.md; a nested feature name
+    // (a/b) is several dirs deep, so climb one level per segment.
+    const featureDir = dirname(dirname(ticket.filepath))
+    const scratchDir = ticket.feature ?
+        join(featureDir, ...ticket.feature.split('/').map(() => '..')) :
+        dirname(featureDir)
+    const others = new Set(
+        ticket.blockers
+            .map(r => r.feature)
+            .filter(f => f !== ticket.feature)
+    )
+    const entries = [
+        ...readEntries(learningsPath),
+        ...[...others].flatMap(f => readEntries(
+            join(scratchDir, f, 'learnings.md')
+        )),
+    ]
+    return renderHistory(selectHistory(entries, {
+        key:ticketKey(ticket.feature, ticket.num),
+        blockerKeys:ticket.blockers.map(r => {
+            return ticketKey(r.feature, r.num)
+        }),
+    }))
+}
+
+// Learnings are advisory, so an unreadable log means no history,
+// not a failure.
 function buildHistory (
     learningsPath:string,
     ticket:Ticket,
     d:Display
 ):string {
     try {
-        return renderHistory(selectHistory(
-            readEntries(learningsPath),
-            {
-                key:ticketKey(ticket.feature, ticket.num),
-                blockerKeys:ticket.blockers.map(r => {
-                    return ticketKey(r.feature, r.num)
-                }),
-            }
-        ))
+        return historyFor(learningsPath, ticket)
     } catch (err) {
         d.log(
             `  ${ticket.filename}: could not read ` +
@@ -2128,28 +2156,128 @@ function indentFilenames (tickets:ReadonlyArray<Ticket>):string {
 }
 
 /**
+ * The paragraphs that explain why open tickets did not run, each
+ * preceded by a blank line: ready-for-human tickets and what they
+ * block, then tickets waiting on blockers outside the run, blocker
+ * refs that match no ticket, and likely feature-name typos.
+ * Returns [] when there is nothing to explain.
+ */
+function explainOpen (
+    tickets:ReadonlyArray<Ticket>,
+    failedKeys:ReadonlySet<string>,
+    warnings:ReadonlyArray<BlockerWarning>,
+):string[] {
+    const remaining = tickets.filter(
+        t => t.status === 'ready-for-agent'
+    )
+    const open = remaining.filter(
+        t => !failedKeys.has(ticketKey(t.feature, t.num))
+    )
+    const lines:string[] = []
+
+    const human = tickets.filter(t => t.status === HUMAN_STATUS)
+    if (human.length > 0) {
+        const humanKeys = new Set(
+            human.map(t => ticketKey(t.feature, t.num))
+        )
+        const blockedByHuman = open.filter(t => t.blockers.some(
+            r => humanKeys.has(ticketKey(r.feature, r.num))
+        ))
+        const noun = human.length === 1 ?
+            'ticket is' :
+            'tickets are'
+        lines.push(
+            '',
+            (remaining.length === 0 && failedKeys.size === 0 ?
+                `All remaining ${noun} marked ${HUMAN_STATUS}. ` :
+                `${human.length} ${noun} marked ${HUMAN_STATUS}. `) +
+            'nightralph only runs ready-for-agent tickets, ' +
+            'so an agent cannot finish these:',
+            indentFilenames(human),
+        )
+        if (blockedByHuman.length > 0) {
+            const n = blockedByHuman.length
+            lines.push(
+                `${n} ready-for-agent ticket` +
+                `${n === 1 ? ' is' : 's are'} ` +
+                'blocked until they are done:',
+                indentFilenames(blockedByHuman),
+            )
+        }
+        lines.push(
+            'Do that work by hand, then set each ticket\'s ' +
+            '**Status:** to done' +
+            (blockedByHuman.length > 0 ?
+                ' and run nightralph again.' :
+                '.')
+        )
+    }
+
+    const blockers:string[] = []
+    const outside = open.filter(
+        t => t.blockers.some(r => r.where === 'pending')
+    )
+    if (outside.length > 0) {
+        const n = outside.length
+        blockers.push(
+            `${n} ready-for-agent ticket` +
+            `${n === 1 ? ' waits' : 's wait'} on tickets outside ` +
+            'this run. Select those features too, or finish them ' +
+            'first:',
+            ...outside.map(t => (
+                `  ${ticketLabel(toRef(t))} waits on ` +
+                t.blockers
+                    .filter(r => r.where === 'pending')
+                    .map(blockerLabel)
+                    .join(', ')
+            )),
+        )
+    }
+    const missing = open.flatMap(t => t.blockers
+        .filter(r => r.where === 'missing')
+        .map(r => `  ${ticketLabel(toRef(t))}: ${blockerLabel(r)}`))
+    if (missing.length > 0) {
+        const n = missing.length
+        blockers.push(
+            `${n} blocker reference${n === 1 ? '' : 's'} match no ` +
+            'ticket. Fix the **Blocked by:** line:',
+            ...missing,
+        )
+    }
+    const typos = warnings.filter(w => w.kind === 'typo')
+    if (typos.length > 0) {
+        const n = typos.length
+        blockers.push(
+            `${n} word${n === 1 ? '' : 's'} in a **Blocked by:** ` +
+            `line look${n === 1 ? 's' : ''} like a feature name but ` +
+            'match no .scratch/<name>/issues directory:',
+            ...typos.map(w => `  ${w.ticket}: ${w.text}`),
+        )
+    }
+    if (blockers.length > 0) lines.push('', ...blockers)
+
+    return lines
+}
+
+/**
  * The text logged when a run ends. The first line is the
- * count summary. When tickets marked ready-for-human are
- * still open, further lines name them and say that an
- * agent cannot finish them, so a run that exits with open
+ * count summary. Further paragraphs (`explainOpen`) name
+ * open ready-for-human tickets and say that an agent cannot
+ * finish them, list tickets waiting on blockers outside the
+ * run and blocker refs that match no ticket, and repeat the
+ * typo `warnings` from loading, so a run that exits with open
  * tickets never looks like it silently gave up.
  */
 export function renderFinishSummary (
     tickets:ReadonlyArray<Ticket>,
     totalCompleted:number,
     failedKeys:ReadonlySet<string>,
+    warnings:ReadonlyArray<BlockerWarning> = [],
 ):string {
     const remaining = tickets.filter(
         t => t.status === 'ready-for-agent'
     )
     const human = tickets.filter(t => t.status === HUMAN_STATUS)
-    const humanKeys = new Set(
-        human.map(t => ticketKey(t.feature, t.num))
-    )
-    const blockedByHuman = remaining.filter(t =>
-        !failedKeys.has(ticketKey(t.feature, t.num)) &&
-        t.blockers.some(r => humanKeys.has(ticketKey(r.feature, r.num)))
-    )
 
     const counts = `Finished: ${totalCompleted} completed` +
         (remaining.length > 0 ?
@@ -2191,35 +2319,7 @@ export function renderFinishSummary (
         }
     }
 
-    if (human.length === 0) return lines.join('\n')
-
-    const noun = human.length === 1 ?
-        'ticket is' :
-        'tickets are'
-    lines.push(
-        '',
-        (remaining.length === 0 && failedKeys.size === 0 ?
-            `All remaining ${noun} marked ${HUMAN_STATUS}. ` :
-            `${human.length} ${noun} marked ${HUMAN_STATUS}. `) +
-        'nightralph only runs ready-for-agent tickets, ' +
-        'so an agent cannot finish these:',
-        indentFilenames(human),
-    )
-    if (blockedByHuman.length > 0) {
-        const n = blockedByHuman.length
-        lines.push(
-            `${n} ready-for-agent ticket${n === 1 ? ' is' : 's are'} ` +
-            'blocked until they are done:',
-            indentFilenames(blockedByHuman),
-        )
-    }
-    lines.push(
-        'Do that work by hand, then set each ticket\'s ' +
-        '**Status:** to done' +
-        (blockedByHuman.length > 0 ?
-            ' and run nightralph again.' :
-            '.')
-    )
+    lines.push(...explainOpen(tickets, failedKeys, warnings))
     return lines.join('\n')
 }
 
@@ -2279,6 +2379,8 @@ export async function runWaves (
     retries?:number,
     retryDelay?:number,
     concurrency?:number,
+    // blocker problems found while loading, for the finish summary
+    warnings:ReadonlyArray<BlockerWarning> = [],
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
@@ -2449,7 +2551,7 @@ export async function runWaves (
         t => t.status === 'ready-for-agent'
     )
     d.log('\n' + renderFinishSummary(
-        tickets, totalCompleted, failedKeys
+        tickets, totalCompleted, failedKeys, warnings
     ))
     d.cleanup()
 
@@ -2482,6 +2584,8 @@ export async function runWavesIsolated (opts:{
     concurrency?:number
     // per-feature progress paths for multi-feature runs
     progressPaths?:Map<string, string>
+    // blocker problems found while loading, for the finish summary
+    warnings?:ReadonlyArray<BlockerWarning>
     // review the unreviewed work and run one fix pass at the end;
     // unset = no review
     review?:{
@@ -3079,7 +3183,7 @@ export async function runWavesIsolated (opts:{
         t => t.status === 'ready-for-agent'
     )
     d.log('\n' + renderFinishSummary(
-        opts.tickets, totalCompleted, failedKeys
+        opts.tickets, totalCompleted, failedKeys, opts.warnings ?? []
     ))
     if (reviewLine) d.log(reviewLine)
     d.log(`Work is on ${baseBranch}`)

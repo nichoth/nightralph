@@ -39,12 +39,18 @@ import {
     ticketKey,
     blockerSatisfied,
     blockerLabel,
+    historyFor,
     HUMAN_STATUS,
     type Ticket,
     type EffortLevel,
 } from '../src/orchestrator.js'
-import { NOTES_PATH } from '../src/learnings.js'
+import {
+    NOTES_PATH,
+    appendEntry,
+    renderEntry,
+} from '../src/learnings.js'
 import type { BlockerRef } from '../src/blockers.js'
+import { ticketLabel } from '../src/display.js'
 
 // -- helpers --
 
@@ -4565,6 +4571,56 @@ test('renderFinishSummary is one line with no human tickets', t => {
     t.ok(!out.includes(HUMAN_STATUS), 'no human section')
 })
 
+test('renderFinishSummary AC2.2: names a blocker outside the run',
+    t => {
+        const ref:BlockerRef = {
+            feature:'b', num:1, where:'pending', status:'ready-for-agent',
+        }
+        const ticket = makeTicket({
+            num:2, filename:'02-x.md', feature:'a', blockers:[ref],
+        })
+        const out = renderFinishSummary([ticket], 0, new Set())
+        t.ok(out.includes(ticketLabel(ticket)), 'names the ticket')
+        t.ok(out.includes(blockerLabel(ref)), 'names the blocker')
+    })
+
+test('renderFinishSummary AC2.4: lists a blocker that matches no ticket',
+    t => {
+        const ref:BlockerRef = { feature:'a', num:9, where:'missing' }
+        const ticket = makeTicket({
+            num:3, filename:'03-x.md', feature:'a', blockers:[ref],
+        })
+        const out = renderFinishSummary([ticket], 0, new Set())
+        t.ok(out.includes(ticketLabel(ticket)), 'names the ticket')
+        t.ok(out.includes(blockerLabel(ref)), 'names the blocker')
+    })
+
+test('renderFinishSummary leaves failed tickets out of the blocker ' +
+    'paragraph', t => {
+    const ref:BlockerRef = {
+        feature:'b', num:1, where:'pending', status:'ready-for-agent',
+    }
+    const ticket = makeTicket({
+        num:2, filename:'02-x.md', feature:'a', blockers:[ref],
+    })
+    const out = renderFinishSummary(
+        [ticket], 0, new Set([ticketKey('a', 2)])
+    )
+    t.ok(!out.includes(blockerLabel(ref)), 'failed ticket not listed')
+    t.equal(out.split('\n').length, 1, 'only the counts line')
+})
+
+test('renderFinishSummary AC2.9: repeats typo warnings', t => {
+    const ticket = makeTicket({
+        num:4, filename:'04-x.md', feature:'a', status:'done',
+    })
+    const out = renderFinishSummary([ticket], 1, new Set(), [
+        { ticket:'a/04', kind:'typo', text:'nwsletter-audit' },
+    ])
+    t.ok(out.includes('nwsletter-audit'), 'names the word')
+    t.ok(out.includes('a/04'), 'names the ticket')
+})
+
 test('renderFinishSummary names every ready-for-human ticket', t => {
     const tickets = [
         makeTicket({ num:1, filename:'01-a.md', status:'done' }),
@@ -4859,3 +4915,96 @@ test('runWaves with only human tickets logs them and is allDone',
             'summary names the status')
     }
 )
+
+// -- historyFor --
+
+// Appends a done entry whose notes are `marker` to a learnings log.
+function appendDone (
+    path:string,
+    feature:string,
+    num:number,
+    marker:string
+):void {
+    appendEntry(path, renderEntry({
+        key:ticketKey(feature, num),
+        label:`${feature}/${String(num).padStart(2, '0')}`,
+        attempt:1,
+        now:new Date('2026-10-09T00:00:00Z'),
+        outcome:'done',
+        run:{
+            exitCode:0, completedItems:[], timedOut:false, notes:marker,
+        },
+    }))
+}
+
+// A ticket at <scratch>/<feature>/issues/02-x.md with these refs.
+function historyTicket (
+    scratch:string,
+    feature:string,
+    blockers:BlockerRef[]
+):Ticket {
+    const issues = join(scratch, feature, 'issues')
+    mkdirSync(issues, { recursive:true })
+    const filepath = join(issues, '02-x.md')
+    writeFileSync(filepath, '**Status:** ready-for-agent\n')
+    return makeTicket({
+        num:2, filename:'02-x.md', feature, filepath, blockers,
+    })
+}
+
+test('historyFor AC2.7: reads a cross-feature blocker\'s done entry',
+    t => {
+        const scratch = join(tmp(), '.scratch')
+        mkdirSync(join(scratch, 'b'), { recursive:true })
+        appendDone(
+            join(scratch, 'b', 'learnings.md'), 'b', 1,
+            'marker-b-01-notes'
+        )
+        const ticket = historyTicket(scratch, 'a', [
+            { feature:'b', num:1, where:'done', status:'done' },
+        ])
+        const out = historyFor(join(scratch, 'a', 'learnings.md'), ticket)
+        t.ok(out.includes('marker-b-01-notes'), 'b/01 notes are included')
+    })
+
+test('historyFor still reads a same-feature blocker', t => {
+    const scratch = join(tmp(), '.scratch')
+    const ticket = historyTicket(scratch, 'a', [
+        { feature:'a', num:1, where:'run' },
+    ])
+    const learnings = join(scratch, 'a', 'learnings.md')
+    appendDone(learnings, 'a', 1, 'marker-a-01-notes')
+    t.ok(
+        historyFor(learnings, ticket).includes('marker-a-01-notes'),
+        'a/01 notes are included'
+    )
+})
+
+test('historyFor: a feature with no learnings.md is no error', t => {
+    const scratch = join(tmp(), '.scratch')
+    const ticket = historyTicket(scratch, 'a', [
+        { feature:'b', num:1, where:'done', status:'done' },
+    ])
+    t.equal(
+        historyFor(join(scratch, 'a', 'learnings.md'), ticket),
+        '',
+        'no history'
+    )
+})
+
+test('historyFor: a nested feature reads blockers beside .scratch',
+    t => {
+        const scratch = join(tmp(), '.scratch')
+        mkdirSync(join(scratch, 'b'), { recursive:true })
+        appendDone(
+            join(scratch, 'b', 'learnings.md'), 'b', 1,
+            'marker-nested-notes'
+        )
+        const ticket = historyTicket(scratch, 'x/y', [
+            { feature:'b', num:1, where:'done', status:'done' },
+        ])
+        const out = historyFor(
+            join(scratch, 'x', 'y', 'learnings.md'), ticket
+        )
+        t.ok(out.includes('marker-nested-notes'), 'b/01 notes are included')
+    })
