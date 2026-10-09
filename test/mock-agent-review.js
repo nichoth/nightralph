@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto'
 //   fixer     (prompt has the findings marker) per MOCK_FIX:
 //             pass | break
 //   ticket    otherwise, per MOCK_TICKET: pass | fail
-// Each run writes { time, role, cwd } into MOCK_RECORD_DIR.
+// Each run writes { time, role, cwd, prompt } into MOCK_RECORD_DIR.
 
 const GIT_ENV = {
     ...process.env,
@@ -43,7 +43,9 @@ function run (prompt) {
     writeFileSync(
         join(process.env.MOCK_RECORD_DIR,
             `${Date.now()}-${randomUUID()}.json`),
-        JSON.stringify({ time:Date.now(), role, cwd:process.cwd() })
+        JSON.stringify({
+            time:Date.now(), role, cwd:process.cwd(), prompt,
+        })
     )
 
     if (role === 'reviewer') {

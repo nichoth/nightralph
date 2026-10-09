@@ -4,8 +4,12 @@
 // the claude branch. With FAKE_CLAUDE_DELEGATE set to a
 // test/mock-agent-*.js path, it then runs that mock with the same
 // prompt, cwd, env and arguments and exits with its status.
+// With FAKE_CLAUDE_PROMPT_DIR set, it writes each prompt it reads
+// to a uniquely named file in that directory.
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, readFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 const chunks = []
 process.stdin.on('data', chunk => chunks.push(chunk))
@@ -15,6 +19,11 @@ process.stdin.on('end', () => {
     if (envLog) {
         const value = process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? null
         appendFileSync(envLog, JSON.stringify(value) + '\n')
+    }
+    const promptDir = process.env.FAKE_CLAUDE_PROMPT_DIR
+    if (promptDir) {
+        const name = `${process.pid}-${randomUUID()}.txt`
+        writeFileSync(join(promptDir, name), prompt)
     }
     const stream = process.env.FAKE_CLAUDE_STREAM
     if (stream) {

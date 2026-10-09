@@ -5568,6 +5568,7 @@ const FAKE_CLAUDE_KEYS = [
     'FAKE_CLAUDE_DELEGATE',
     'FAKE_CLAUDE_ENV_LOG',
     'FAKE_CLAUDE_HANG',
+    'FAKE_CLAUDE_PROMPT_DIR',
     'FAKE_CLAUDE_STREAM',
 ]
 
@@ -5586,6 +5587,13 @@ function fakeClaudeEnv (
     const env = { ...process.env }
     for (const key of FAKE_CLAUDE_KEYS) delete env[key]
     return { ...env, ...extra }
+}
+
+// Every prompt the fake claude wrote to FAKE_CLAUDE_PROMPT_DIR
+function readPrompts (dir:string):string[] {
+    return readdirSync(dir).map(name => {
+        return readFileSync(join(dir, name), 'utf8')
+    })
 }
 
 function readEnvLog (path:string):unknown[] {
@@ -5704,39 +5712,61 @@ test('CLI subprocess - prefer-subagent AC1.6 AC1.7 in-place run ' +
     try {
         const { issuesDir } = scratchDirs(projectDir)
         const ticketPath = join(issuesDir, '01-task.md')
-        const run = async (value:string, envLog:string) => {
+        const run = async (
+            value:string,
+            envLog:string,
+            promptDir:string
+        ) => {
             writeFileSync(
                 ticketPath,
                 makeTicketBody({ status:'ready-for-agent' })
             )
+            mkdirSync(promptDir)
             return spawnCli([
                 FAKE_CLAUDE, '--spec', FEAT, '--timeout', '10',
                 '--prefer-subagent', value, '--test-cmd', '',
             ], {
                 cwd:projectDir,
-                env:fakeClaudeEnv({ FAKE_CLAUDE_ENV_LOG:envLog }),
+                env:fakeClaudeEnv({
+                    FAKE_CLAUDE_ENV_LOG:envLog,
+                    FAKE_CLAUDE_PROMPT_DIR:promptDir,
+                }),
             })
         }
 
         const onLog = join(logDir, 'on.log')
-        const on = await run('haiku', onLog)
+        const onPrompts = join(logDir, 'on-prompts')
+        const on = await run('haiku', onLog, onPrompts)
         t.equal(on.code, 0, 'AC1.6 exit 0')
         t.deepEqual(readEnvLog(onLog), ['haiku'],
             'AC1.6 the agent gets the model')
+        const promptsOn = readPrompts(onPrompts)
+        t.equal(promptsOn.length, 1, 'AC1.6 one prompt')
+        t.ok(promptsOn.every(hasEveryRuleLine),
+            'AC1.6 the ticket prompt carries the subagent rule')
 
         const emptyLog = join(logDir, 'empty.log')
-        const empty = await run('', emptyLog)
+        const emptyPrompts = join(logDir, 'empty-prompts')
+        const empty = await run('', emptyLog, emptyPrompts)
         t.equal(empty.code, 0, 'AC1.7 exit 0')
         t.deepEqual(readEnvLog(emptyLog), [null],
             'AC1.7 an empty value sets nothing')
+        const promptsEmpty = readPrompts(emptyPrompts)
+        t.equal(promptsEmpty.length, 1, 'AC1.7 one prompt')
+        t.ok(promptsEmpty.every(hasNoRuleLine),
+            'AC1.7 the ticket prompt has no subagent rule')
     } finally {
         rmSync(projectDir, { recursive:true, force:true })
         rmSync(logDir, { recursive:true, force:true })
     }
 })
 
-test('CLI subprocess - prefer-subagent AC1.6 isolated run passes ' +
-    'the model to the agent', async t => {
+// One isolated CLI run in a fresh repo with `--prefer-subagent value`
+async function runIsolatedPreferSubagent (value:string):Promise<{
+    code:number
+    envValues:unknown[]
+    prompts:string[]
+}> {
     const { projectDir, issuesDir, templateDir } = cliGitRepo()
     const logDir = tmp()
     try {
@@ -5746,27 +5776,49 @@ test('CLI subprocess - prefer-subagent AC1.6 isolated run passes ' +
         )
         commitAll(projectDir, 'add tickets')
         const envLog = join(logDir, 'env.log')
+        const promptDir = join(logDir, 'prompts')
+        mkdirSync(promptDir)
 
         const { code } = await spawnCli([
             FAKE_CLAUDE, '--spec', FEAT, '--timeout', '10',
-            '--prefer-subagent', 'haiku', '--test-cmd', '',
+            '--prefer-subagent', value, '--test-cmd', '',
             '--no-review',
         ], {
             cwd:projectDir,
             env:fakeClaudeEnv({
                 FAKE_CLAUDE_ENV_LOG:envLog,
                 FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+                FAKE_CLAUDE_PROMPT_DIR:promptDir,
             }),
         })
-
-        t.equal(code, 0, 'exit 0')
-        t.deepEqual(readEnvLog(envLog), ['haiku'],
-            'the agent gets the model')
+        return {
+            code,
+            envValues:readEnvLog(envLog),
+            prompts:readPrompts(promptDir),
+        }
     } finally {
         removeWorktreesAndRepo(projectDir)
         rmSync(templateDir, { recursive:true, force:true })
         rmSync(logDir, { recursive:true, force:true })
     }
+}
+
+test('CLI subprocess - prefer-subagent AC1.6 AC1.7 isolated run ' +
+    'passes the model to the agent', async t => {
+    const on = await runIsolatedPreferSubagent('haiku')
+    t.equal(on.code, 0, 'AC1.6 exit 0')
+    t.deepEqual(on.envValues, ['haiku'], 'AC1.6 the agent gets the model')
+    t.equal(on.prompts.length, 1, 'AC1.6 one prompt')
+    t.ok(on.prompts.every(hasEveryRuleLine),
+        'AC1.6 the ticket prompt carries the subagent rule')
+
+    const empty = await runIsolatedPreferSubagent('')
+    t.equal(empty.code, 0, 'AC1.7 exit 0')
+    t.deepEqual(empty.envValues, [null],
+        'AC1.7 an empty value sets nothing')
+    t.equal(empty.prompts.length, 1, 'AC1.7 one prompt')
+    t.ok(empty.prompts.every(hasNoRuleLine),
+        'AC1.7 the ticket prompt has no subagent rule')
 })
 
 test('runWavesIsolated - prefer-subagent AC1.6 reaches ticket and ' +
@@ -5796,9 +5848,12 @@ test('runWavesIsolated - prefer-subagent AC1.6 reaches ticket and ' +
         commitAll(projectDir, 'add tickets')
 
         const envLog = join(logDir, 'env.log')
+        const promptDir = join(logDir, 'prompts')
+        mkdirSync(promptDir)
         for (const key of FAKE_CLAUDE_KEYS) delete process.env[key]
         process.env.FAKE_CLAUDE_ENV_LOG = envLog
         process.env.FAKE_CLAUDE_DELEGATE = MOCK_PASS
+        process.env.FAKE_CLAUDE_PROMPT_DIR = promptDir
         process.chdir(projectDir)
 
         await runWavesIsolated({
@@ -5819,6 +5874,10 @@ test('runWavesIsolated - prefer-subagent AC1.6 reaches ticket and ' +
             'ticket 2 is done after the respawn')
         t.deepEqual(readEnvLog(envLog), ['haiku', 'haiku', 'haiku'],
             'both tickets and the respawn get the model')
+        const prompts = readPrompts(promptDir)
+        t.equal(prompts.length, 3, 'three prompts')
+        t.ok(prompts.every(hasEveryRuleLine),
+            'both ticket prompts and the merge prompt carry the rule')
     } finally {
         process.chdir(originalCwd)
         for (const [key, value] of saved) {

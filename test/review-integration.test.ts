@@ -9,6 +9,7 @@ import { execFileSync, execSync } from 'node:child_process'
 import type { Display } from '../src/display.js'
 import { runWavesIsolated, scanTickets } from '../src/orchestrator.js'
 import { parseReviewEntries } from '../src/review.js'
+import { subagentRule } from '../src/rules.js'
 
 const MOCK = join(process.cwd(), 'test', 'mock-agent-review.js')
 const FAKE_CLAUDE = join(process.cwd(), 'test', 'fake-claude', 'claude')
@@ -51,6 +52,24 @@ function countRoles (recordDir:string):Roles {
         counts[role]++
     }
     return counts
+}
+
+// The prompts each role received, from the mock's records
+function promptsByRole (recordDir:string):Record<keyof Roles, string[]> {
+    const prompts:Record<keyof Roles, string[]> = {
+        reviewer:[], fixer:[], ticket:[],
+    }
+    for (const f of readdirSync(recordDir)) {
+        const { role, prompt } = JSON.parse(
+            readFileSync(join(recordDir, f), 'utf8')
+        ) as { role:keyof Roles; prompt:string }
+        prompts[role].push(prompt)
+    }
+    return prompts
+}
+
+function hasEveryLine (text:string, lines:string[]):boolean {
+    return lines.every(line => text.includes(line))
 }
 
 type RunOpts = Parameters<typeof runWavesIsolated>[0]
@@ -211,6 +230,25 @@ test('review pass - prefer-subagent AC1.6 reaches the reviewer ' +
                 .map(line => JSON.parse(line))
             t.deepEqual(values, ['haiku', 'haiku', 'haiku'],
                 'the ticket, reviewer and fixer agents get the model')
+
+            const rule = subagentRule('haiku')
+            const readOnlyRule = subagentRule('haiku', true)
+            const writeOnly = rule.filter(line => {
+                return !readOnlyRule.includes(line)
+            })
+            const prompts = promptsByRole(h.recordDir)
+            t.equal(writeOnly.length, 1,
+                'one rule line is missing from the read-only variant')
+            t.ok(prompts.reviewer.every(p => {
+                return hasEveryLine(p, readOnlyRule)
+            }), 'the reviewer prompt carries the read-only rule')
+            t.ok(prompts.reviewer.every(p => {
+                return writeOnly.every(line => !p.includes(line))
+            }), 'the reviewer prompt omits the edit-and-commit line')
+            t.ok(prompts.fixer.every(p => hasEveryLine(p, rule)),
+                'the fixer prompt carries the full rule')
+            t.ok(prompts.ticket.every(p => hasEveryLine(p, rule)),
+                'the ticket prompt carries the full rule')
         })
     } finally {
         rmSync(logDir, { recursive:true, force:true })
