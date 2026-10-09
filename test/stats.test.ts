@@ -5,6 +5,8 @@ import {
     emptyRunStats,
     addRun,
     renderRunStats,
+    addStats,
+    formatStats,
 } from '../src/stats.js'
 import type { RunStats } from '../src/stats.js'
 
@@ -253,4 +255,45 @@ test('AC6.3: partial-cost marker only when some runs lack cost', t => {
         (partialLine?.length ?? 0) > (fullLine?.length ?? 0),
         'partial line is longer',
     )
+})
+
+// -- AC5.2: a ticket's running total across attempts --
+
+test('AC5.2: addStats sums subagents and cost', t => {
+    t.deepEqual(
+        addStats({ subagents:1, costUsd:0.25 }, { subagents:2, costUsd:0.5 }),
+        { subagents:3, costUsd:0.75 },
+    )
+})
+
+test('AC5.2: addStats keeps no cost when neither side has one', t => {
+    const total = addStats({ subagents:1 }, { subagents:1 })
+    t.deepEqual(total, { subagents:2 })
+    t.ok(!('costUsd' in total), 'no costUsd key')
+})
+
+test('AC5.2: addStats keeps a cost reported by either side', t => {
+    t.deepEqual(
+        addStats({ subagents:1, costUsd:0.25 }, {}),
+        { subagents:1, costUsd:0.25 },
+    )
+    t.deepEqual(
+        addStats({ subagents:0 }, { subagents:2, costUsd:0.5 }),
+        { subagents:2, costUsd:0.5 },
+    )
+})
+
+// -- AC5.1: the display row suffix --
+
+test('AC5.1: formatStats is null when there is nothing to show', t => {
+    t.equal(formatStats(undefined), null)
+    t.equal(formatStats({ subagents:0 }), null)
+})
+
+test('AC5.1: formatStats renders a count or a cost', t => {
+    t.ok(formatStats({ subagents:0, costUsd:0.1 }) !== null, 'cost only')
+    t.ok(formatStats({ subagents:2 }) !== null, 'count only')
+    const both = formatStats({ subagents:2, costUsd:0.42 })
+    t.ok(both?.includes('2'), 'includes the count')
+    t.ok(both?.includes('0.42'), 'includes the cost')
 })
