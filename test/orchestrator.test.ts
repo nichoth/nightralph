@@ -3447,6 +3447,29 @@ test('formatStreamLine - ignores wrong-typed JSON values', t => {
     )
 })
 
+test('formatStreamLine - does not throw on crafted text fields', t => {
+    const lines = [
+        JSON.stringify({
+            type:'assistant',
+            message:{ content:[{ type:'text', text:{ toString:1 } }] },
+        }),
+        JSON.stringify({
+            type:'assistant',
+            message:{ content:[{ type:'text', text:['a'] }] },
+        }),
+        JSON.stringify({
+            type:'system',
+            subtype:'api_retry',
+            error:{ toString:1 },
+        }),
+    ]
+    for (const line of lines) {
+        const out = formatStreamLine(line)
+        t.ok(out === null || typeof out === 'string',
+            'should return text or null without throwing')
+    }
+})
+
 test('formatStreamLine - skips subagent assistant text', t => {
     const sub = JSON.stringify({
         type:'assistant',

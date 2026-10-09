@@ -27,7 +27,7 @@ export type RunStats = {
 // named it `Task` before 2.1.63.
 const SUBAGENT_TOOLS:ReadonlySet<string> = new Set(['Agent', 'Task'])
 
-function isRecord (value:unknown):value is Record<string, unknown> {
+export function isRecord (value:unknown):value is Record<string, unknown> {
     return typeof value === 'object' &&
         value !== null &&
         !Array.isArray(value)

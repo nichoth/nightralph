@@ -66,6 +66,7 @@ import {
 import { runReviewPass, renderReviewSummary } from './review.js'
 import {
     emptyStreamStats,
+    isRecord,
     nextStreamStats,
     type SubagentStats,
 } from './stats.js'
@@ -765,9 +766,8 @@ function formatStreamObject (value:unknown):string|null {
         if (!content) return null
         for (const block of content) {
             if (!isRecord(block)) continue
-            if (block.type === 'text') {
-                return String(block.text)
-            }
+            if (block.type !== 'text') continue
+            if (typeof block.text === 'string') return block.text
         }
         return null
     }
@@ -786,18 +786,18 @@ function formatStreamObject (value:unknown):string|null {
     }
 
     if (obj.type === 'system') {
-        const sub = obj.subtype as string|undefined
+        const sub = typeof obj.subtype === 'string' ?
+            obj.subtype :
+            undefined
         if (sub === 'api_retry') {
-            const error = obj.error as string|undefined
-            return `retry: ${error ?? 'unknown'}`
+            const error = typeof obj.error === 'string' ?
+                obj.error :
+                'unknown'
+            return `retry: ${error}`
         }
     }
 
     return null
-}
-
-function isRecord (value:unknown):value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null
 }
 
 export type PiStreamFormatter = {
