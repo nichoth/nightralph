@@ -5101,4 +5101,9 @@ test('renderNothingReady names a blocker in another status', t => {
     ], [])
     t.ok(out.includes(ticketLabel(triage)), 'names the blocker')
     t.ok(out.includes('needs-triage'), 'names its status')
+    // Pins the format the human-work test's negative check relies on
+    t.ok(
+        out.includes(`${ticketLabel(triage)} (needs-triage)`),
+        'lists the blocker as label (status)'
+    )
 })
