@@ -1,5 +1,9 @@
 import { test } from '@substrate-system/tapzero'
-import { parseBlockerField } from '../src/blockers.js'
+import {
+    parseBlockerField,
+    provisionalRefs,
+    resolveBlockers,
+} from '../src/blockers.js'
 
 const KNOWN = new Set([
     'newsletter-audit',
@@ -223,4 +227,72 @@ test('the old single-feature form still parses', t => {
         KNOWN,
     )
     t.deepEqual(crlf.refs.map(r => r.num), [1, 2], 'CRLF body')
+})
+
+const SELECTED = new Map<string, ReadonlySet<number>>([
+    ['a', new Set([1, 2])],
+    ['b', new Set([1])],
+])
+
+function lookupOf (statuses:Record<string, string>) {
+    return (feature:string, num:number) => statuses[`${feature}:${num}`]
+}
+
+test('resolveBlockers: a ticket in a selected feature', t => {
+    const refs = resolveBlockers([{ num:2 }], 'a', SELECTED, lookupOf({}))
+    t.deepEqual(refs, [{ feature:'a', num:2, where:'run' }], 'run')
+})
+
+test('resolveBlockers AC2.4: no ticket in a selected feature', t => {
+    const own = resolveBlockers([{ num:9 }], 'a', SELECTED, lookupOf({}))
+    t.deepEqual(own, [{ feature:'a', num:9, where:'missing' }], 'own')
+
+    const other = resolveBlockers(
+        [{ feature:'b', num:9 }], 'a', SELECTED, lookupOf({})
+    )
+    t.deepEqual(
+        other, [{ feature:'b', num:9, where:'missing' }], 'other'
+    )
+})
+
+test('resolveBlockers AC2.1: a done ticket outside the run', t => {
+    const refs = resolveBlockers(
+        [{ feature:'c', num:3 }], 'a', SELECTED,
+        lookupOf({ 'c:3':'done' })
+    )
+    t.deepEqual(refs, [
+        { feature:'c', num:3, where:'done', status:'done' },
+    ], 'done')
+})
+
+test('resolveBlockers AC2.2: an unfinished ticket outside', t => {
+    const refs = resolveBlockers(
+        [{ feature:'c', num:3 }], 'a', SELECTED,
+        lookupOf({ 'c:3':'ready-for-agent' })
+    )
+    t.deepEqual(refs, [
+        { feature:'c', num:3, where:'pending', status:'ready-for-agent' },
+    ], 'pending')
+})
+
+test('resolveBlockers: no ticket outside the run', t => {
+    const refs = resolveBlockers(
+        [{ feature:'c', num:3 }], 'a', SELECTED, lookupOf({})
+    )
+    t.deepEqual(refs, [{ feature:'c', num:3, where:'missing' }], 'missing')
+})
+
+test('resolveBlockers: own feature written out is the same ref', t => {
+    const refs = resolveBlockers(
+        [{ feature:'a', num:1 }, { num:1 }], 'a', SELECTED, lookupOf({})
+    )
+    t.deepEqual(refs, [{ feature:'a', num:1, where:'run' }], 'one ref')
+})
+
+test('provisionalRefs: every ref is in the run', t => {
+    const refs = provisionalRefs([{ num:1 }, { feature:'b', num:2 }], 'a')
+    t.deepEqual(refs, [
+        { feature:'a', num:1, where:'run' },
+        { feature:'b', num:2, where:'run' },
+    ], 'own feature filled in')
 })

@@ -137,3 +137,87 @@ export function parseBlockerField (
     }
     return { refs, typos }
 }
+
+export type BlockerWhere = 'run'|'done'|'pending'|'missing'
+
+export type BlockerRef = {
+    feature:string;
+    num:number;
+    // 'run'     -> a ticket in this run; its live status decides
+    // 'done'    -> outside the run, done when loaded
+    // 'pending' -> outside the run, not done (dead this session)
+    // 'missing' -> no ticket matches (dead, reported)
+    where:BlockerWhere;
+    status?:string;   // the outside ticket's status, for messages
+}
+
+// Same text as ticketKey in orchestrator.ts, which this module
+// must not import.
+function refId (feature:string, num:number):string {
+    return `${feature}:${num}`
+}
+
+/**
+ * Classifies raw refs. `selected` maps each feature in the run to
+ * its ticket numbers; `lookup` returns the status of a ticket in a
+ * feature outside the run, or undefined when there is none.
+ * De-duplicates by (feature, num) after the own feature is filled
+ * in.
+ */
+export function resolveBlockers (
+    raw:ReadonlyArray<RawRef>,
+    ownFeature:string,
+    selected:ReadonlyMap<string, ReadonlySet<number>>,
+    lookup:(feature:string, num:number) => string|undefined
+):BlockerRef[] {
+    const out:BlockerRef[] = []
+    const seen = new Set<string>()
+    for (const r of raw) {
+        const feature = r.feature ?? ownFeature
+        const id = refId(feature, r.num)
+        if (seen.has(id)) continue
+        seen.add(id)
+        const nums = selected.get(feature)
+        if (nums) {
+            out.push({
+                feature,
+                num:r.num,
+                where:nums.has(r.num) ? 'run' : 'missing',
+            })
+            continue
+        }
+        const status = lookup(feature, r.num)
+        if (status === undefined) {
+            out.push({ feature, num:r.num, where:'missing' })
+        } else {
+            out.push({
+                feature,
+                num:r.num,
+                where:status === 'done' ? 'done' : 'pending',
+                status,
+            })
+        }
+    }
+    return out
+}
+
+/**
+ * Refs for a bare scan, before the run is known: every ref is
+ * `run`, so one that matches no ticket in the list is never
+ * satisfied.
+ */
+export function provisionalRefs (
+    raw:ReadonlyArray<RawRef>,
+    ownFeature:string
+):BlockerRef[] {
+    const out:BlockerRef[] = []
+    const seen = new Set<string>()
+    for (const r of raw) {
+        const feature = r.feature ?? ownFeature
+        const id = refId(feature, r.num)
+        if (seen.has(id)) continue
+        seen.add(id)
+        out.push({ feature, num:r.num, where:'run' })
+    }
+    return out
+}
