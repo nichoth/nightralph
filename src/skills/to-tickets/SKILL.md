@@ -44,7 +44,7 @@ Give each ticket its **blocking edges**: the other tickets that must complete be
 Present the proposed breakdown as a numbered list. For each ticket, show:
 
 - **Title**: short descriptive name
-- **Blocked by**: which other tickets (if any) must complete first
+- **Blocked by**: which other tickets (if any) must complete first, by number, or `<feature> <NN>` for a ticket in another feature
 - **What it delivers**: the end-to-end behaviour this ticket makes work
 
 Ask the user:
@@ -59,7 +59,7 @@ Iterate until the user approves the breakdown.
 
 Publish the approved tickets. **How** depends on the tracker `npx nightralph init` configured; the tickets are the same either way, only the shape of the blocking edges changes:
 
-- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below: one ticket per file, never a single combined file.
+- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers of the tickets it depends on. A blocker in another feature is written `<feature> <NN>`, where `<feature>` is that feature's `.scratch/<feature>/` directory name, repeated before each of its numbers (`newsletter-audit 15, newsletter-audit 16`). List every number: `03-05` means 3 and 5, not 3 through 5, and a feature name before it applies to both. A note in parentheses is ignored. The list may wrap onto the next lines; it ends at a blank line, the next `**Field:**` line, a heading or a checklist item. Use the per-ticket file template below: one ticket per file, never a single combined file.
 - Set every local ticket to `**Status:** ready-for-agent` so nightralph can
   run it immediately. Do not publish local tickets as `needs-triage`.
 - **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. Apply the `ready-for-agent` triage label unless instructed otherwise; the tickets are agent-grabbable by construction.
@@ -74,7 +74,7 @@ Do NOT close or modify any parent issue.
 
 **What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective, not a layer-by-layer implementation list.
 
-**Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
+**Blocked by:** the numbers of the tickets that gate this one, and `<feature> <NN>` for one in another feature, each optionally followed by a note in parentheses; or "None (can start immediately)".
 
 **Status:** ready-for-agent
 
@@ -100,7 +100,7 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 
 ## Blocked by
 
-- A reference to each blocking ticket, or "None (can start immediately)".
+- The tracker identifier of each blocking ticket, or "None (can start immediately)".
 
 </issue-template>
 
