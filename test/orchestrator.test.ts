@@ -5066,19 +5066,24 @@ test('renderNothingReady reports a cycle', t => {
 })
 
 test('renderNothingReady reports human work, not a cycle', t => {
+    const human = makeTicket({
+        num:1,
+        filename:'01-human.md',
+        feature:'a',
+        status:HUMAN_STATUS,
+    })
     const out = renderNothingReady([
-        makeTicket({
-            num:1,
-            filename:'01-human.md',
-            feature:'a',
-            status:HUMAN_STATUS,
-        }),
+        human,
         makeTicket({
             num:2, filename:'02-waits.md', feature:'a', blockers:[1],
         }),
     ], [])
     t.ok(out.includes('01-human.md'), 'names the human ticket')
     t.ok(!out.includes('Deadlocked tickets'), 'no cycle line')
+    t.ok(
+        !out.includes(`${ticketLabel(human)} (${HUMAN_STATUS})`),
+        'the human blocker is not listed as another status'
+    )
 })
 
 test('renderNothingReady names a blocker in another status', t => {
