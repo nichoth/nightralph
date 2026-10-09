@@ -221,3 +221,9 @@ export function provisionalRefs (
     }
     return out
 }
+
+export type BlockerWarning = {
+    ticket:string;    // ticketLabel of the ticket with the problem
+    kind:'missing'|'typo';
+    text:string;      // the ref label or the unknown word
+}
