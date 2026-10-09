@@ -1119,8 +1119,18 @@ test('AC2.6: a human ticket blocks only its own feature', t => {
             feature:'b',
             blockers:[{ feature:'b', num:2, where:'run' }],
         }),
+        makeTicket({
+            num:4,
+            filename:'04-needs-human.md',
+            feature:'b',
+            blockers:[{ feature:'a', num:2, where:'run' }],
+        }),
     ]
     const summary = renderFinishSummary(tickets, 0, new Set())
+    t.ok(
+        summary.includes('04-needs-human.md'),
+        'b/04, which lists a/02, is blocked by a human'
+    )
     t.ok(
         !summary.includes('03-waits.md'),
         'b/03 is not listed as blocked by a human'
