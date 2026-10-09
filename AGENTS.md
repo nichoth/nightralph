@@ -502,8 +502,9 @@ Small orchestrator that runs a single-agent session per issue.
   ready. Blocked tickets (`findBlockedTickets`) are
   reported via `setBlocked` with `ticketLabel` names for
   in-run blockers and `blockerLabel` text for outside or
-  missing ones, right after `startRun`, at the top of every later
-  loop iteration, and once more after the loop, so
+  missing ones, right after `startRun`, at the top of
+  every later loop iteration, and once more after the
+  loop, so
   the `-X` stop and the no-progress breaks still
   report them. The `progress` passed to `startWave`
   counts only the session set (`completed` = session
@@ -633,9 +634,10 @@ Small orchestrator that runs a single-agent session per issue.
   the status to done; humans are matched by `ticketKey`,
   so a human `a/02` never blocks `b/03` that lists `02`.
   A second paragraph lists open tickets waiting on
-  `pending` refs, every `missing` ref, and the `typo`
-  entries of `warnings` (default `[]`); each part is
-  omitted when empty, so a plain run is still one line.
+  `pending` refs, the `missing` refs of open tickets,
+  and the `typo` entries of `warnings` (default `[]`);
+  each part is omitted when empty, so a run with
+  nothing to explain gets no extra paragraph.
   `runWaves` takes `warnings` as a trailing positional
   argument and `runWavesIsolated` as `opts.warnings`.
   This is why a run whose only
