@@ -121,6 +121,38 @@ function applyResult (
     }
 }
 
+// The running total of a ticket's attempts. A cost is kept as
+// soon as either side reports one.
+export function addStats (
+    total:SubagentStats,
+    run:{ subagents?:number; costUsd?:number }
+):SubagentStats {
+    const subagents = total.subagents + (run.subagents ?? 0)
+    if (total.costUsd === undefined && run.costUsd === undefined) {
+        return { subagents }
+    }
+    return {
+        subagents,
+        costUsd:(total.costUsd ?? 0) + (run.costUsd ?? 0),
+    }
+}
+
+/**
+ * The display row suffix, e.g. `2 subagents, $0.42`, or `null`
+ * when there is nothing to show.
+ */
+export function formatStats (stats?:SubagentStats):string|null {
+    if (!stats) return null
+    if (stats.subagents === 0 && stats.costUsd === undefined) {
+        return null
+    }
+    const count = `${stats.subagents} ` +
+        (stats.subagents === 1 ? 'subagent' : 'subagents')
+    return stats.costUsd === undefined ?
+        count :
+        `${count}, $${stats.costUsd.toFixed(2)}`
+}
+
 export function emptyRunStats ():RunStats {
     return { agentRuns:0, withCost:0, subagents:0, costUsd:0 }
 }

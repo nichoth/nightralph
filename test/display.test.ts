@@ -19,6 +19,7 @@ import {
     type RunProgress,
     type TicketStatus,
 } from '../src/display.js'
+import type { SubagentStats } from '../src/stats.js'
 import {
     spawnAgent, runWaves, runWavesIsolated, scanTickets,
     type Ticket,
@@ -1792,6 +1793,17 @@ class RecordingDisplay implements Display {
         this.calls.push({
             method:'setBlocked',
             args:[num, feature, blockedBy],
+        })
+    }
+
+    setTicketStats (
+        num:number,
+        feature:string|undefined,
+        stats:SubagentStats,
+    ):void {
+        this.calls.push({
+            method:'setTicketStats',
+            args:[num, feature, stats],
         })
     }
 

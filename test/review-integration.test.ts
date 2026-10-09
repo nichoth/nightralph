@@ -36,6 +36,7 @@ function quietDisplay ():Display {
         startWave:noop,
         setTicketStatus:noop,
         setBlocked:noop,
+        setTicketStats:noop,
         log:noop,
         cleanup:noop,
     }

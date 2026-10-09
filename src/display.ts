@@ -1,3 +1,5 @@
+import { formatStats, type SubagentStats } from './stats.js'
+
 export type TicketStatus =
     | 'pending'
     | 'in-progress'
@@ -12,6 +14,7 @@ export type DisplayTicket = {
     readonly feature?:string
     status:TicketStatus
     blockedBy?:ReadonlyArray<string>
+    stats?:SubagentStats
 }
 
 export type TicketRef = {
@@ -65,6 +68,15 @@ export type Display = {
         num:number,
         feature:string|undefined,
         blockedBy:ReadonlyArray<string>,
+    ):void
+    /**
+     * Subagent stats for a ticket's row: the running total of
+     * its attempts so far.
+     */
+    setTicketStats(
+        num:number,
+        feature:string|undefined,
+        stats:SubagentStats,
     ):void
     log(message:string):void
     cleanup():void
@@ -138,10 +150,12 @@ const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g
 
 function rowText (ticket:DisplayTicket):string {
     const label = ticketLabel(ticket)
-    if (ticket.status !== 'blocked' || !ticket.blockedBy?.length) {
-        return label
-    }
-    return `${label} (blocked by ${ticket.blockedBy.join(', ')})`
+    const blocked = ticket.status === 'blocked' &&
+        ticket.blockedBy?.length ?
+        `${label} (blocked by ${ticket.blockedBy.join(', ')})` :
+        label
+    const suffix = formatStats(ticket.stats)
+    return suffix === null ? blocked : `${blocked} - ${suffix}`
 }
 
 /**
@@ -311,6 +325,18 @@ export class StatusDisplay implements Display {
 
         ticket.status = 'blocked'
         ticket.blockedBy = [...blockedBy]
+        this.render()
+    }
+
+    setTicketStats (
+        num:number,
+        feature:string|undefined,
+        stats:SubagentStats,
+    ):void {
+        const ticket = this.findTicket(num, feature)
+        if (!ticket) return
+
+        ticket.stats = { ...stats }
         this.render()
     }
 
@@ -505,6 +531,14 @@ export class PlainDisplay implements Display {
         _num:number,
         _feature:string|undefined,
         _blockedBy:ReadonlyArray<string>,
+    ):void {
+        // no-op: plain mode has no fixed list
+    }
+
+    setTicketStats (
+        _num:number,
+        _feature:string|undefined,
+        _stats:SubagentStats,
     ):void {
         // no-op: plain mode has no fixed list
     }

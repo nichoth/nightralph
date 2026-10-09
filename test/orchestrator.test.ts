@@ -4989,6 +4989,7 @@ test('runWaves with nothing runnable reports no blocked tickets',
             setBlocked () {
                 t.fail('no setBlocked should be called')
             },
+            setTicketStats () {},
             log (m:string) { logs.push(m) },
             cleanup () {},
         }
@@ -5040,6 +5041,7 @@ test('runWaves with only human tickets logs them and is allDone',
             setBlocked () {
                 t.fail('no setBlocked should be called')
             },
+            setTicketStats () {},
             log (m:string) { logs.push(m) },
             cleanup () {},
         }
