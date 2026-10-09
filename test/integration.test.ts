@@ -436,7 +436,7 @@ test('CLI subprocess - error for nonexistent feature',
         }
     })
 
-test('CLI subprocess - unknown blocker warning and stripping',
+test('CLI subprocess - unknown blocker keeps the ticket from running',
     async t => {
         const projectDir = tmp()
         try {
@@ -451,35 +451,22 @@ test('CLI subprocess - unknown blocker warning and stripping',
                 }),
             )
 
-            const { code, stdout, stderr } = await spawnCli([
+            await spawnCli([
                 MOCK_AGENT,
                 '--spec', FEAT,
                 '--timeout', '10',
             ], { cwd:projectDir })
 
-            const combined = stdout + stderr
-            t.ok(
-                combined.includes('99'),
-                'output warns about blocker 99',
-            )
-            t.ok(
-                combined.includes('not found'),
-                'output mentions blocker not found',
-            )
-
-            t.equal(code, 0, 'exit code 0')
-
             const ticket = readFileSync(
                 join(issuesDir, '01-task.md'), 'utf8'
             )
             t.ok(
-                ticket.includes('**Status:** done'),
-                'ticket completed after blocker stripped',
+                ticket.includes('**Status:** ready-for-agent'),
+                'ticket is still waiting on its blocker',
             )
-
             t.ok(
-                existsSync(join(logsDir, '01-task.log')),
-                'log file created',
+                !existsSync(join(logsDir, '01-task.log')),
+                'no agent ran',
             )
         } finally {
             rmSync(projectDir, {

@@ -8,7 +8,6 @@ import { hideBin } from 'yargs/helpers'
 import { select } from '@inquirer/prompts'
 import { setup, checkGhAuth, type TrackerKind } from './setup.js'
 import {
-    scanTickets,
     dryRun,
     dryRunIsolated,
     runWaves,
@@ -30,7 +29,9 @@ import {
     findFeatureDirs,
     resolveIssuesDir,
     getScriptDir,
+    loadSelection,
     type FeatureSelection,
+    type BlockerWarning,
 } from './resolve.js'
 import {
     getRepoRoot,
@@ -270,13 +271,16 @@ type LoadedTickets = {
     firstLogsDir:string
     // paths a selection needs that are not in the working tree
     missing:string[]
+    // blockers that match no ticket, and likely feature-name typos
+    warnings:BlockerWarning[]
 }
 
 // Scans every selected feature's tickets from the working tree.
-// `log` is a no-op for the silent re-scan after resuming an
-// integration branch. A selection whose issues dir or spec is
-// absent is skipped and reported in `missing`; the caller decides
-// whether that is fatal.
+// Blockers are resolved by `loadSelection`, across features, and
+// the problems it finds come back as `warnings`. `log` is a no-op
+// for the silent re-scan after resuming an integration branch. A
+// selection whose issues dir or spec is absent is skipped and
+// reported in `missing`; the caller decides whether that is fatal.
 function loadTickets (
     selections:FeatureSelection[],
     log:(msg:string) => void
@@ -289,6 +293,8 @@ function loadTickets (
     let firstLogsDir = ''
     const missing:string[] = []
 
+    const valid:FeatureSelection[] = []
+    const specs = new Map<string, string>()
     for (const selection of selections) {
         const { dir, spec, name } = selection
 
@@ -301,11 +307,25 @@ function loadTickets (
             continue
         }
 
-        const specBody = stripSpecSection(
+        specs.set(name, stripSpecSection(
             readFileSync(spec, 'utf8'),
             'User Stories'
-        )
-        const tickets = scanTickets(dir, name)
+        ))
+        valid.push(selection)
+    }
+
+    // process.cwd() is the base resolveIssuesDir uses; a nested
+    // --spec name (a/b) only round-trips through the true scratch
+    // dir, not dirname(dirname(dir)).
+    const loaded = valid.length > 0 ?
+        loadSelection(
+            join(process.cwd(), '.scratch'),
+            valid.map(s => s.name)
+        ) :
+        { tickets:[], warnings:[] }
+
+    for (const { dir, spec, name } of valid) {
+        const tickets = loaded.tickets.filter(t => t.feature === name)
 
         if (tickets.length === 0) {
             log(
@@ -319,26 +339,7 @@ function loadTickets (
             `[${name}] Found ${tickets.length} tickets`
         )
 
-        const knownNums = new Set(
-            tickets.map(t => t.num)
-        )
-        for (const t of tickets) {
-            const unknown = t.blockers.filter(
-                b => !knownNums.has(b.num)
-            )
-            if (unknown.length > 0) {
-                log(
-                    `${t.filename}: blockers ` +
-                    `[${unknown.map(b => b.num).join(', ')}] ` +
-                    'not found in directory'
-                )
-            }
-            t.blockers = t.blockers.filter(
-                b => knownNums.has(b.num)
-            )
-        }
-
-        specBodies.set(name, specBody)
+        specBodies.set(name, specs.get(name)!)
         progressPaths.set(
             name, join(dirname(dir), 'progress.md')
         )
@@ -359,6 +360,7 @@ function loadTickets (
         firstFeatureName,
         firstLogsDir,
         missing,
+        warnings:loaded.warnings,
     }
 }
 
