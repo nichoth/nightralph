@@ -154,6 +154,12 @@ Rules (from the design, plus review hardening):
 - Refs are de-duplicated by `(feature ?? '', num)`, first
   occurrence wins, order preserved.
 
+Amended 2026-10-09 during review: the shipped code replaces
+`isHyphenatedWord` with `looksLikeFeature` (lowercase letters and
+digits joined by hyphens, with a letter, so `FDR-018` is not a
+typo) and passes `feature` to every number of a range. The block
+below is the original plan text; `src/blockers.ts` is authoritative.
+
 Code (write it as-is, adjusting only if lint complains). This exact
 code was run against every fixture in Task 3 during planning and
 produced the expected results:
@@ -389,7 +395,11 @@ on the returned `{ refs, typos }`:
   `'**Blocked by:** 01\n## Step 3'` -> `[1]`.
 - Ranges: `03-05` -> `[3, 5]`; with `KNOWN`,
   `newsletter-audit 03-05` ->
-  `[{ feature:'newsletter-audit', num:3 }, { num:5 }]`.
+  `[{ feature:'newsletter-audit', num:3 },
+  { feature:'newsletter-audit', num:5 }]`. (Amended 2026-10-09
+  during review: a feature applies to both ends of a range. In a
+  comma list it still applies only to the next number:
+  `newsletter-audit 16, 17` -> 17 is the ticket's own feature.)
 - Unpaired delimiters hide nothing: `'03 (oops 04\n05'` ->
   `[3, 4, 5]`; `` '03 `x 04' `` -> `[3, 4]`.
 - Missing field: `'no field here'` -> refs `[]`, typos `[]`.
