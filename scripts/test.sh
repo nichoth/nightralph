@@ -17,6 +17,7 @@ TESTS=(
     worktree
     progress
     learnings
+    stats
     review
     review-pass
     merge
