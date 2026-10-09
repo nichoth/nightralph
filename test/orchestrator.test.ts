@@ -2074,6 +2074,319 @@ test('spawnAgent reports spawn errors through onLine and the log',
     }
 )
 
+const FAKE_CLAUDE = join(process.cwd(), 'test', 'fake-claude', 'claude')
+const FAKE_CLAUDE_JS = join(
+    process.cwd(),
+    'test',
+    'mock-agent-claude.js'
+)
+const FAKE_ENV_KEYS = [
+    'CLAUDE_CODE_SUBAGENT_MODEL',
+    'FAKE_CLAUDE_ENV_LOG',
+    'FAKE_CLAUDE_HANG',
+    'FAKE_CLAUDE_STREAM',
+]
+
+async function withFakeEnv (
+    values:Record<string, string|undefined>,
+    fn:() => Promise<void>
+):Promise<void> {
+    const saved = FAKE_ENV_KEYS.map(key => {
+        return [key, process.env[key]] as const
+    })
+    try {
+        for (const key of FAKE_ENV_KEYS) delete process.env[key]
+        for (const [key, value] of Object.entries(values)) {
+            if (value !== undefined) process.env[key] = value
+        }
+        await fn()
+    } finally {
+        for (const [key, value] of saved) {
+            if (value === undefined) delete process.env[key]
+            else process.env[key] = value
+        }
+    }
+}
+
+function writeStreamFile (dir:string, lines:unknown[]):string {
+    const path = join(dir, 'stream.jsonl')
+    const text = lines.map(line => {
+        if (typeof line === 'string') return line
+        return JSON.stringify(line)
+    }).join('\n') + '\n'
+    writeFileSync(path, text)
+    return path
+}
+
+function readEnvLog (path:string):unknown[] {
+    return readFileSync(path, 'utf8')
+        .split('\n')
+        .filter(line => line !== '')
+        .map(line => JSON.parse(line))
+}
+
+function agentLine (id:string) {
+    return {
+        type:'assistant',
+        message:{
+            content:[{ type:'tool_use', id, name:'Agent', input:{} }],
+        },
+    }
+}
+
+test('spawnAgent sets CLAUDE_CODE_SUBAGENT_MODEL from preferSubagent',
+    async t => {
+        const base = tmp()
+        const envLog = join(base, 'env.log')
+
+        await withFakeEnv({
+            CLAUDE_CODE_SUBAGENT_MODEL:'shell-model',
+            FAKE_CLAUDE_ENV_LOG:envLog,
+        }, async () => {
+            const result = await spawnAgent({
+                prompt:'test',
+                agentCmd:FAKE_CLAUDE,
+                model:null,
+                timeout:10,
+                logPath:join(base, 'test.log'),
+                preferSubagent:'haiku',
+            })
+            t.equal(result.exitCode, 0, 'agent exits successfully')
+        })
+
+        t.deepEqual(
+            readEnvLog(envLog),
+            ['haiku'],
+            'preferSubagent overrides the shell value'
+        )
+    }
+)
+
+test('spawnAgent keeps the shell subagent model without an option',
+    async t => {
+        const base = tmp()
+        const envLog = join(base, 'env.log')
+
+        await withFakeEnv({
+            CLAUDE_CODE_SUBAGENT_MODEL:'shell-model',
+            FAKE_CLAUDE_ENV_LOG:envLog,
+        }, async () => {
+            await spawnAgent({
+                prompt:'test',
+                agentCmd:FAKE_CLAUDE,
+                model:null,
+                timeout:10,
+                logPath:join(base, 'test.log'),
+            })
+        })
+
+        t.deepEqual(
+            readEnvLog(envLog),
+            ['shell-model'],
+            'shell value is inherited'
+        )
+    }
+)
+
+test('spawnAgent leaves the subagent model unset without an option',
+    async t => {
+        const base = tmp()
+        const envLog = join(base, 'env.log')
+
+        await withFakeEnv({ FAKE_CLAUDE_ENV_LOG:envLog }, async () => {
+            await spawnAgent({
+                prompt:'test',
+                agentCmd:FAKE_CLAUDE,
+                model:null,
+                timeout:10,
+                logPath:join(base, 'test.log'),
+            })
+        })
+
+        t.deepEqual(
+            readEnvLog(envLog),
+            [null],
+            'no subagent model is set'
+        )
+    }
+)
+
+test('spawnAgent sets no subagent model for non-claude agents',
+    async t => {
+        const base = tmp()
+        const envLog = join(base, 'env.log')
+
+        await withFakeEnv({ FAKE_CLAUDE_ENV_LOG:envLog }, async () => {
+            await spawnAgent({
+                prompt:'test',
+                agentCmd:FAKE_CLAUDE_JS,
+                model:null,
+                timeout:10,
+                logPath:join(base, 'test.log'),
+                preferSubagent:'haiku',
+            })
+        })
+
+        t.deepEqual(
+            readEnvLog(envLog),
+            [null],
+            'preferSubagent is ignored outside the claude provider'
+        )
+    }
+)
+
+test('spawnAgent reports subagent stats through onStats',
+    async t => {
+        const base = tmp()
+        const seen:unknown[] = []
+        const streamFile = writeStreamFile(base, [
+            agentLine('toolu_a'),
+            agentLine('toolu_b'),
+            {
+                type:'result',
+                subtype:'success',
+                total_cost_usd:0.5,
+                subagent_stats:{ spawned:3 },
+            },
+        ])
+
+        await withFakeEnv({ FAKE_CLAUDE_STREAM:streamFile }, async () => {
+            const result = await spawnAgent({
+                prompt:'test',
+                agentCmd:FAKE_CLAUDE,
+                model:null,
+                timeout:10,
+                logPath:join(base, 'test.log'),
+                onStats:stats => seen.push(stats),
+            })
+
+            t.deepEqual(
+                seen,
+                [
+                    { subagents:1 },
+                    { subagents:2 },
+                    { subagents:3, costUsd:0.5 },
+                ],
+                'onStats fires each time the stats change'
+            )
+            t.equal(result.subagents, 3, 'result has the subagent count')
+            t.equal(result.costUsd, 0.5, 'result has the cost')
+        })
+    }
+)
+
+test('spawnAgent keeps the subagent count but no cost on timeout',
+    async t => {
+        const base = tmp()
+        const streamFile = writeStreamFile(base, [agentLine('toolu_a')])
+
+        await withFakeEnv({
+            FAKE_CLAUDE_STREAM:streamFile,
+            FAKE_CLAUDE_HANG:'1',
+        }, async () => {
+            const result = await spawnAgent({
+                prompt:'test',
+                agentCmd:FAKE_CLAUDE,
+                model:null,
+                timeout:1,
+                logPath:join(base, 'test.log'),
+            })
+
+            t.equal(result.timedOut, true, 'agent was killed at timeout')
+            t.equal(result.subagents, 1, 'subagent count is kept')
+            t.equal('costUsd' in result, false, 'no cost without a result')
+        })
+    }
+)
+
+test('spawnAgent survives wrong-typed stream lines',
+    async t => {
+        const base = tmp()
+        const streamFile = writeStreamFile(base, [
+            'not json at all',
+            'null',
+            '42',
+            '{"type":"result","total_cost_usd":"1"}',
+            '{"type":"assistant","message":{"content":5}}',
+            '{"type":"assistant","message":{"content":[null]}}',
+            {
+                type:'result',
+                subtype:'success',
+                total_cost_usd:0.1,
+            },
+        ])
+
+        await withFakeEnv({ FAKE_CLAUDE_STREAM:streamFile }, async () => {
+            const result = await spawnAgent({
+                prompt:'test',
+                agentCmd:FAKE_CLAUDE,
+                model:null,
+                timeout:10,
+                logPath:join(base, 'test.log'),
+            })
+
+            t.equal(result.exitCode, 0, 'agent exits successfully')
+            t.equal(result.costUsd, 0.1, 'valid result still counts')
+        })
+    }
+)
+
+test('spawnAgent ignores checklist text from subagent messages',
+    async t => {
+        const base = tmp()
+        const streamFile = writeStreamFile(base, [
+            {
+                type:'assistant',
+                parent_tool_use_id:'toolu_1',
+                message:{ content:[{ type:'text', text:'[x] first item' }] },
+            },
+            {
+                type:'assistant',
+                parent_tool_use_id:null,
+                message:{ content:[{ type:'text', text:'[x] second item' }] },
+            },
+        ])
+
+        await withFakeEnv({ FAKE_CLAUDE_STREAM:streamFile }, async () => {
+            const result = await spawnAgent({
+                prompt:'test',
+                agentCmd:FAKE_CLAUDE,
+                model:null,
+                timeout:10,
+                logPath:join(base, 'test.log'),
+            })
+
+            t.deepEqual(
+                result.completedItems,
+                ['second item'],
+                'only main-loop checklist items are collected'
+            )
+        })
+    }
+)
+
+test('spawnAgent omits subagent stats for non-claude agents',
+    async t => {
+        const base = tmp()
+        const MOCK_CHECKLIST = join(
+            process.cwd(),
+            'test',
+            'mock-agent-checklist.js'
+        )
+
+        const result = await spawnAgent({
+            prompt:'test',
+            agentCmd:MOCK_CHECKLIST,
+            model:null,
+            timeout:10,
+            logPath:join(base, 'test.log'),
+        })
+
+        t.equal('subagents' in result, false, 'no subagent count')
+        t.equal('costUsd' in result, false, 'no cost')
+    }
+)
+
 // -- runWaves (integration) --
 
 const MOCK_PASS = join(
@@ -3107,6 +3420,50 @@ test('formatStreamLine - returns raw non-JSON lines',
             'should pass through non-JSON lines'
         )
     })
+
+test('formatStreamLine - ignores wrong-typed JSON values', t => {
+    const lines = [
+        'null',
+        '42',
+        JSON.stringify({ type:'assistant', message:{ content:5 } }),
+        JSON.stringify({
+            type:'assistant',
+            message:{ content:[null] },
+        }),
+        JSON.stringify({ type:'result', total_cost_usd:'1' }),
+    ]
+    for (const line of lines) {
+        const out = formatStreamLine(line)
+        t.ok(out === null || typeof out === 'string',
+            'should return text or null for wrong-typed input')
+    }
+    t.equal(
+        formatStreamLine(JSON.stringify({
+            type:'result',
+            total_cost_usd:'1',
+        })),
+        'done',
+        'should not add a cost for a non-numeric total'
+    )
+})
+
+test('formatStreamLine - skips subagent assistant text', t => {
+    const sub = JSON.stringify({
+        type:'assistant',
+        parent_tool_use_id:'toolu_1',
+        message:{ content:[{ type:'text', text:'inner' }] },
+    })
+    t.equal(formatStreamLine(sub), null,
+        'should not show text from a subagent')
+
+    const main = JSON.stringify({
+        type:'assistant',
+        parent_tool_use_id:null,
+        message:{ content:[{ type:'text', text:'outer' }] },
+    })
+    t.equal(formatStreamLine(main), 'outer',
+        'should show text from the main loop')
+})
 
 // -- createPiStreamFormatter --
 
