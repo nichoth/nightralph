@@ -451,11 +451,23 @@ test('CLI subprocess - unknown blocker keeps the ticket from running',
                 }),
             )
 
-            await spawnCli([
+            const { code, stdout } = await spawnCli([
                 MOCK_AGENT,
                 '--spec', FEAT,
                 '--timeout', '10',
             ], { cwd:projectDir })
+
+            // Positive control: the run loaded the ticket and ended
+            // normally, so the assertions below are not explained by
+            // an early failure (exit 2) or a timeout.
+            t.ok(
+                code === 0 || code === 1,
+                'the CLI ran to the end',
+            )
+            t.ok(
+                stdout.includes('Found 1 tickets'),
+                'the CLI scanned the ticket',
+            )
 
             const ticket = readFileSync(
                 join(issuesDir, '01-task.md'), 'utf8'
