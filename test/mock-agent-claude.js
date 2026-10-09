@@ -5,10 +5,16 @@
 // test/mock-agent-*.js path, it then runs that mock with the same
 // prompt, cwd, env and arguments and exits with its status.
 // With FAKE_CLAUDE_PROMPT_DIR set, it writes each prompt it reads
-// to a uniquely named file in that directory.
+// to a uniquely named file in that directory. With
+// FAKE_CLAUDE_FAIL_ONCE set to a marker path, the first run exits 1.
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+    appendFileSync,
+    existsSync,
+    readFileSync,
+    writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 const chunks = []
@@ -31,6 +37,14 @@ process.stdin.on('end', () => {
             .split('\n')
             .filter(line => line !== '')
         for (const line of lines) process.stdout.write(line + '\n')
+    }
+    // The first run creates the marker file and exits 1; later runs
+    // see it and carry on.
+    const failOnce = process.env.FAKE_CLAUDE_FAIL_ONCE
+    if (failOnce && !existsSync(failOnce)) {
+        writeFileSync(failOnce, '')
+        process.exitCode = 1
+        return
     }
     const delegate = process.env.FAKE_CLAUDE_DELEGATE
     if (delegate) {
