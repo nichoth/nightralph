@@ -324,17 +324,17 @@ function loadTickets (
         )
         for (const t of tickets) {
             const unknown = t.blockers.filter(
-                b => !knownNums.has(b)
+                b => !knownNums.has(b.num)
             )
             if (unknown.length > 0) {
                 log(
                     `${t.filename}: blockers ` +
-                    `[${unknown.join(', ')}] ` +
+                    `[${unknown.map(b => b.num).join(', ')}] ` +
                     'not found in directory'
                 )
             }
             t.blockers = t.blockers.filter(
-                b => knownNums.has(b)
+                b => knownNums.has(b.num)
             )
         }
 

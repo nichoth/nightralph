@@ -96,6 +96,11 @@ import {
     type AgentRunRecord,
     type EntryInput,
 } from './learnings.js'
+import {
+    parseBlockerField,
+    provisionalRefs,
+    type BlockerRef,
+} from './blockers.js'
 
 export type Ticket = {
     num:number
@@ -104,7 +109,7 @@ export type Ticket = {
     filepath:string
     body:string
     status:string
-    blockers:number[]
+    blockers:BlockerRef[]
     feature:string
 }
 
@@ -185,23 +190,16 @@ export function parseStatus (body:string):string {
     return m ? m[1].trim().toLowerCase() : ''
 }
 
-export function parseBlockers (body:string):number[] {
-    const m = body.match(/\*\*Blocked by:\*\*\s*(.+)/i)
-    if (!m) return []
-    const text = m[1]
-    if (/none/i.test(text)) return []
-    const nums:number[] = []
-    const re = /(\d+)/g
-    let match
-    while ((match = re.exec(text))) {
-        nums.push(Number(match[1]))
-    }
-    return nums
-}
-
+/**
+ * Reads every ticket file in `dir`. Blocker refs are provisional
+ * (every ref `where:'run'`) until `loadSelection` resolves them
+ * against the run; a word in `knownFeatures` before a number names
+ * that number's feature.
+ */
 export function scanTickets (
     dir:string,
-    feature:string = ''
+    feature:string = '',
+    knownFeatures:ReadonlySet<string> = new Set()
 ):Ticket[] {
     const files = readdirSync(dir)
         .filter(f => TICKET_RE.test(f))
@@ -222,7 +220,10 @@ export function scanTickets (
             filepath,
             body,
             status:parseStatus(body),
-            blockers:parseBlockers(body),
+            blockers:provisionalRefs(
+                parseBlockerField(body, knownFeatures).refs,
+                feature
+            ),
             feature,
         }
     })
@@ -230,6 +231,38 @@ export function scanTickets (
 
 export function ticketKey (feature:string, num:number):string {
     return `${feature}:${num}`
+}
+
+/**
+ * Whether one blocker ref lets its dependent run. `run` refs are
+ * decided by the live status of the ticket in this run; refs
+ * outside the run were classified at load time.
+ */
+export function blockerSatisfied (
+    ref:BlockerRef,
+    doneKeys:ReadonlySet<string>
+):boolean {
+    switch (ref.where) {
+        case 'run':
+            return doneKeys.has(ticketKey(ref.feature, ref.num))
+        case 'done': return true
+        case 'pending':
+        case 'missing': return false
+    }
+}
+
+/**
+ * Display name of a blocker: `<feature>/<NN>`, plus why it is dead
+ * when it is outside the run.
+ */
+export function blockerLabel (ref:BlockerRef):string {
+    const nn = String(ref.num).padStart(2, '0')
+    const base = ref.feature ? `${ref.feature}/${nn}` : nn
+    if (ref.where === 'pending') {
+        return `${base} (${ref.status ?? 'not done'}, not in run)`
+    }
+    if (ref.where === 'missing') return `${base} (not found)`
+    return base
 }
 
 export function findReadyTickets (
@@ -242,25 +275,25 @@ export function findReadyTickets (
     )
     return tickets.filter(t => {
         if (t.status !== 'ready-for-agent') return false
-        return t.blockers.every(b =>
-            doneKeys.has(ticketKey(t.feature, b))
-        )
+        return t.blockers.every(r => blockerSatisfied(r, doneKeys))
     })
 }
 
 /**
- * Tickets that cannot run this session because a ticket they
- * depend on (directly or through a chain, within their own
- * feature) is dead: in `failedKeys`, or in a status that is
- * neither done nor ready-for-agent, e.g. ready-for-human.
- * Returns ticketKey -> dead upstream ticketKeys. Only
- * ready-for-agent tickets that have not failed are keys. A
- * blocker number with no matching ticket is not dead.
+ * Tickets that cannot run this session because a blocker they
+ * depend on, directly or through a chain of in-run refs (across
+ * features), is dead. Dead means a `pending` or `missing` ref, or
+ * an in-run ticket that is in `failedKeys` or whose status is
+ * neither done nor ready-for-agent, e.g. ready-for-human. A `done`
+ * ref, or a done in-run ticket, ends the walk. An in-run ref with
+ * no matching ticket (bare scans only) is not dead.
+ * Returns ticketKey -> dead upstream refs. Only ready-for-agent
+ * tickets that have not failed are keys.
  */
 export function findBlockedTickets (
     tickets:ReadonlyArray<Ticket>,
     failedKeys:ReadonlySet<string>,
-):Map<string, Array<string>> {
+):Map<string, BlockerRef[]> {
     const byKey = new Map(
         tickets.map(t => [ticketKey(t.feature, t.num), t])
     )
@@ -268,33 +301,38 @@ export function findBlockedTickets (
     function collectDead (
         ticket:Ticket,
         visited:Set<string>,
-        found:Set<string>,
+        found:Map<string, BlockerRef>,
     ):void {
-        for (const b of ticket.blockers) {
-            const key = ticketKey(ticket.feature, b)
+        for (const ref of ticket.blockers) {
+            const key = ticketKey(ref.feature, ref.num)
             if (visited.has(key)) continue
             visited.add(key)
+            if (ref.where === 'done') continue
+            if (ref.where === 'pending' || ref.where === 'missing') {
+                found.set(key, ref)
+                continue
+            }
             const blocker = byKey.get(key)
             if (!blocker || blocker.status === 'done') continue
             if (
                 failedKeys.has(key) ||
                 blocker.status !== 'ready-for-agent'
             ) {
-                found.add(key)
+                found.set(key, ref)
                 continue
             }
             collectDead(blocker, visited, found)
         }
     }
 
-    const blocked = new Map<string, Array<string>>()
+    const blocked = new Map<string, BlockerRef[]>()
     for (const t of tickets) {
         const key = ticketKey(t.feature, t.num)
         if (t.status !== 'ready-for-agent') continue
         if (failedKeys.has(key)) continue
-        const found = new Set<string>()
+        const found = new Map<string, BlockerRef>()
         collectDead(t, new Set([key]), found)
-        if (found.size > 0) blocked.set(key, [...found])
+        if (found.size > 0) blocked.set(key, [...found.values()])
     }
     return blocked
 }
@@ -615,7 +653,7 @@ function listTickets (tickets:ReadonlyArray<Ticket>):void {
     console.log('\nTickets:')
     for (const t of tickets) {
         const blockerStr = t.blockers.length > 0 ?
-            `blocked by [${t.blockers.join(', ')}]` :
+            `blocked by [${t.blockers.map(blockerLabel).join(', ')}]` :
             'no blockers'
         console.log(
             `  ${t.filename} ` +
@@ -645,11 +683,7 @@ function * simulateWaves (
             if (sim.get(key) !== 'ready-for-agent') {
                 return false
             }
-            return t.blockers.every(b =>
-                doneKeys.has(
-                    ticketKey(t.feature, b)
-                )
-            )
+            return t.blockers.every(r => blockerSatisfied(r, doneKeys))
         })
         if (ready.length === 0) break
         yield { wave, ready }
@@ -685,10 +719,8 @@ function detectDeadlocks (
             const ticket = tickets.find(t =>
                 ticketKey(t.feature, t.num) === key
             )!
-            if (ticket.blockers.every(b =>
-                doneKeys.has(
-                    ticketKey(ticket.feature, b)
-                )
+            if (ticket.blockers.every(r =>
+                blockerSatisfied(r, doneKeys)
             )) {
                 doneKeys.add(key)
                 readyKeys.delete(key)
@@ -1676,8 +1708,8 @@ function buildHistory (
             readEntries(learningsPath),
             {
                 key:ticketKey(ticket.feature, ticket.num),
-                blockerKeys:ticket.blockers.map(b => {
-                    return ticketKey(ticket.feature, b)
+                blockerKeys:ticket.blockers.map(r => {
+                    return ticketKey(r.feature, r.num)
                 }),
             }
         ))
@@ -2111,10 +2143,12 @@ export function renderFinishSummary (
         t => t.status === 'ready-for-agent'
     )
     const human = tickets.filter(t => t.status === HUMAN_STATUS)
-    const humanNums = new Set(human.map(t => t.num))
+    const humanKeys = new Set(
+        human.map(t => ticketKey(t.feature, t.num))
+    )
     const blockedByHuman = remaining.filter(t =>
         !failedKeys.has(ticketKey(t.feature, t.num)) &&
-        t.blockers.some(b => humanNums.has(b))
+        t.blockers.some(r => humanKeys.has(ticketKey(r.feature, r.num)))
     )
 
     const counts = `Finished: ${totalCompleted} completed` +
@@ -2216,10 +2250,10 @@ function reportBlocked (
     )) {
         const ticket = byKey.get(key)
         if (!ticket) continue
-        const labels = dead
-            .map(k => byKey.get(k))
-            .filter((t):t is Ticket => t !== undefined)
-            .map(t => ticketLabel(toRef(t)))
+        const labels = dead.map(ref => {
+            const t = byKey.get(ticketKey(ref.feature, ref.num))
+            return t ? ticketLabel(toRef(t)) : blockerLabel(ref)
+        })
         d.setBlocked(ticket.num, ticket.feature, labels)
     }
 }

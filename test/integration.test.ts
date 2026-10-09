@@ -25,8 +25,10 @@ import {
     killRunningAgents,
     killProcessGroup,
     ticketKey,
+    blockerLabel,
     type Ticket,
 } from '../src/orchestrator.js'
+import type { BlockerRef } from '../src/blockers.js'
 import { parseEntries, readEntries } from '../src/learnings.js'
 import { readProgress } from '../src/progress.js'
 import { parseReviewEntries } from '../src/review.js'
@@ -2407,6 +2409,89 @@ test('runWavesIsolated - AC4.2 AC4.3: startRun once with the ' +
             calls[blockedTwo]?.args[2],
             [ticketLabel(mustFind(tickets, 1))],
             'ticket 2 names ticket 1'
+        )
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+    }
+})
+
+test('runWavesIsolated - AC2.2 AC2.4 AC2.5: blocked rows name ' +
+    'outside, missing and chained blockers', async t => {
+    const projectDir = initTempGitRepo()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+
+        for (const name of [
+            '01-ready.md', '02-pending.md', '03-missing.md',
+            '04-chain.md', '05-mid.md',
+        ]) {
+            writeFileSync(
+                join(issuesDir, name),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+        }
+
+        const tickets = scanTickets(issuesDir)
+        const pendingRef:BlockerRef = {
+            feature:'other',
+            num:7,
+            where:'pending',
+            status:'ready-for-agent',
+        }
+        const missingRef:BlockerRef = {
+            feature:'other', num:9, where:'missing',
+        }
+        const chainRef:BlockerRef = {
+            feature:'other',
+            num:8,
+            where:'pending',
+            status:'ready-for-human',
+        }
+        mustFind(tickets, 2).blockers = [pendingRef]
+        mustFind(tickets, 3).blockers = [missingRef]
+        mustFind(tickets, 4).blockers = [
+            { feature:'', num:5, where:'run' },
+        ]
+        mustFind(tickets, 5).blockers = [chainRef]
+        commitAll(projectDir, 'add tickets')
+        const { display, calls } = recordingDisplay()
+
+        const originalCwd = process.cwd()
+        process.chdir(projectDir)
+        try {
+            await runWavesIsolated({
+                tickets,
+                specBody:'test spec',
+                agentCmd:MOCK_PASS,
+                model:null,
+                timeout:10,
+                logsDir,
+                featureName:'test-feature-outside',
+                conflictStrategy:'respawn',
+                retries:0,
+                testCmd:'true',
+                display,
+            })
+        } finally {
+            process.chdir(originalCwd)
+        }
+
+        const labelsFor = (n:number) => calls.find(c => (
+            c.method === 'setBlocked' && c.args[0] === n
+        ))?.args[2]
+        t.deepEqual(
+            labelsFor(2), [blockerLabel(pendingRef)],
+            'ticket 2 names the outside ticket and its status'
+        )
+        t.deepEqual(
+            labelsFor(3), [blockerLabel(missingRef)],
+            'ticket 3 names the blocker that was not found'
+        )
+        t.deepEqual(
+            labelsFor(4), [blockerLabel(chainRef)],
+            'ticket 4 names the outside ticket behind ticket 5'
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
