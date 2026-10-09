@@ -630,11 +630,12 @@ Small orchestrator that runs a single-agent session per issue.
   ticket is `ready-for-human` it adds a paragraph
   naming those tickets, saying an agent cannot finish
   them, listing any `ready-for-agent` tickets blocked
-  on them, and telling the user to do the work and set
+  on them (directly or through other in-run tickets,
+  as `findBlockedTickets` walks), and telling the user to do the work and set
   the status to done; humans are matched by `ticketKey`,
   so a human `a/02` never blocks `b/03` that lists `02`.
   A second paragraph lists open tickets waiting on
-  `pending` refs, the `missing` refs of open tickets,
+  `pending` refs (also through in-run tickets), the `missing` refs of open tickets,
   and the `typo` entries of `warnings` (default `[]`);
   each part is omitted when empty, so a run with
   nothing to explain gets no extra paragraph.
@@ -678,13 +679,15 @@ Small orchestrator that runs a single-agent session per issue.
   across lines, a `)` inside code does not close) are
   removed; an unpaired delimiter stays as text. Text
   starting with `None` means no refs. A number is a whole
-  token of digits; `03-05` is 3 and 5. The token directly
+  token of digits; `03-05` is 3 and 5. The word directly
   before a number (whitespace gap only) is its feature when
   it is in `knownFeatures`, and applies to every number of
   a range; otherwise the number is the ticket's own feature
-  (`feature` absent). A lowercase hyphenated token with a
-  letter (feature-shaped, so not `FDR-018`) before a number
-  that is not a known feature is reported once in `typos`.
+  (`feature` absent). A word may contain `/`, so a nested
+  feature such as `a/b` is one word. A lowercase hyphenated
+  word, or a `/` path of lowercase segments, with a letter
+  (feature-shaped, so not `FDR-018`) before a number that
+  is not a known feature is reported once in `typos`.
   Refs are de-duplicated by (feature, num)
 - **BlockerWhere**: `run` (a ticket in this run; its live
   status decides), `done` (outside the run, done when
@@ -705,9 +708,10 @@ Small orchestrator that runs a single-agent session per issue.
   `loadSelection(scratchDir, names)`, `FeatureCounts`,
   `featureCounts(scratchDir, name)`,
   `featureChoiceLabel(scratchDir, name)`
-- **loadSelection**: known features are the
-  `<scratchDir>/*` dirs with an `issues` subdir (complete or
-  not). Scans each selected feature, scans an unselected
+- **loadSelection**: known features are the dirs under
+  `<scratchDir>`, at any depth, with an `issues` subdir
+  (complete or not), named by their path (`a/b`, the name
+  `--spec` takes). Scans each selected feature, scans an unselected
   feature only when a ref points into it (once, cached),
   resolves every ticket's refs with `resolveBlockers`, and
   returns `{ tickets, warnings }`: the selected features'
@@ -1267,22 +1271,6 @@ Small orchestrator that runs a single-agent session per issue.
   `rebaseBranch` aborts and checks out the base
   branch on failure; stderr captures git's stdout
   (conflict info) or stderr (fatal errors)
-
-## Agent skills
-
-### Issue tracker
-
-Issues are tracked as local markdown files under
-`.scratch/`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default label vocabulary.
-See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context layout. See `docs/agents/domain.md`.
 
 <!-- nightralph:start -->
 ## Agent skills

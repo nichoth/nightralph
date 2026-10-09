@@ -307,6 +307,23 @@ test('loadSelection: a misspelt feature is a typo warning', t => {
     ], 'the number refers to the own feature')
 })
 
+test('loadSelection: a blocker in a nested feature', t => {
+    const { scratchDir } = makeTempScratch()
+    addFeature(scratchDir, 'rollout/billing', [{
+        filename:'03-x.md',
+        body:ticketBody('done', 'None'),
+    }])
+    addFeature(scratchDir, HIR, [{
+        filename:'01-x.md',
+        body:ticketBody('ready-for-agent', 'rollout/billing 03'),
+    }])
+    const { tickets, warnings } = loadSelection(scratchDir, [HIR])
+    t.deepEqual(findTicket(tickets, HIR, 1).blockers, [
+        { feature:'rollout/billing', num:3, where:'done', status:'done' },
+    ], 'the ref resolves into the nested feature')
+    t.deepEqual(warnings, [], 'no warnings')
+})
+
 test('featureCounts AC1.11: the picker counts what a run would', t => {
     const scratchDir = crossFeatureTree('done')
     addFeature(scratchDir, HIR, [{

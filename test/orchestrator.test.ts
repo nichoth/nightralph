@@ -5086,6 +5086,47 @@ test('renderNothingReady reports human work, not a cycle', t => {
     )
 })
 
+test('renderNothingReady lists a ticket that waits on human work ' +
+    'through another ticket', t => {
+    const out = renderNothingReady([
+        makeTicket({
+            num:1,
+            filename:'01-human.md',
+            feature:'a',
+            status:HUMAN_STATUS,
+        }),
+        makeTicket({
+            num:2, filename:'02-direct.md', feature:'a', blockers:[1],
+        }),
+        makeTicket({
+            num:3, filename:'03-chained.md', feature:'a', blockers:[2],
+        }),
+    ], [])
+    t.ok(out.includes('02-direct.md'), 'names the direct waiter')
+    t.ok(out.includes('03-chained.md'), 'names the chained waiter')
+})
+
+test('renderNothingReady lists a ticket that waits on a blocker ' +
+    'outside the run through another ticket', t => {
+    const chained = makeTicket({
+        num:3, filename:'03-chained.md', feature:'a', blockers:[2],
+    })
+    const out = renderNothingReady([
+        makeTicket({
+            num:2,
+            filename:'02-direct.md',
+            feature:'a',
+            blockers:[OUTSIDE],
+        }),
+        chained,
+    ], [])
+    t.ok(
+        out.includes(`${ticketLabel(chained)} waits on ` +
+            blockerLabel(OUTSIDE)),
+        'names the chained waiter and the outside blocker'
+    )
+})
+
 test('renderNothingReady names a blocker in another status', t => {
     const triage = makeTicket({
         num:1,

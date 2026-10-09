@@ -14,7 +14,8 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - Dependencies are recorded as a `**Blocked by:**` line near the top of
   each issue file, listing the numbers of the tickets that must complete
   first, or `None`. A ticket in another feature is `<feature> <NN>`,
-  where `<feature>` is its `.scratch/<feature>/` directory name,
+  where `<feature>` is its `.scratch/<feature>/` directory name
+  (a path such as `rollout/billing` for a nested feature),
   repeated before each of its numbers. List every number: `03-05`
   means 3 and 5, and a feature name before it applies to both. Notes
   in parentheses are ignored. The list may wrap onto the next lines

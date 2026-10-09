@@ -244,6 +244,22 @@ function spawnCli (
     })
 }
 
+// SIGKILL is delivered and the dead process reaped asynchronously,
+// so a pid can still answer kill(pid, 0) for a few ms after the
+// kill. Polls until it is gone; false means it outlived `ms`.
+async function processGone (pid:number, ms = 5000):Promise<boolean> {
+    const deadline = Date.now() + ms
+    while (Date.now() < deadline) {
+        try {
+            process.kill(pid, 0)
+        } catch {
+            return true
+        }
+        await new Promise(r => setTimeout(r, 20))
+    }
+    return false
+}
+
 // True when some line of `text` is a stack frame.
 function hasStackLine (text:string):boolean {
     return text.split('\n').some(l => l.startsWith('    at '))
@@ -3373,14 +3389,8 @@ test('spawnAgent - timeout kills the process group, ' +
         const grandchildPid = Number(
             readFileSync(pidFile, 'utf8').trim()
         )
-        let grandchildAlive = true
-        try {
-            process.kill(grandchildPid, 0)
-        } catch {
-            grandchildAlive = false
-        }
         t.equal(
-            grandchildAlive, false,
+            await processGone(grandchildPid), true,
             'the grandchild process was killed along with ' +
             'the agent'
         )
@@ -3547,14 +3557,8 @@ test('CLI subprocess - SIGINT kills the running ' +
             'CLI exits 130 on SIGINT'
         )
 
-        let grandchildAlive = true
-        try {
-            process.kill(grandchildPid, 0)
-        } catch {
-            grandchildAlive = false
-        }
         t.equal(
-            grandchildAlive, false,
+            await processGone(grandchildPid), true,
             'the agent\'s child process was killed too'
         )
     } finally {
@@ -4232,16 +4236,8 @@ test('spawnAgent - grace timer kills process group ' +
         const grandchildPid = Number(
             readFileSync(pidFile, 'utf8').trim()
         )
-        // Small delay to let SIGKILL fully propagate
-        await new Promise(r => setTimeout(r, 200))
-        let grandchildAlive = true
-        try {
-            process.kill(grandchildPid, 0)
-        } catch {
-            grandchildAlive = false
-        }
         t.equal(
-            grandchildAlive, false,
+            await processGone(grandchildPid), true,
             'grandchild process is no longer alive'
         )
     } finally {

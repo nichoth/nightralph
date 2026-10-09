@@ -78,20 +78,40 @@ function stripNotes (text:string):string {
 
 /**
  * A word shaped like a feature dir name: lowercase letters and
- * digits joined by hyphens, with at least one letter. Doc IDs such
- * as `FDR-018` are not.
+ * digits joined by hyphens, or a nested path of such segments
+ * joined by `/`, with at least one letter. Doc IDs such as
+ * `FDR-018` are not.
  */
 function looksLikeFeature (word:string):boolean {
-    return /^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(word) && /[a-z]/.test(word)
+    const segments = word.split('/')
+    return (segments.length > 1 || word.includes('-')) &&
+        /[a-z]/.test(word) &&
+        segments.every(s => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s))
+}
+
+/**
+ * The word that ends right before `start`, separated from it by
+ * whitespace only. A word may contain `/`, so a nested feature such
+ * as `rollout/billing` is one word. `null` when the gap is empty or
+ * holds anything but whitespace.
+ */
+function wordBefore (text:string, start:number):string|null {
+    let i = start
+    while (i > 0 && /\s/.test(text[i - 1])) i--
+    if (i === start) return null
+    const end = i
+    while (i > 0 && /[A-Za-z0-9_/-]/.test(text[i - 1])) i--
+    return i === end ? null : text.slice(i, end)
 }
 
 /**
  * Reads the **Blocked by:** field of a ticket body. A number
  * belongs to the feature named by the word directly before it
  * when that word is in `knownFeatures` (the names of
- * `.scratch/<name>/issues` dirs); otherwise to the ticket's own
- * feature. Feature-shaped words that name no feature are returned
- * as `typos`.
+ * `.scratch/<name>/issues` dirs, `<name>` possibly nested, as in
+ * `rollout/billing`); otherwise to the ticket's own feature.
+ * Feature-shaped words that name no feature are returned as
+ * `typos`.
  */
 export function parseBlockerField (
     body:string,
@@ -111,15 +131,10 @@ export function parseBlockerField (
         seen.add(id)
         refs.push(feature === undefined ? { num } : { feature, num })
     }
-    let prev:{ word:string; end:number }|null = null
     for (const m of clean.matchAll(TOKEN_RE)) {
         const word = m[0]
-        const start = m.index ?? 0
         if (/^\d+(?:-\d+)*$/.test(word)) {
-            const before = prev !== null &&
-                /^\s+$/.test(clean.slice(prev.end, start)) ?
-                prev.word :
-                null
+            const before = wordBefore(clean, m.index ?? 0)
             let feature:string|undefined
             if (before !== null && knownFeatures.has(before)) {
                 feature = before
@@ -133,7 +148,6 @@ export function parseBlockerField (
             // both ends of a range belong to the same feature
             for (const n of word.split('-').map(Number)) add(n, feature)
         }
-        prev = { word, end:start + word.length }
     }
     return { refs, typos }
 }

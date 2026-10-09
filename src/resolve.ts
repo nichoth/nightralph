@@ -68,17 +68,24 @@ export type LoadedSelection = {
 }
 
 // Names of the features under scratchDir: dirs with an issues
-// subdir, complete or not.
+// subdir, complete or not, at any depth. A nested feature's name
+// is its path, e.g. `rollout/billing`, the same name `--spec`
+// takes.
 function knownFeatureNames (scratchDir:string):Set<string> {
-    if (!existsSync(scratchDir)) return new Set()
-    return new Set(
-        readdirSync(scratchDir, { withFileTypes:true })
-            .filter(e => (
-                e.isDirectory() &&
-                existsSync(join(scratchDir, e.name, 'issues'))
-            ))
-            .map(e => e.name)
-    )
+    const names = new Set<string>()
+    const walk = (rel:string) => {
+        const dir = rel === '' ? scratchDir : join(scratchDir, rel)
+        for (const e of readdirSync(dir, { withFileTypes:true })) {
+            if (!e.isDirectory() || e.name === 'issues') continue
+            const name = rel === '' ? e.name : `${rel}/${e.name}`
+            if (existsSync(join(scratchDir, name, 'issues'))) {
+                names.add(name)
+            }
+            walk(name)
+        }
+    }
+    if (existsSync(scratchDir)) walk('')
+    return names
 }
 
 /**

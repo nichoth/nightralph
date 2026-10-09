@@ -182,6 +182,27 @@ test('ranges expand to their endpoints', t => {
     ], 'a feature applies only to the number right after it')
 })
 
+test('a nested feature is read with its full path', t => {
+    const known = new Set([...KNOWN, 'rollout/billing'])
+    const p = parseBlockerField(
+        bodyWith('rollout/billing 03-05, 07'), known
+    )
+    t.deepEqual(p, {
+        refs:[
+            { feature:'rollout/billing', num:3 },
+            { feature:'rollout/billing', num:5 },
+            { num:7 },
+        ],
+        typos:[],
+    }, 'the path is the feature')
+})
+
+test('an unknown nested feature is reported as a typo', t => {
+    const p = parse('rollout/biling 03')
+    t.deepEqual(p.refs, [{ num:3 }], 'ref falls back to own feature')
+    t.deepEqual(p.typos, ['rollout/biling'], 'typo reported')
+})
+
 test('nested and code-guarded parentheses', t => {
     const nested = parse('03 (a (b) 04) 05')
     t.deepEqual(nested.refs.map(r => r.num), [3, 5], 'nested parens')

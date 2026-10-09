@@ -2159,7 +2159,9 @@ function indentFilenames (tickets:ReadonlyArray<Ticket>):string {
  * The paragraphs that explain why open tickets did not run, each
  * preceded by a blank line: ready-for-human tickets and what they
  * block, then tickets waiting on blockers outside the run, blocker
- * refs that match no ticket, and likely feature-name typos.
+ * refs that match no ticket, and likely feature-name typos. A
+ * ticket counts as blocked by human or outside work when it waits
+ * on it directly or through other in-run tickets.
  * Returns [] when there is nothing to explain.
  */
 function explainOpen (
@@ -2173,6 +2175,13 @@ function explainOpen (
     const open = remaining.filter(
         t => !failedKeys.has(ticketKey(t.feature, t.num))
     )
+    // Dead refs upstream of each open ticket, through chains of
+    // in-run tickets, so A waiting on B waiting on a human ticket
+    // is listed too, not only B.
+    const dead = findBlockedTickets(tickets, failedKeys)
+    const deadRefs = (t:Ticket) => (
+        dead.get(ticketKey(t.feature, t.num)) ?? []
+    )
     const lines:string[] = []
 
     const human = tickets.filter(t => t.status === HUMAN_STATUS)
@@ -2180,7 +2189,7 @@ function explainOpen (
         const humanKeys = new Set(
             human.map(t => ticketKey(t.feature, t.num))
         )
-        const blockedByHuman = open.filter(t => t.blockers.some(
+        const blockedByHuman = open.filter(t => deadRefs(t).some(
             r => humanKeys.has(ticketKey(r.feature, r.num))
         ))
         const noun = human.length === 1 ?
@@ -2215,7 +2224,7 @@ function explainOpen (
 
     const blockers:string[] = []
     const outside = open.filter(
-        t => t.blockers.some(r => r.where === 'pending')
+        t => deadRefs(t).some(r => r.where === 'pending')
     )
     if (outside.length > 0) {
         const n = outside.length
@@ -2226,7 +2235,7 @@ function explainOpen (
             'first:',
             ...outside.map(t => (
                 `  ${ticketLabel(toRef(t))} waits on ` +
-                t.blockers
+                deadRefs(t)
                     .filter(r => r.where === 'pending')
                     .map(blockerLabel)
                     .join(', ')
