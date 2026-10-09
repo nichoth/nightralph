@@ -2323,6 +2323,81 @@ export function renderFinishSummary (
     return lines.join('\n')
 }
 
+/**
+ * The zero-ready stop rule: nothing can start, yet a
+ * ready-for-agent ticket is waiting on a blocker. A run with no
+ * ready-for-agent ticket left (all done, or only human work) is
+ * not a stop: it still gets its finish summary and review.
+ */
+export function nothingReady (
+    tickets:ReadonlyArray<Ticket>
+):boolean {
+    return findReadyTickets(tickets).length === 0 &&
+        tickets.some(t => t.status === 'ready-for-agent')
+}
+
+/**
+ * Why nothing can run: the same paragraphs as the finish summary
+ * (human work, tickets outside the run, refs that match nothing,
+ * typos), plus tickets waiting on an in-run ticket in another
+ * status (e.g. needs-triage) and tickets that wait on each other
+ * in a cycle.
+ */
+export function renderNothingReady (
+    tickets:ReadonlyArray<Ticket>,
+    warnings:ReadonlyArray<BlockerWarning>
+):string {
+    const lines = [
+        'Nothing to run: every ready-for-agent ticket is ' +
+        'waiting on a blocker.',
+        ...explainOpen(tickets, new Set(), warnings),
+    ]
+    const dead = findBlockedTickets(tickets, new Set())
+    const byKey = new Map(
+        tickets.map(t => [ticketKey(t.feature, t.num), t])
+    )
+    // Human blockers are explained by explainOpen; any other
+    // in-run dead blocker is a status an agent will not pick up.
+    const other:string[] = []
+    for (const [key, refs] of dead) {
+        const stuck = refs.flatMap(r => {
+            const b = byKey.get(ticketKey(r.feature, r.num))
+            return b && b.status !== HUMAN_STATUS ?
+                [`${ticketLabel(toRef(b))} (${b.status})`] :
+                []
+        })
+        const t = byKey.get(key)
+        if (t && stuck.length > 0) {
+            other.push(
+                `  ${ticketLabel(toRef(t))} waits on ` +
+                stuck.join(', ')
+            )
+        }
+    }
+    if (other.length > 0) {
+        lines.push(
+            '',
+            'These tickets wait on tickets that are not ' +
+            'ready-for-agent:',
+            ...other,
+            'Set those tickets to ready-for-agent or done, or ' +
+            'fix the **Blocked by:** lines.'
+        )
+    }
+    const cycle = detectDeadlocks(tickets).filter(t => (
+        !dead.has(ticketKey(t.feature, t.num))
+    ))
+    if (cycle.length > 0) {
+        lines.push(
+            '',
+            'Deadlocked tickets (waiting on each other): ' +
+            cycle.map(t => ticketLabel(toRef(t))).join(', ') +
+            '. Fix their **Blocked by:** lines.'
+        )
+    }
+    return lines.join('\n')
+}
+
 function sessionTickets (
     tickets:ReadonlyArray<Ticket>,
 ):Array<Ticket> {

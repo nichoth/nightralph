@@ -40,6 +40,8 @@ import {
     blockerSatisfied,
     blockerLabel,
     historyFor,
+    nothingReady,
+    renderNothingReady,
     HUMAN_STATUS,
     type Ticket,
     type EffortLevel,
@@ -5008,3 +5010,90 @@ test('historyFor: a nested feature reads blockers beside .scratch',
         )
         t.ok(out.includes('marker-nested-notes'), 'b/01 notes are included')
     })
+
+// -- nothingReady / renderNothingReady --
+
+const OUTSIDE:BlockerRef = {
+    feature:'b', num:1, where:'pending', status:'ready-for-agent',
+}
+
+test('nothingReady stops only when a ready-for-agent ticket waits',
+    t => {
+        t.equal(nothingReady([]), false, 'no tickets')
+        t.equal(nothingReady([
+            makeTicket({ num:1, filename:'01-a.md', status:'done' }),
+        ]), false, 'all done')
+        t.equal(nothingReady([
+            makeTicket({
+                num:1, filename:'01-a.md', status:HUMAN_STATUS,
+            }),
+        ]), false, 'only human work')
+        const blocked = makeTicket({
+            num:1, filename:'01-a.md', feature:'a', blockers:[OUTSIDE],
+        })
+        t.equal(nothingReady([blocked]), true, 'one blocked ticket')
+        const free = makeTicket({
+            num:2, filename:'02-b.md', feature:'a',
+        })
+        t.equal(
+            nothingReady([blocked, free]), false,
+            'one ticket can start'
+        )
+    })
+
+test('renderNothingReady names a blocker outside the run', t => {
+    const out = renderNothingReady([
+        makeTicket({
+            num:1, filename:'01-a.md', feature:'a', blockers:[OUTSIDE],
+        }),
+    ], [])
+    t.ok(out.includes(blockerLabel(OUTSIDE)), 'names the blocker')
+})
+
+test('renderNothingReady reports a cycle', t => {
+    const tickets = [
+        makeTicket({
+            num:1, filename:'01-a.md', feature:'a', blockers:[2],
+        }),
+        makeTicket({
+            num:2, filename:'02-b.md', feature:'a', blockers:[1],
+        }),
+    ]
+    const out = renderNothingReady(tickets, [])
+    t.ok(out.includes('Deadlocked tickets'), 'reports the cycle')
+    t.ok(out.includes(ticketLabel(tickets[0])), 'names a/01')
+    t.ok(out.includes(ticketLabel(tickets[1])), 'names a/02')
+})
+
+test('renderNothingReady reports human work, not a cycle', t => {
+    const out = renderNothingReady([
+        makeTicket({
+            num:1,
+            filename:'01-human.md',
+            feature:'a',
+            status:HUMAN_STATUS,
+        }),
+        makeTicket({
+            num:2, filename:'02-waits.md', feature:'a', blockers:[1],
+        }),
+    ], [])
+    t.ok(out.includes('01-human.md'), 'names the human ticket')
+    t.ok(!out.includes('Deadlocked tickets'), 'no cycle line')
+})
+
+test('renderNothingReady names a blocker in another status', t => {
+    const triage = makeTicket({
+        num:1,
+        filename:'01-triage.md',
+        feature:'a',
+        status:'needs-triage',
+    })
+    const out = renderNothingReady([
+        triage,
+        makeTicket({
+            num:2, filename:'02-waits.md', feature:'a', blockers:[1],
+        }),
+    ], [])
+    t.ok(out.includes(ticketLabel(triage)), 'names the blocker')
+    t.ok(out.includes('needs-triage'), 'names its status')
+})
