@@ -103,10 +103,10 @@ function applyResult (
     if (!hasCost && !hasSpawned) return state
 
     const subagents = hasSpawned ?
-        spawned as number :
+        spawned :
         state.stats.subagents
     const costUsd = hasCost ?
-        cost as number :
+        cost :
         state.stats.costUsd
     // A repeated result with the same values is not a change
     if (

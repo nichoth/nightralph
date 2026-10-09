@@ -115,6 +115,14 @@ test('AC3.5: a result with subagent_stats replaces the count', t => {
     t.deepEqual(state.stats, { subagents:5, costUsd:0.5 })
 })
 
+test('AC3.5: a result with only subagent_stats omits the cost key', t => {
+    const state = fold([
+        { type:'result', subagent_stats:{ spawned:2 } },
+    ])
+    t.deepEqual(state.stats, { subagents:2 })
+    t.ok(!('costUsd' in state.stats), 'costUsd key is absent')
+})
+
 test('AC3.5: the last of several results wins and nothing is summed', t => {
     const state = fold([
         {
