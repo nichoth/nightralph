@@ -751,6 +751,29 @@ function detectDeadlocks (
     )
 }
 
+/**
+ * The whole run simulated with the dry-run wave logic: the waves in
+ * order, the ready-for-agent tickets that never reach a wave, and
+ * the dead upstream refs of the tickets that cannot run (the same
+ * map renderNothingReady uses). A `neverRun` ticket with no
+ * `deadRefs` entry waits on a cycle.
+ */
+export type SimulatedRun = {
+    waves:Array<Array<Ticket>>
+    neverRun:Array<Ticket>
+    deadRefs:Map<string, Array<BlockerRef>>
+}
+
+export function simulateRun (
+    tickets:ReadonlyArray<Ticket>
+):SimulatedRun {
+    return {
+        waves:[...simulateWaves(tickets)].map(w => w.ready),
+        neverRun:detectDeadlocks(tickets),
+        deadRefs:findBlockedTickets(tickets, new Set()),
+    }
+}
+
 const PROVIDER_ARGS:Record<string, string[]> = {
     claude:[
         '--print', '--verbose',

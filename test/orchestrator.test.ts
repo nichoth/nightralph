@@ -26,6 +26,7 @@ import {
     spawnAgent,
     dryRun,
     dryRunIsolated,
+    simulateRun,
     getProviderArgs,
     formatStreamLine,
     createPiStreamFormatter,
@@ -1374,6 +1375,161 @@ test(
         )
     }
 )
+
+// -- simulateRun --
+
+function runFixture ():Array<Ticket> {
+    return [
+        makeTicket({
+            num:1,
+            filename:'01-a-base.md',
+            status:'done',
+            feature:'a',
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-a-after-base.md',
+            blockers:[1],
+            feature:'a',
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-a-after-two.md',
+            blockers:[2],
+            feature:'a',
+        }),
+        makeTicket({
+            num:1,
+            filename:'01-b-needs-a3.md',
+            blockers:[{ feature:'a', num:3, where:'run' }],
+            feature:'b',
+        }),
+        makeTicket({
+            num:4,
+            filename:'04-a-human.md',
+            status:'ready-for-human',
+            feature:'a',
+        }),
+        makeTicket({
+            num:5,
+            filename:'05-a-behind-human.md',
+            blockers:[4],
+            feature:'a',
+        }),
+        makeTicket({
+            num:2,
+            filename:'02-b-cycle.md',
+            blockers:[3],
+            feature:'b',
+        }),
+        makeTicket({
+            num:3,
+            filename:'03-b-cycle.md',
+            blockers:[2],
+            feature:'b',
+        }),
+        makeTicket({
+            num:4,
+            filename:'04-b-pending.md',
+            blockers:[{
+                feature:'c',
+                num:9,
+                where:'pending',
+                status:'ready-for-agent',
+            }],
+            feature:'b',
+        }),
+    ]
+}
+
+function dryRunWaveLines (tickets:Array<Ticket>):Array<string> {
+    const output:Array<string> = []
+    const originalLog = console.log
+    console.log = function (msg:unknown) {
+        output.push(String(msg))
+    }
+
+    try {
+        dryRun(tickets, 'spec body', 'npm test')
+    } finally {
+        console.log = originalLog
+    }
+    return output.join('\n').split('\n')
+}
+
+test('simulateRun waves match the dry-run waves', t => {
+    const tickets = runFixture()
+    const run = simulateRun(tickets)
+
+    const dryWaves:Array<Array<string>> = dryRunWaveLines(tickets)
+        .map(line => /^ {2}Wave \d+: (.*)$/.exec(line))
+        .filter((m):m is RegExpExecArray => m !== null)
+        .map(m => m[1]!.split(', '))
+
+    t.deepEqual(
+        dryWaves,
+        run.waves.map(w => w.map(ticket => ticket.filename)),
+        'simulated waves are the dry-run waves'
+    )
+    t.equal(run.waves.length, 3, 'the chain takes three waves')
+})
+
+test('simulateRun neverRun is ready tickets in no wave', t => {
+    const tickets = runFixture()
+    const run = simulateRun(tickets)
+
+    const inWave = new Set(
+        run.waves.flat().map(ticket => ticketKey(
+            ticket.feature, ticket.num
+        ))
+    )
+    const expected = tickets
+        .filter(ticket => ticket.status === 'ready-for-agent')
+        .map(ticket => ticketKey(ticket.feature, ticket.num))
+        .filter(key => !inWave.has(key))
+        .sort()
+    const actual = run.neverRun
+        .map(ticket => ticketKey(ticket.feature, ticket.num))
+        .sort()
+
+    t.deepEqual(
+        actual,
+        expected,
+        'neverRun is the ready-for-agent tickets in no wave'
+    )
+    t.deepEqual(
+        actual,
+        ['a:5', 'b:2', 'b:3', 'b:4'].sort(),
+        'the fixture leaves a:5, b:2, b:3 and b:4 out of every wave'
+    )
+})
+
+test('simulateRun deadRefs equals findBlockedTickets', t => {
+    const tickets = runFixture()
+    const run = simulateRun(tickets)
+    const expected = findBlockedTickets(tickets, new Set())
+
+    t.deepEqual(
+        [...run.deadRefs.entries()],
+        [...expected.entries()],
+        'deadRefs matches findBlockedTickets with no failed keys'
+    )
+    t.ok(run.deadRefs.has(ticketKey('a', 5)), 'a:5 has a dead ref')
+    t.ok(run.deadRefs.has(ticketKey('b', 4)), 'b:4 has a dead ref')
+    t.ok(
+        !run.deadRefs.has(ticketKey('b', 2)) &&
+            !run.deadRefs.has(ticketKey('b', 3)),
+        'cycle tickets have no dead refs'
+    )
+})
+
+test('simulateRun on no tickets is empty', t => {
+    const run = simulateRun([])
+
+    t.deepEqual(run.waves, [], 'no waves')
+    t.deepEqual(run.neverRun, [], 'nothing is never-run')
+    t.equal(run.deadRefs.size, 0, 'no dead refs')
+})
 
 // -- markDone --
 
