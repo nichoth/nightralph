@@ -142,14 +142,18 @@ its tests.
 - Tickets are identified by `ticketKey(feature, num)` in every map
   and set, since numbers repeat across features.
 - `blockerSatisfied` is the one readiness check; ready tickets,
-  dry-run waves (`simulateRun`), deadlock detection and the `graph`
-  suggestion all use it, so they agree.
+  dry-run waves, deadlock detection and the `graph` suggestion all
+  use it, so they agree. `graph` checks its suggestion through
+  `simulateRun`, which wraps the private `simulateWaves` that
+  `--dry-run` prints, so the two report the same waves; give
+  `graph` no wave loop of its own.
 - Prompt rule lines live in `src/rules.ts`, shared by the ticket,
   merge, fix and review prompts. Change a rule there so the
   prompts cannot drift.
 - `renderTypoWarnings` in `src/orchestrator.ts` is the one typo
   paragraph, shared by `explainOpen` (the finish summary and the
-  nothing-ready explanation) and `graph`.
+  nothing-ready explanation) and `graph`, so the wording cannot
+  drift between them.
 - Provider-specific options (`--max-turns`, `--prefer-subagent`)
   warn and are dropped on providers without them. Each provider's
   effort ladder is in `src/retry.ts`.
