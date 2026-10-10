@@ -404,10 +404,10 @@ Subagents: 5 started across 7 agent runs, cost $3.18 (cost from 6 of 7 runs)
 ```
 
 The part in parentheses appears only when some runs reported no cost.
-claude reports cost only when it finishes, so an agent killed at
-`--timeout` usually reports none. Codex and pi runs
-report nothing, so a run that used only them gets no stats line. Stats
-are advisory: they never change a ticket's outcome or the exit code.
+A claude agent reports cost only when it finishes, so one killed at
+`--timeout` usually reports none. Codex and pi runs report nothing, so
+a run that used only them gets no stats line. Stats are advisory: they
+never change a ticket's outcome or the exit code.
 
 ### Status display
 
