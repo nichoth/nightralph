@@ -126,10 +126,11 @@ test('AC3.2: a transitive chain is suggested in full', t => {
         t.equal(s.runnable, 1, 'alpha/01 runs')
         t.equal(s.total, 1, 'one target ticket')
         t.ok(
-            edgeTriples(s).some(([, f, n]) => f === 'gamma' && n === 1) &&
-                s.edges.some(e => (
-                    e.from.feature === 'beta' && e.ref.feature === 'gamma'
-                )),
+            s.edges.some(e => (
+                e.from.feature === 'beta' &&
+                    e.ref.feature === 'gamma' &&
+                    e.ref.num === 1
+            )),
             'edges include the beta -> gamma hop'
         )
     } finally {
@@ -229,6 +230,33 @@ test('AC3.5: a lone missing ref does not widen the selection', t => {
             byName.get('beta')?.suggestion,
             null,
             'beta has no suggestion'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('buildGraph loads each feature set once, names sorted', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        addFeature(scratchDir, 'alpha', [[1, 'ready-for-agent', 'beta 01']])
+        addFeature(scratchDir, 'beta', [[1, 'ready-for-agent', 'alpha 01']])
+        const calls:string[][] = []
+        const recording:LoadFn = names => {
+            calls.push([...names])
+            return load(names)
+        }
+        buildGraph(recording, ['alpha', 'beta'])
+        const sortedKey = (names:string[]) => [...names].sort().join('\n')
+        const keys = calls.map(sortedKey)
+        t.equal(
+            new Set(keys).size,
+            keys.length,
+            'no feature set is loaded twice'
+        )
+        t.ok(
+            calls.every(c => c.join('\n') === sortedKey(c)),
+            'every load call gets its names sorted'
         )
     } finally {
         rmSync(root, { recursive:true, force:true })

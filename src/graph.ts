@@ -220,8 +220,9 @@ function crossesFeatures (s:Suggestion):boolean {
  * One report per feature, sorted by name: its picker counts and,
  * when it waits on or has a dead ref into another feature, the
  * verified suggestion. Typo warnings come from each feature's own
- * load, so each is listed once. Loads are cached by name list, so
- * no selection is read twice in one call.
+ * load, so each is listed once. Loads are cached by feature set and
+ * always called with the names sorted, so no feature set is read
+ * twice in one call, whatever order the names arrive in.
  */
 export function buildGraph (
     load:LoadFn,
@@ -229,8 +230,9 @@ export function buildGraph (
 ):{ reports:FeatureReport[]; warnings:BlockerWarning[] } {
     const cache = new Map<string, LoadedSelection>()
     const cached:LoadFn = names => {
-        const key = names.join('\n')
-        const hit = cache.get(key) ?? load(names)
+        const sorted = [...names].sort((a, b) => a.localeCompare(b))
+        const key = sorted.join('\n')
+        const hit = cache.get(key) ?? load(sorted)
         cache.set(key, hit)
         return hit
     }
