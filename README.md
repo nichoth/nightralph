@@ -153,6 +153,9 @@ npx nightralph pi -m openrouter/z-ai/glm-5.3-flash
 # Dry run to inspect the dependency graph and prompt
 npx nightralph codex --dry-run
 
+# Show which features wait on tickets in other features
+npx nightralph graph
+
 # Use codex with a specific model
 npx nightralph codex -m gpt-5.6-luna
 
@@ -290,6 +293,32 @@ Flags:
 A feature name that resolves to `.scratch/<name>/`.
 The spec file is `.scratch/<name>/spec.md` and the issues directory
 is `.scratch/<name>/issues/`.
+
+
+### `graph` command
+
+`nightralph graph` lists the features whose tickets wait on tickets
+in other features, and the features to select together to unblock
+them. It is read-only: it runs no git, no provider check, and
+writes nothing.
+
+With `--spec <name>` it shows only that feature. The sample below
+is from a run with three features: `held-import-review` has a ticket
+blocked by `newsletter-audit/16`, and `analytics` has no blockers.
+
+```bash
+npx nightralph graph
+```
+
+```text
+held-import-review (0/2 ready)
+  held-import-review waits on newsletter-audit
+    held-import-review/01 waits on newsletter-audit/16 (ready-for-agent)
+  Run together: held-import-review, newsletter-audit (select both in the picker)
+    2 of 2 ready-for-agent tickets become runnable
+
+Not waiting on other features: analytics, newsletter-audit
+```
 
 
 ### `--prefer-subagent` option
