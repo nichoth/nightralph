@@ -686,6 +686,28 @@ test('a Run together hint with every feature pickable is today\'s hint',
     }
 )
 
+test('a Run together hint names several unlisted features in order', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        nestedRollout(scratchDir)
+        const pickable = new Set(['hir'])
+        const lines = renderLines(load, ['hir', 'newsletter-audit'], pickable)
+        const hint = parenthetical(runTogetherLine(lines))
+        t.ok(
+            hint.includes('newsletter-audit') &&
+                hint.includes('rollout/billing'),
+            'the hint names every feature the picker cannot list'
+        )
+        t.ok(!hint.includes('hir'), 'the hint names no pickable feature')
+        t.ok(
+            hint.indexOf('newsletter-audit') < hint.indexOf('rollout/billing'),
+            'the unlisted features follow the features order'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
 test('AC3.5: a missing ref is shown with no Run together line', t => {
     const { root, scratchDir, load } = makeScratch()
     try {
