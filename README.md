@@ -27,7 +27,7 @@ so they can't drift as long as you install the skills with this package.
 - [Workflow](#workflow)
   * [Create Issues](#create-issues)
   * [Examples](#examples)
-  * [Interface](#interface)
+  * [Command Line Arguments](#command-line-arguments)
     + [`--spec ` option](#--spec--option)
 - [How It Works](#how-it-works)
   * [Select a ticket](#select-a-ticket)
@@ -35,6 +35,7 @@ so they can't drift as long as you install the skills with this package.
   * [Progress](#progress)
   * [Integration branch](#integration-branch)
   * [Review](#review)
+  * [Subagents](#subagents)
   * [Status display](#status-display)
 - [Keep Your Machine Awake](#keep-your-machine-awake)
   * [Mac OS](#mac-os)
@@ -167,7 +168,7 @@ npx nightralph claude -m claude-opus-4-6 30
 npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --effort medium --retries 1
 ```
 
-### Interface
+### Command Line Arguments
 
 Flags:
 
@@ -468,18 +469,19 @@ keep the machine awake, but the display can still go dark.
 #### Claude Opus 4.6
 
 ```sh
-caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort low
+caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort medium
 ```
 
 #### Claude Opus 5.5
 
 ```sh
-caffeinate -i npx nightralph claude -m claude-opus-5-5 --effort low
+caffeinate -i npx nightralph claude -m claude-opus-5-5 --effort medium
 ```
+
 #### Claude Sonnet 5.5
 
 ```sh
-caffeinate -i npx nightralph claude -m claude-sonnet-5-5 --effort high
+caffeinate -i npx nightralph claude -m claude-sonnet-5-5 --effort medium
 ```
 
 #### Claude Haiku 5.5
@@ -491,7 +493,7 @@ caffeinate -i npx nightralph claude -m claude-haiku-5-5 --effort high
 #### Claude Fable 5.1
 
 ```sh
-caffeinate -i npx nightralph claude -m claude-fable-5-1 --effort low
+caffeinate -i npx nightralph claude -m claude-fable-5-1 --effort medium
 ```
 
 #### `pi` + OpenRouter model
