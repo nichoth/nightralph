@@ -26,16 +26,17 @@ so they can't drift as long as you install the skills with this package.
   * [Install Dependency Skills](#install-dependency-skills)
 - [Workflow](#workflow)
   * [Create Issues](#create-issues)
-  * [Examples](#examples)
-  * [Command Line Arguments](#command-line-arguments)
-    + [`--spec ` option](#--spec--option)
+- [Examples](#examples)
+- [Command Line Arguments](#command-line-arguments)
+  * [Notes](#notes)
+  * [`--spec ` option](#--spec--option)
+  * [`--prefer-subagent` option](#--prefer-subagent-option)
 - [How It Works](#how-it-works)
   * [Select a ticket](#select-a-ticket)
   * [Worktrees](#worktrees)
   * [Progress](#progress)
   * [Integration branch](#integration-branch)
   * [Review](#review)
-  * [Subagents](#subagents)
   * [Status display](#status-display)
 - [Keep Your Machine Awake](#keep-your-machine-awake)
   * [Mac OS](#mac-os)
@@ -136,7 +137,7 @@ one, in the worktree before a ticket can be marked `done`.
 > then follow with `to-tickets`.
 >
 
-### Examples
+## Examples
 
 After you have the tickets, use the `nightralph` loop to execute.
 The `to-tickets` skill produces markdown files at
@@ -168,7 +169,7 @@ npx nightralph claude -m claude-opus-4-6 30
 npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --effort medium --retries 1
 ```
 
-### Command Line Arguments
+## Command Line Arguments
 
 Flags:
 
@@ -186,13 +187,13 @@ Flags:
 | `--install-cmd <cmd>` | no | auto | Run in each fresh worktree before the agent starts, and again after a merge-conflict rebase; non-zero exit fails the attempt (it is retried like any other failure). Auto-detects from the lockfile: `pnpm-lock.yaml` -> `pnpm install --prefer-offline --frozen-lockfile`, `package-lock.json` -> `npm ci --prefer-offline --no-audit --no-fund`, a `package.json` with no lockfile -> `npm install --prefer-offline --no-audit --no-fund --no-package-lock`, no `package.json` -> no install. Pass `""` to disable. Shares the agent's `--timeout`. Output goes to `<ticket>.install.log` |
 | `--max-turns <n>` | no | -- | Max agentic turns per agent run. Forwarded as `--max-turns <n>` to `claude` only; for `codex` and `pi` the flag is skipped with a warning and the agent runs with no turn limit. The limit is per spawn, not a total for the ticket: every retry and every re-spawn after a merge conflict starts with a fresh budget of `n` turns, so with `--retries 3` one ticket can use up to 4 x `n`. When omitted (or `0`), no limit is passed, so `--timeout` is the only cap. Takes precedence over the `[turns]` positional when both are given. Reaching the limit is an error exit, so the attempt fails and is retried like any other failure |
 | `--effort <level>` | no | -- | Starting effort/reasoning level. Each provider has its own ladder: `claude` supports `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--effort`); `codex` supports `low`, `medium`, `high` (forwarded as `-c model_reasoning_effort=<level>`); `pi` supports `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (forwarded as `--thinking`). Omitted = provider default. Each retry steps up from here (see `--retries`) |
-| `--prefer-subagent <model>` | no | -- | `claude` only. Sets `CLAUDE_CODE_SUBAGENT_MODEL=<model>` for every claude agent nightralph spawns (tickets, merge-conflict re-spawns, the reviewer and the fixer) and adds a prompt rule: hand read-only work (exploring the codebase, searching code, test runs with long output) to subagents, and make every edit and commit yourself. The reviewer gets the rule without the edit and commit line, since it never edits. `""` is the same as omitting the flag. For `codex` and `pi` it is skipped with one warning at startup (`--prefer-subagent not supported by <provider>, skipping`). `--dry-run` prints `Prefer subagent: <model>`, or `(none)`. See [Subagents](#subagents) |
+| `--prefer-subagent <model>` | no | -- | `claude` only. Sets `CLAUDE_CODE_SUBAGENT_MODEL=<model>` for every claude agent nightralph spawns (tickets, merge-conflict re-spawns, the reviewer and the fixer) and adds a prompt rule: hand read-only work (exploring the codebase, searching code, test runs with long output) to subagents, and make every edit and commit yourself. The reviewer gets the rule without the edit and commit line, since it never edits. `""` is the same as omitting the flag. For `codex` and `pi` it is skipped with one warning at startup (`--prefer-subagent not supported by <provider>, skipping`). `--dry-run` prints `Prefer subagent: <model>`, or `(none)`. See [`--prefer-subagent` option](#--prefer-subagent-option) |
 | `--retries <n>` | no | `3` | Extra attempts per ticket after a failed run. Each retry starts from a fresh worktree and raises the effort level one rung (see Notes). `0` disables retries |
 | `--retry-delay <n>` | no | `30` | Seconds to wait before the first retry; doubles each further retry (30s, 60s, 120s, ...). `0` disables the wait |
 | `--concurrency <n>` | no | `5` | Max agents running at once within a wave. A wave with more ready tickets than this runs them through a pool: as one agent exits, the next ticket starts. The wave still finishes fully before its branches are merged |
 
 
-**Notes**:
+### Notes
 
 * When `--spec <name>` is omitted, the CLI looks for
   `.scratch/<feature>/issues/` directories. If multiple features exist,
@@ -284,11 +285,93 @@ Flags:
     tool-use proposals so the agent runs non-interactively)
 
 
-#### `--spec <name>` option
+### `--spec <name>` option
 
 A feature name that resolves to `.scratch/<name>/`.
 The spec file is `.scratch/<name>/spec.md` and the issues directory
 is `.scratch/<name>/issues/`.
+
+
+### `--prefer-subagent` option
+
+Use this to use a strong model on the ticket while a cheaper, faster
+model handles the reading. The main agent writes the code and makes
+every commit. Subagents explore the codebase, search for code, and run
+tests whose output would flood the main agent's context, then report
+back a short answer.
+
+The flag does two things for every claude agent nightralph spawns
+(tickets, merge-conflict re-spawns, the reviewer and the fixer):
+
+1. It sets `CLAUDE_CODE_SUBAGENT_MODEL=<model>` in the agent's
+   environment.
+2. It adds a rule to the prompt: hand read-only work to subagents,
+   brief each one fully, do not delegate a lookup that takes a single
+   tool call, and never let a subagent edit files or commit. The
+   reviewer gets the same rule without the edit and commit line.
+
+`<model>` is anything Claude Code accepts as a model: an alias such as
+`sonnet` or `haiku`, or a full model ID. Sonnet is the safer choice
+when subagents need judgment, such as tracing a call path across
+modules. Haiku is cheaper and faster, and suits mechanical lookups and
+summarizing long test output, but it is more likely to miss something.
+
+```sh
+# Opus writes the code, Sonnet subagents explore and run tests
+npx nightralph claude -m claude-opus-4-6 --prefer-subagent sonnet
+
+# Cheaper subagents for searches and noisy test runs
+npx nightralph claude -m claude-opus-4-6 --prefer-subagent haiku
+
+# A Sonnet main agent with Haiku subagents
+npx nightralph claude -m claude-sonnet-4-6 --prefer-subagent haiku
+
+# Pin an exact model ID instead of an alias
+npx nightralph claude -m claude-opus-4-6 --prefer-subagent claude-sonnet-5-5
+
+# Check the setting and the prompt rule without running anything
+npx nightralph claude --prefer-subagent claude-haiku-5-5 --dry-run
+```
+
+Only the `claude` provider supports this flag. With `codex` or `pi` it
+is skipped with one warning at startup.
+
+`--prefer-subagent <model>` sets the model that a claude agent's
+subagents default to. It's a fallback, not a mandate. A model passed on
+an individual subagent call wins, and so does the `model` in a subagent
+definition. The built-in Explore subagent picks its own model.
+nightralph never sets `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so without
+the flag a value you exported in your shell still applies.
+
+Subagent turns do not count toward `--max-turns`. That was observed on
+Claude Code 2.1.296 and is not documented by Anthropic, so it may
+change. Subagent time does count against `--timeout`, because the
+timeout covers the whole agent process.
+
+Spawned agents load your global `~/.claude` plugins and hooks. Those
+can spend turns and steer delegation their own way, and nightralph does
+not isolate agents from them.
+
+Subagent stats are recorded for every claude run, whether or not
+`--prefer-subagent` is set. When a claude agent ran, the attempt's
+entry in `learnings.md` includes `Subagents: <n>.` and `Cost: $<x>.`,
+each left out when the agent did not report it. The
+ticket's row in the status display shows the running total across its
+attempts, as in `a/03 - 2 subagents, $0.42`. After the finish summary,
+one line totals the subagents, agent runs and cost over every ticket
+attempt, merge-conflict re-spawn, the reviewer and the fixer:
+
+```
+Subagents: 5 started across 7 agent runs, cost $3.18 (cost from 6 of 7 runs)
+```
+
+The part in parentheses appears only when some runs reported no cost.
+A claude agent reports cost only when it finishes, so one killed at
+`--timeout` usually reports none. Codex and pi runs report nothing, so
+a run that used only them gets no stats line. Stats are advisory: they
+never change a ticket's outcome or the exit code.
+
+
 
 
 ## How It Works
@@ -373,43 +456,6 @@ second agent fixes them test-first; its work merges only if the test
 command passes. Findings it could not fix stay unchecked in
 `review.md`. Skip this with `--no-review`.
 
-### Subagents
-
-`--prefer-subagent <model>` sets the model that a claude agent's
-subagents default to. It's a fallback, not a mandate. A model passed on
-an individual subagent call wins, and so does the `model` in a subagent
-definition. The built-in Explore subagent picks its own model.
-nightralph never sets `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so without
-the flag a value you exported in your shell still applies.
-
-Subagent turns do not count toward `--max-turns`. That was observed on
-Claude Code 2.1.296 and is not documented by Anthropic, so it may
-change. Subagent time does count against `--timeout`, because the
-timeout covers the whole agent process.
-
-Spawned agents load your global `~/.claude` plugins and hooks. Those
-can spend turns and steer delegation their own way, and nightralph does
-not isolate agents from them.
-
-Subagent stats are recorded for every claude run, whether or not
-`--prefer-subagent` is set. When a claude agent ran, the attempt's
-entry in `learnings.md` includes `Subagents: <n>.` and `Cost: $<x>.`,
-each left out when the agent did not report it. The
-ticket's row in the status display shows the running total across its
-attempts, as in `a/03 - 2 subagents, $0.42`. After the finish summary,
-one line totals the subagents, agent runs and cost over every ticket
-attempt, merge-conflict re-spawn, the reviewer and the fixer:
-
-```
-Subagents: 5 started across 7 agent runs, cost $3.18 (cost from 6 of 7 runs)
-```
-
-The part in parentheses appears only when some runs reported no cost.
-A claude agent reports cost only when it finishes, so one killed at
-`--timeout` usually reports none. Codex and pi runs report nothing, so
-a run that used only them gets no stats line. Stats are advisory: they
-never change a ticket's outcome or the exit code.
-
 ### Status display
 
 In a terminal, nightralph shows a header line, one row per ticket, and
@@ -434,7 +480,7 @@ Each row starts with a dot that shows the ticket's state:
   `auth/03 (blocked by auth/01)`.
 
 A claude ticket's row can end with its subagent count and cost, as in
-`auth/02 - 2 subagents, $0.42` (see [Subagents](#subagents)).
+`auth/02 - 2 subagents, $0.42` (see [`--prefer-subagent` option](#--prefer-subagent-option)).
 
 The header looks like this:
 
