@@ -27,6 +27,7 @@ import type { AgentResult } from './orchestrator.js'
 import {
     readDocsRule,
     installRule,
+    subagentRule,
     testGateRule,
     LINT_RULE,
     integrityRule,
@@ -79,6 +80,7 @@ export function renderReviewPrompt (opts:{
     from:string
     to:string
     exclude?:string
+    preferSubagent?:string
 }):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -104,6 +106,7 @@ export function renderReviewPrompt (opts:{
             'style preferences.',
         '- You may run the tests or the type checker to confirm ' +
             'a suspicion.',
+        ...subagentRule(opts.preferSubagent, true),
         '- Do NOT edit, stage, or commit code. Anything you ' +
             'change here is discarded.',
         ...CONFINEMENT_RULES,
@@ -160,6 +163,7 @@ export function renderFixPrompt (opts:{
     findings:ReadonlyArray<Finding>
     testCmd:string
     installCmd?:string
+    preferSubagent?:string
     previous?:{ reason:FixFailure; notes:string|null }
 }):string {
     return [
@@ -179,6 +183,7 @@ export function renderFixPrompt (opts:{
         '- Fix ONLY the listed findings. Do not fix unrelated ' +
             'problems you notice.',
         ...installRule(opts.installCmd),
+        ...subagentRule(opts.preferSubagent),
         '- Use /tdd for every finding: write a failing test that ' +
             'shows the problem, then write only enough code to ' +
             'make it pass, then refactor.',
@@ -482,6 +487,8 @@ export type SpawnAgentFn = (opts:{
     label?:string
     maxTurns?:number
     effort?:EffortLevel
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     onLine?:(line:string) => void
 }) => Promise<AgentResult>
 
@@ -509,6 +516,8 @@ export type ReviewPassOpts = {
     installCmd?:string
     maxTurns?:number
     effort?:EffortLevel
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     retries:number
     retryDelay:number
     log:(msg:string) => void
@@ -600,6 +609,7 @@ export async function runReviewer (
                     exclude:reviewExcludeFor(
                         opts.repoRoot, opts.reviewPath
                     ),
+                    preferSubagent:opts.preferSubagent,
                 }),
                 agentCmd:opts.agentCmd,
                 model:opts.model,
@@ -609,6 +619,7 @@ export async function runReviewer (
                 label:'review',
                 maxTurns:opts.maxTurns,
                 effort,
+                preferSubagent:opts.preferSubagent,
                 onLine:opts.log,
             })
             const text = collectNotes(wt.worktreePath, FINDINGS_FILE)
@@ -699,6 +710,7 @@ export async function runFixer (
                     testCmd:opts.testCmd,
                     installCmd:opts.installCmd,
                     previous,
+                    preferSubagent:opts.preferSubagent,
                 }),
                 agentCmd:opts.agentCmd,
                 model:opts.model,
@@ -710,6 +722,7 @@ export async function runFixer (
                 label:'review-fix',
                 maxTurns:opts.maxTurns,
                 effort,
+                preferSubagent:opts.preferSubagent,
                 onLine:opts.log,
             })
             // Before any auto-commit, so notes never get committed

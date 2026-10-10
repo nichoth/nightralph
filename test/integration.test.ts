@@ -1,4 +1,4 @@
-import { test } from '@substrate-system/tapzero'
+import { test, type Test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync,
     appendFileSync, copyFileSync,
@@ -26,12 +26,15 @@ import {
     killProcessGroup,
     ticketKey,
     blockerLabel,
+    renderFinishSummary,
     type Ticket,
 } from '../src/orchestrator.js'
 import type { BlockerRef } from '../src/blockers.js'
 import { parseEntries, readEntries } from '../src/learnings.js'
 import { readProgress } from '../src/progress.js'
 import { parseReviewEntries } from '../src/review.js'
+import { subagentRule } from '../src/rules.js'
+import { renderRunStats } from '../src/stats.js'
 
 function tmp ():string {
     return mkdtempSync(
@@ -2315,6 +2318,7 @@ function recordingDisplay ():{
             startWave:record('startWave'),
             setTicketStatus:record('setTicketStatus'),
             setBlocked:record('setBlocked'),
+            setTicketStats:record('setTicketStats'),
             log:record('log'),
             cleanup:record('cleanup'),
         },
@@ -4468,6 +4472,7 @@ test('runWavesIsolated - multi-feature tickets write ' +
             startWave () {},
             setTicketStatus () {},
             setBlocked () {},
+            setTicketStats () {},
             log (m:string) { logs.push(m) },
             cleanup () {},
         }
@@ -5913,3 +5918,586 @@ test('CLI subprocess - AC3.3 a closed feature prompt exits 2 with ' +
         rmSync(projectDir, { recursive:true, force:true })
     }
 })
+
+// -- --prefer-subagent --
+
+const FAKE_CLAUDE = join(process.cwd(), 'test', 'fake-claude', 'claude')
+const SUBAGENT_RULE = subagentRule('haiku')
+const FAKE_CLAUDE_KEYS = [
+    'CLAUDE_CODE_SUBAGENT_MODEL',
+    'FAKE_CLAUDE_DELEGATE',
+    'FAKE_CLAUDE_ENV_LOG',
+    'FAKE_CLAUDE_FAIL_ONCE',
+    'FAKE_CLAUDE_HANG',
+    'FAKE_CLAUDE_PROMPT_DIR',
+    'FAKE_CLAUDE_STREAM',
+]
+
+function hasEveryRuleLine (text:string):boolean {
+    return SUBAGENT_RULE.every(line => text.includes(line))
+}
+
+function hasNoRuleLine (text:string):boolean {
+    return SUBAGENT_RULE.every(line => !text.includes(line))
+}
+
+// The CLI's env without anything the fake claude reads, plus `extra`
+function fakeClaudeEnv (
+    extra:Record<string, string> = {}
+):NodeJS.ProcessEnv {
+    const env = { ...process.env }
+    for (const key of FAKE_CLAUDE_KEYS) delete env[key]
+    return { ...env, ...extra }
+}
+
+// Every prompt the fake claude wrote to FAKE_CLAUDE_PROMPT_DIR
+function readPrompts (dir:string):string[] {
+    return readdirSync(dir).map(name => {
+        return readFileSync(join(dir, name), 'utf8')
+    })
+}
+
+function readEnvLog (path:string):unknown[] {
+    return readFileSync(path, 'utf8')
+        .split('\n')
+        .filter(line => line !== '')
+        .map(line => JSON.parse(line))
+}
+
+// The dry-run cases for one project: the flag, no flag, and `""`
+async function checkPreferSubagentDryRun (
+    t:Test,
+    projectDir:string
+):Promise<void> {
+    const base = [FAKE_CLAUDE, '--spec', FEAT, '--dry-run']
+    const env = fakeClaudeEnv()
+
+    const on = await spawnCli(
+        [...base, '--prefer-subagent', 'haiku'],
+        { cwd:projectDir, env }
+    )
+    t.equal(on.code, 0, 'AC1.1 exit 0')
+    t.ok(on.stdout.includes('Prefer subagent: haiku'),
+        'AC1.1 the dry run names the model')
+    t.ok(hasEveryRuleLine(on.stdout),
+        'AC1.1 the printed prompt carries the subagent rule')
+
+    const off = await spawnCli(base, { cwd:projectDir, env })
+    t.equal(off.code, 0, 'AC1.2 exit 0')
+    t.ok(off.stdout.includes('Prefer subagent: (none)'),
+        'AC1.2 the dry run says none')
+    t.ok(hasNoRuleLine(off.stdout),
+        'AC1.2 the printed prompt has no subagent rule')
+
+    const empty = await spawnCli(
+        [...base, '--prefer-subagent', ''],
+        { cwd:projectDir, env }
+    )
+    t.equal(empty.code, 0, 'AC1.7 exit 0')
+    t.equal(empty.stdout, off.stdout,
+        'AC1.7 an empty value prints what no flag prints')
+}
+
+test('CLI subprocess - prefer-subagent AC1.1 AC1.2 AC1.7 in-place ' +
+    'dry run', async t => {
+    const projectDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        await checkPreferSubagentDryRun(t, projectDir)
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - prefer-subagent AC1.1 AC1.2 AC1.7 isolated ' +
+    'dry run', async t => {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    try {
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        await checkPreferSubagentDryRun(t, projectDir)
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - prefer-subagent AC1.3 AC1.7 other providers ' +
+    'warn once and drop it', async t => {
+    const projectDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const env = fakeClaudeEnv()
+
+        for (const provider of ['codex', 'pi']) {
+            const { code, stdout, stderr } = await spawnCli([
+                provider, '--spec', FEAT, '--dry-run',
+                '--prefer-subagent', 'haiku',
+            ], { cwd:projectDir, env })
+            t.equal(code, 0, `AC1.3 ${provider}: exit 0`)
+            t.equal(stderr.split('--prefer-subagent').length, 2,
+                `AC1.3 ${provider}: one warning`)
+            t.ok(stdout.includes('Prefer subagent: (none)'),
+                `AC1.3 ${provider}: the value is dropped`)
+            t.ok(hasNoRuleLine(stdout),
+                `AC1.3 ${provider}: the prompt has no subagent rule`)
+        }
+
+        const { code, stderr } = await spawnCli([
+            'codex', '--spec', FEAT, '--dry-run',
+            '--prefer-subagent', '',
+        ], { cwd:projectDir, env })
+        t.equal(code, 0, 'AC1.7 codex with "": exit 0')
+        t.ok(!stderr.includes('--prefer-subagent'),
+            'AC1.7 codex with "": no warning')
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+    }
+})
+
+test('CLI subprocess - prefer-subagent AC1.6 AC1.7 in-place run ' +
+    'passes the model to the agent', async t => {
+    const projectDir = tmp()
+    const logDir = tmp()
+    try {
+        const { issuesDir } = scratchDirs(projectDir)
+        const ticketPath = join(issuesDir, '01-task.md')
+        const run = async (
+            value:string,
+            envLog:string,
+            promptDir:string
+        ) => {
+            writeFileSync(
+                ticketPath,
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            mkdirSync(promptDir)
+            return spawnCli([
+                FAKE_CLAUDE, '--spec', FEAT, '--timeout', '10',
+                '--prefer-subagent', value, '--test-cmd', '',
+            ], {
+                cwd:projectDir,
+                env:fakeClaudeEnv({
+                    FAKE_CLAUDE_ENV_LOG:envLog,
+                    FAKE_CLAUDE_PROMPT_DIR:promptDir,
+                }),
+            })
+        }
+
+        const onLog = join(logDir, 'on.log')
+        const onPrompts = join(logDir, 'on-prompts')
+        const on = await run('haiku', onLog, onPrompts)
+        t.equal(on.code, 0, 'AC1.6 exit 0')
+        t.deepEqual(readEnvLog(onLog), ['haiku'],
+            'AC1.6 the agent gets the model')
+        const promptsOn = readPrompts(onPrompts)
+        t.equal(promptsOn.length, 1, 'AC1.6 one prompt')
+        t.ok(promptsOn.every(hasEveryRuleLine),
+            'AC1.6 the ticket prompt carries the subagent rule')
+
+        const emptyLog = join(logDir, 'empty.log')
+        const emptyPrompts = join(logDir, 'empty-prompts')
+        const empty = await run('', emptyLog, emptyPrompts)
+        t.equal(empty.code, 0, 'AC1.7 exit 0')
+        t.deepEqual(readEnvLog(emptyLog), [null],
+            'AC1.7 an empty value sets nothing')
+        const promptsEmpty = readPrompts(emptyPrompts)
+        t.equal(promptsEmpty.length, 1, 'AC1.7 one prompt')
+        t.ok(promptsEmpty.every(hasNoRuleLine),
+            'AC1.7 the ticket prompt has no subagent rule')
+    } finally {
+        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive:true, force:true })
+    }
+})
+
+// One isolated CLI run in a fresh repo with `--prefer-subagent value`
+async function runIsolatedPreferSubagent (value:string):Promise<{
+    code:number
+    envValues:unknown[]
+    prompts:string[]
+}> {
+    const { projectDir, issuesDir, templateDir } = cliGitRepo()
+    const logDir = tmp()
+    try {
+        writeFileSync(
+            join(issuesDir, '01-task.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        commitAll(projectDir, 'add tickets')
+        const envLog = join(logDir, 'env.log')
+        const promptDir = join(logDir, 'prompts')
+        mkdirSync(promptDir)
+
+        const { code } = await spawnCli([
+            FAKE_CLAUDE, '--spec', FEAT, '--timeout', '10',
+            '--prefer-subagent', value, '--test-cmd', '',
+            '--no-review',
+        ], {
+            cwd:projectDir,
+            env:fakeClaudeEnv({
+                FAKE_CLAUDE_ENV_LOG:envLog,
+                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+                FAKE_CLAUDE_PROMPT_DIR:promptDir,
+            }),
+        })
+        return {
+            code,
+            envValues:readEnvLog(envLog),
+            prompts:readPrompts(promptDir),
+        }
+    } finally {
+        removeWorktreesAndRepo(projectDir)
+        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive:true, force:true })
+    }
+}
+
+test('CLI subprocess - prefer-subagent AC1.6 AC1.7 isolated run ' +
+    'passes the model to the agent', async t => {
+    const on = await runIsolatedPreferSubagent('haiku')
+    t.equal(on.code, 0, 'AC1.6 exit 0')
+    t.deepEqual(on.envValues, ['haiku'], 'AC1.6 the agent gets the model')
+    t.equal(on.prompts.length, 1, 'AC1.6 one prompt')
+    t.ok(on.prompts.every(hasEveryRuleLine),
+        'AC1.6 the ticket prompt carries the subagent rule')
+
+    const empty = await runIsolatedPreferSubagent('')
+    t.equal(empty.code, 0, 'AC1.7 exit 0')
+    t.deepEqual(empty.envValues, [null],
+        'AC1.7 an empty value sets nothing')
+    t.equal(empty.prompts.length, 1, 'AC1.7 one prompt')
+    t.ok(empty.prompts.every(hasNoRuleLine),
+        'AC1.7 the ticket prompt has no subagent rule')
+})
+
+test('runWavesIsolated - prefer-subagent AC1.6 reaches ticket and ' +
+    'merge-respawn agents', async t => {
+    const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+    const projectDir = initTempGitRepo({ templateDir })
+    const logDir = tmp()
+    const repoName = basename(projectDir)
+    const fakeGit = installMergeFailOnceGit(`${repoName}--02-second`)
+    const saved = FAKE_CLAUDE_KEYS.map(key => {
+        return [key, process.env[key]] as const
+    })
+    const originalCwd = process.cwd()
+    try {
+        const issuesDir = join(projectDir, 'issues')
+        const logsDir = join(projectDir, '.logs')
+        mkdirSync(issuesDir)
+        writeFileSync(
+            join(issuesDir, '01-first.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        writeFileSync(
+            join(issuesDir, '02-second.md'),
+            makeTicketBody({ status:'ready-for-agent' })
+        )
+        const tickets = scanTickets(issuesDir)
+        commitAll(projectDir, 'add tickets')
+
+        const envLog = join(logDir, 'env.log')
+        const promptDir = join(logDir, 'prompts')
+        mkdirSync(promptDir)
+        for (const key of FAKE_CLAUDE_KEYS) delete process.env[key]
+        process.env.FAKE_CLAUDE_ENV_LOG = envLog
+        process.env.FAKE_CLAUDE_DELEGATE = MOCK_PASS
+        process.env.FAKE_CLAUDE_PROMPT_DIR = promptDir
+        process.chdir(projectDir)
+
+        await runWavesIsolated({
+            tickets,
+            specBody:'test spec',
+            agentCmd:FAKE_CLAUDE,
+            model:null,
+            timeout:10,
+            logsDir,
+            featureName:'test-feature-prefer-subagent',
+            conflictStrategy:'respawn',
+            testCmd:'true',
+            preferSubagent:'haiku',
+        })
+
+        t.equal(tickets[0].status, 'done', 'ticket 1 is done')
+        t.equal(tickets[1].status, 'done',
+            'ticket 2 is done after the respawn')
+        t.deepEqual(readEnvLog(envLog), ['haiku', 'haiku', 'haiku'],
+            'both tickets and the respawn get the model')
+        const prompts = readPrompts(promptDir)
+        t.equal(prompts.length, 3, 'three prompts')
+        t.ok(prompts.every(hasEveryRuleLine),
+            'both ticket prompts and the merge prompt carry the rule')
+    } finally {
+        process.chdir(originalCwd)
+        for (const [key, value] of saved) {
+            if (value === undefined) delete process.env[key]
+            else process.env[key] = value
+        }
+        fakeGit.restore()
+        removeWorktreesAndRepo(projectDir)
+        rmSync(logDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive:true, force:true })
+    }
+})
+
+// -- subagent stats tally (runWavesIsolated) --
+
+// One main-loop `Agent` call and a result: each fake claude run
+// reports `{ subagents:1, costUsd:0.25 }`
+function writeOneSubagentStream (dir:string):string {
+    const path = join(dir, 'stream.jsonl')
+    const lines = [
+        {
+            type:'assistant',
+            message:{
+                content:[{
+                    type:'tool_use', id:'toolu_1', name:'Agent', input:{},
+                }],
+            },
+        },
+        {
+            type:'result',
+            subtype:'success',
+            total_cost_usd:0.25,
+            subagent_stats:{ spawned:1 },
+        },
+    ]
+    writeFileSync(path, lines.map(l => JSON.stringify(l)).join('\n') + '\n')
+    return path
+}
+
+// Runs `fn` with only `values` set among the fake claude keys,
+// restoring every key afterwards
+async function withFakeClaude (
+    values:Record<string, string>,
+    fn:() => Promise<void>
+):Promise<void> {
+    const saved = FAKE_CLAUDE_KEYS.map(key => {
+        return [key, process.env[key]] as const
+    })
+    try {
+        for (const key of FAKE_CLAUDE_KEYS) delete process.env[key]
+        for (const [key, value] of Object.entries(values)) {
+            process.env[key] = value
+        }
+        await fn()
+    } finally {
+        for (const [key, value] of saved) {
+            if (value === undefined) delete process.env[key]
+            else process.env[key] = value
+        }
+    }
+}
+
+function logsOf (calls:ReadonlyArray<DisplayCall>):string[] {
+    return calls
+        .filter(c => c.method === 'log')
+        .map(c => String(c.args[0]))
+}
+
+test('runWavesIsolated - logs the stats line after the finish summary',
+    async t => {
+        const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+        const projectDir = initTempGitRepo({ templateDir })
+        const dataDir = tmp()
+        const originalCwd = process.cwd()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            mkdirSync(issuesDir)
+            writeFileSync(
+                join(issuesDir, '01-only.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
+            const { display, calls } = recordingDisplay()
+
+            await withFakeClaude({
+                FAKE_CLAUDE_STREAM:writeOneSubagentStream(dataDir),
+                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+            }, async () => {
+                process.chdir(projectDir)
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:FAKE_CLAUDE,
+                    model:null,
+                    timeout:10,
+                    logsDir:join(projectDir, '.logs'),
+                    featureName:'test-feature-stats-line',
+                    conflictStrategy:'respawn',
+                    testCmd:'true',
+                    display,
+                })
+            })
+
+            t.equal(tickets[0].status, 'done', 'ticket is done')
+            const logs = logsOf(calls)
+            const summaryAt = logs.indexOf(
+                '\n' + renderFinishSummary(tickets, 1, new Set())
+            )
+            t.ok(summaryAt >= 0, 'finish summary is logged')
+            t.equal(
+                logs[summaryAt + 1],
+                renderRunStats({
+                    agentRuns:1, withCost:1, subagents:1, costUsd:0.25,
+                }),
+                'the stats line follows the finish summary'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            removeWorktreesAndRepo(projectDir)
+            rmSync(dataDir, { recursive:true, force:true })
+            rmSync(templateDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test('runWavesIsolated - the stats tally counts merge respawns',
+    async t => {
+        const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+        const projectDir = initTempGitRepo({ templateDir })
+        const dataDir = tmp()
+        const repoName = basename(projectDir)
+        const fakeGit = installMergeFailOnceGit(`${repoName}--02-second`)
+        const originalCwd = process.cwd()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            mkdirSync(issuesDir)
+            writeFileSync(
+                join(issuesDir, '01-first.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            writeFileSync(
+                join(issuesDir, '02-second.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
+            const { display, calls } = recordingDisplay()
+
+            await withFakeClaude({
+                FAKE_CLAUDE_STREAM:writeOneSubagentStream(dataDir),
+                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+            }, async () => {
+                process.chdir(projectDir)
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:FAKE_CLAUDE,
+                    model:null,
+                    timeout:10,
+                    logsDir:join(projectDir, '.logs'),
+                    featureName:'test-feature-stats-respawn',
+                    conflictStrategy:'respawn',
+                    testCmd:'true',
+                    display,
+                })
+            })
+
+            t.equal(tickets[1].status, 'done',
+                'ticket 2 is done after the respawn')
+            const expected = renderRunStats({
+                agentRuns:3, withCost:3, subagents:3, costUsd:0.75,
+            })
+            t.ok(expected !== null, 'a stats line is expected')
+            t.ok(
+                logsOf(calls).includes(expected as string),
+                'both tickets and the respawn are tallied'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            fakeGit.restore()
+            removeWorktreesAndRepo(projectDir)
+            rmSync(dataDir, { recursive:true, force:true })
+            rmSync(templateDir, { recursive:true, force:true })
+        }
+    }
+)
+
+test('runWavesIsolated - a ticket row shows the total across attempts',
+    async t => {
+        const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
+        const projectDir = initTempGitRepo({ templateDir })
+        const dataDir = tmp()
+        const originalCwd = process.cwd()
+        try {
+            const issuesDir = join(projectDir, 'issues')
+            const logsDir = join(projectDir, '.logs')
+            mkdirSync(issuesDir)
+            writeFileSync(
+                join(issuesDir, '01-only.md'),
+                makeTicketBody({ status:'ready-for-agent' })
+            )
+            const tickets = scanTickets(issuesDir)
+            commitAll(projectDir, 'add tickets')
+            const { display, calls } = recordingDisplay()
+
+            await withFakeClaude({
+                FAKE_CLAUDE_STREAM:writeOneSubagentStream(dataDir),
+                FAKE_CLAUDE_FAIL_ONCE:join(dataDir, 'failed-once'),
+                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+            }, async () => {
+                process.chdir(projectDir)
+                await runWavesIsolated({
+                    tickets,
+                    specBody:'test spec',
+                    agentCmd:FAKE_CLAUDE,
+                    model:null,
+                    timeout:10,
+                    logsDir,
+                    featureName:'test-feature-stats-retry',
+                    conflictStrategy:'respawn',
+                    testCmd:'true',
+                    retries:1,
+                    retryDelay:0,
+                    display,
+                })
+            })
+
+            t.equal(tickets[0].status, 'done',
+                'ticket is done on the second attempt')
+            const stats = calls
+                .filter(c => c.method === 'setTicketStats')
+                .filter(c => c.args[0] === 1)
+                .map(c => c.args[2])
+            t.deepEqual(
+                stats[stats.length - 1],
+                { subagents:2, costUsd:0.5 },
+                'the last row stats are both attempts together'
+            )
+            t.ok(
+                stats.some(s => {
+                    return JSON.stringify(s) ===
+                        JSON.stringify({ subagents:2, costUsd:0.25 })
+                }),
+                'the retry adds its live count to the first attempt'
+            )
+            const entries = parseEntries(readFileSync(
+                join(projectDir, 'learnings.md'), 'utf8'
+            ))
+            t.equal(entries.length, 2, 'one entry per attempt')
+            t.ok(
+                entries.every(e => e.body.includes('Subagents: 1.')),
+                'each entry records its own subagent count'
+            )
+        } finally {
+            process.chdir(originalCwd)
+            removeWorktreesAndRepo(projectDir)
+            rmSync(dataDir, { recursive:true, force:true })
+            rmSync(templateDir, { recursive:true, force:true })
+        }
+    }
+)

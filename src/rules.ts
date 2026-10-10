@@ -27,6 +27,32 @@ export function installRule (installCmd?:string):string[] {
     ]
 }
 
+// The delegation rule for agents whose subagents default to a
+// cheaper model (CLAUDE_CODE_SUBAGENT_MODEL). Empty without one.
+// `readOnly` drops the edit/commit line, for the reviewer, which
+// never edits.
+export function subagentRule (
+    preferSubagent?:string,
+    readOnly = false
+):string[] {
+    if (!preferSubagent) return []
+    return [
+        '- Hand read-only work to subagents: exploring the ' +
+            'codebase, searching code, and experiments or test ' +
+            'runs whose output would flood your context. ' +
+            `Subagents default to the ${preferSubagent} model.`,
+        '- A subagent starts with no context. Brief each one ' +
+            'with the objective, what you already know, its ' +
+            'boundaries, and the reply you expect (file:line ' +
+            'references, or pass/fail with the relevant output).',
+        ...(readOnly ? [] : [
+            '- Subagents never edit files or run git commands ' +
+                'that write. You make every edit and every commit.',
+        ]),
+        '- Do not delegate a lookup that takes a single tool call.',
+    ]
+}
+
 export function testGateRule (testCmd:string, subject:string):string {
     if (testCmd === '') {
         return '- Before each commit, run the tests relevant ' +

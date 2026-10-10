@@ -16,6 +16,7 @@ import {
     type Finding,
     type ReviewEntry,
 } from '../src/review.js'
+import { subagentRule } from '../src/rules.js'
 
 const A = 'a'.repeat(40)
 const B = 'b'.repeat(40)
@@ -292,6 +293,66 @@ test('renderFixPrompt with an empty test command names no gate',
         t.ok(!without.includes('``'),
             'no empty code span for the command')
     })
+
+test('renderReviewPrompt is unchanged without preferSubagent', t => {
+    const opts = { specBody:'SPEC-BODY', from:A, to:B }
+    const base = renderReviewPrompt(opts)
+    t.equal(renderReviewPrompt({ ...opts, preferSubagent:'' }), base,
+        'empty string renders the same prompt')
+    t.equal(
+        renderReviewPrompt({ ...opts, preferSubagent:undefined }),
+        base,
+        'undefined renders the same prompt'
+    )
+    t.ok(subagentRule('haiku').every(line => !base.includes(line)),
+        'no subagent rule lines')
+})
+
+test('renderReviewPrompt gets the read-only subagent rule', t => {
+    const prompt = renderReviewPrompt({
+        specBody:'SPEC-BODY',
+        from:A,
+        to:B,
+        preferSubagent:'haiku',
+    })
+    const readOnly = subagentRule('haiku', true)
+    const writeOnly = subagentRule('haiku')
+        .filter(line => !readOnly.includes(line))
+    t.ok(readOnly.every(line => prompt.includes(line)),
+        'every read-only rule line')
+    t.equal(writeOnly.length, 1, 'one line differs')
+    t.ok(writeOnly.every(line => !prompt.includes(line)),
+        'no edit/commit line')
+})
+
+test('renderFixPrompt is unchanged without preferSubagent', t => {
+    const opts = {
+        specBody:'SPEC-BODY',
+        findings:[finding('first thing')],
+        testCmd:'npm run t',
+    }
+    const base = renderFixPrompt(opts)
+    t.equal(renderFixPrompt({ ...opts, preferSubagent:'' }), base,
+        'empty string renders the same prompt')
+    t.equal(
+        renderFixPrompt({ ...opts, preferSubagent:undefined }),
+        base,
+        'undefined renders the same prompt'
+    )
+    t.ok(subagentRule('haiku').every(line => !base.includes(line)),
+        'no subagent rule lines')
+})
+
+test('renderFixPrompt includes the subagent rule when set', t => {
+    const prompt = renderFixPrompt({
+        specBody:'SPEC-BODY',
+        findings:[finding('first thing')],
+        testCmd:'npm run t',
+        preferSubagent:'haiku',
+    })
+    t.ok(subagentRule('haiku').every(line => prompt.includes(line)),
+        'every subagent rule line')
+})
 
 // -- reviewExcludeFor --
 

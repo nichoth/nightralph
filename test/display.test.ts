@@ -19,6 +19,7 @@ import {
     type RunProgress,
     type TicketStatus,
 } from '../src/display.js'
+import { formatStats, type SubagentStats } from '../src/stats.js'
 import {
     spawnAgent, runWaves, runWavesIsolated, scanTickets,
     type Ticket,
@@ -1795,6 +1796,17 @@ class RecordingDisplay implements Display {
         })
     }
 
+    setTicketStats (
+        num:number,
+        feature:string|undefined,
+        stats:SubagentStats,
+    ):void {
+        this.calls.push({
+            method:'setTicketStats',
+            args:[num, feature, stats],
+        })
+    }
+
     log (message:string):void {
         this.calls.push({
             method:'log',
@@ -2770,4 +2782,114 @@ test('AC4.5: PlainDisplay output format unchanged', t => {
         logs1, logs2,
         'PlainDisplay output unchanged with/without startRun'
     )
+})
+
+// -- setTicketStats: the subagent stats suffix on a row --
+
+test('AC5.1: setTicketStats adds a suffix to that ticket row', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+    const tickets = [
+        { num:1, filename:'01-a.md', feature:'feat' },
+        { num:2, filename:'02-b.md', feature:'feat' },
+    ]
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+
+    const stats = { subagents:2, costUsd:0.42 }
+    display.setTicketStats(1, 'feat', stats)
+
+    const suffix = formatStats(stats)
+    t.ok(suffix !== null, 'the stats have a suffix')
+    const rows = lastFrame(stream.getOutput()).split('\n')
+    const row1 = rows.find(l => l.includes(ticketLabel(tickets[0])))
+    const row2 = rows.find(l => l.includes(ticketLabel(tickets[1])))
+    t.ok(row1?.includes(suffix ?? '\0'), 'ticket 1 row has the suffix')
+    t.ok(row2 !== undefined, 'ticket 2 row is rendered')
+    t.ok(!row2?.includes(suffix ?? '\0'), 'ticket 2 row has no suffix')
+})
+
+test('AC5.1: a ticket with nothing to show keeps a bare row', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+    const tickets = [{ num:1, filename:'01-a.md', feature:'feat' }]
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+    const before = lastFrame(stream.getOutput())
+
+    display.setTicketStats(1, 'feat', { subagents:0 })
+
+    t.equal(
+        lastFrame(stream.getOutput()), before,
+        'the row is unchanged when formatStats has nothing to show',
+    )
+})
+
+test('AC5.3: rows with stats never exceed columns - 1', t => {
+    const stream = createMockStream()
+    stream.columns = 20
+    const display = new StatusDisplay({ stream })
+    const tickets = [
+        { num:1, filename:'01-a.md', feature:'f' },
+        {
+            num:2,
+            filename:'02-b.md',
+            feature:'a-very-long-feature-name-for-this-row',
+        },
+    ]
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+    display.setTicketStats(1, 'f', { subagents:12, costUsd:123.45 })
+    display.setTicketStats(2, tickets[1].feature, {
+        subagents:3,
+        costUsd:0.5,
+    })
+
+    const frame = lastFrame(stream.getOutput())
+    t.ok(frame.length > 0, 'a frame was rendered')
+    const maxWidth = stream.columns - 1
+    const tooLong = stripAnsi(stream.getOutput())
+        .split('\n')
+        .filter(l => l.length > maxWidth)
+    t.equal(
+        tooLong.length, 0,
+        'no row wider than columns-1: ' + JSON.stringify(tooLong),
+    )
+})
+
+test('AC5.4: setTicketStats for an unknown ticket is ignored', t => {
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+    const tickets = [{ num:1, filename:'01-a.md', feature:'feat' }]
+    display.startRun(tickets)
+    display.startWave(1, 1, tickets)
+    const before = stream.getOutput()
+
+    const stats = { subagents:2, costUsd:0.42 }
+    display.setTicketStats(99, 'feat', stats)
+    display.setTicketStats(1, 'other', stats)
+
+    t.equal(stream.getOutput(), before, 'nothing is rendered')
+    t.ok(
+        !stripAnsi(stream.getOutput()).includes(formatStats(stats) ?? '\0'),
+        'no row shows the suffix',
+    )
+})
+
+test('AC5.4: PlainDisplay setTicketStats is a no-op', t => {
+    const logs:string[] = []
+    const origLog = console.log
+    console.log = (...args:unknown[]) => {
+        logs.push(args.join(' '))
+    }
+
+    try {
+        const display = new PlainDisplay()
+        display.startRun([{ num:1, filename:'01-a.md', feature:'f' }])
+        display.setTicketStats(1, 'f', { subagents:1 })
+    } finally {
+        console.log = origLog
+    }
+
+    t.equal(logs.length, 0, 'no logs from setTicketStats')
 })

@@ -34,6 +34,25 @@ Small orchestrator that runs a single-agent session per issue.
   feature picker waits until the timeout; closing stdin makes
   the prompt reject, which the `.fail()` handler turns into
   exit 2
+- Fake claude: `test/fake-claude/claude` is a `sh` wrapper
+  around `test/mock-agent-claude.js`; its basename makes
+  `spawnAgent` take the claude branch. Env vars drive it:
+  `FAKE_CLAUDE_ENV_LOG` (appends the JSON of
+  `CLAUDE_CODE_SUBAGENT_MODEL`, or `null`, per run),
+  `FAKE_CLAUDE_PROMPT_DIR` (writes each prompt it reads to its
+  own file there), `FAKE_CLAUDE_STREAM` (a file whose lines it
+  prints as stream-json), `FAKE_CLAUDE_FAIL_ONCE` (a marker
+  path: the first run creates it and exits 1),
+  `FAKE_CLAUDE_DELEGATE` (a `test/mock-agent-*.js` run with
+  the same prompt, cwd, env and args) and `FAKE_CLAUDE_HANG=1`
+  (never exits). `test/mock-agent-review.js` records
+  `{ time, role, cwd, prompt }` per run. Tests clear and
+  restore these through an explicit key list
+  (`FAKE_CLAUDE_KEYS` in `test/integration.test.ts`,
+  `FAKE_ENV_KEYS` in `test/orchestrator.test.ts`, `ENV_KEYS`
+  in `test/review-integration.test.ts`, whose harness clears
+  every key before applying a test's env), so a test that
+  sets a new key must add it to its file's list
 - `npm publish` -- `prepublishOnly` runs `npm run build` and
   `npm test` first, so a red suite or a stale `dist/` cannot be
   published
@@ -57,6 +76,8 @@ Small orchestrator that runs a single-agent session per issue.
 - `src/rules.ts` -- prompt rule lines shared by the ticket,
   fix and review prompts
 - `src/review.ts` -- review log, reviewer, fixer, review pass
+- `src/stats.ts` -- subagent stats from claude stream-json,
+  per-ticket totals and the run tally
 - `src/testcmd.ts` -- test command detection and execution
 - `src/preflight.ts` -- provider executable lookup
 - `src/resolve.ts` -- feature selection (`.scratch/<feature>/`
@@ -126,6 +147,14 @@ Small orchestrator that runs a single-agent session per issue.
 - `--effort <level>` -- starting effort level,
   validated against the active provider's ladder; omitted =
   provider default; ignored by providers without effort support
+- `--prefer-subagent <model>` -- yargs string, claude only;
+  `""` (or absent) is off. After the provider preflight, a
+  provider whose basename is not `claude` gets one
+  `--prefer-subagent not supported by <provider>, skipping`
+  warning (also under `--dry-run`) and the value is dropped,
+  so no agent gets the env var or the prompt rule. Otherwise
+  it is passed as `preferSubagent` to `runWavesIsolated`,
+  in-place `runWaves`, `dryRun` and `dryRunIsolated`
 - `--retries <n>` -- extra attempts per ticket after a
   failed run; default `DEFAULT_RETRIES` (3); `0`
   disables retries
@@ -140,7 +169,8 @@ Small orchestrator that runs a single-agent session per issue.
   auto-detects git repo and shows worktree/branch
   layout when inside one; also prints the branch
   decision (`describeIntegrationBranch`) and whether
-  review is on or off
+  review is on or off; both dry runs print
+  `Prefer subagent: <model>` (`(none)` when off)
 - **Ticket loading**: `loadTickets` checks each selection's
   issues dir and spec, then loads every valid selection in one
   `loadSelection(<cwd>/.scratch, names)` call, so blockers are
@@ -238,10 +268,11 @@ Small orchestrator that runs a single-agent session per issue.
   `markDone(ticket)`,
   `renderPrompt(specBody, ticket, opts)`,
   `stripSpecSection(specBody, heading)`,
-  `renderMergePrompt(specBody, ticket)`,
-  `spawnAgent(opts)`, `createPiStreamFormatter()`,
+  `renderMergePrompt(specBody, ticket, opts?)`,
+  `spawnAgent(opts)`, `formatStreamLine(line)`,
+  `createPiStreamFormatter()`,
   `killProcessGroup(pid)`, `killRunningAgents()`,
-  `dryRun(tickets, specBody, testCmd)`,
+  `dryRun(tickets, specBody, testCmd, preferSubagent?)`,
   `dryRunIsolated(opts)`, `runWaves(...)`,
   `runWavesIsolated(opts)`, `HUMAN_STATUS`,
   `renderFinishSummary(tickets, totalCompleted, failedKeys,
@@ -321,10 +352,16 @@ Small orchestrator that runs a single-agent session per issue.
   retry for a given provider; `undefined` -> `high`,
   otherwise one rung up the provider's ladder, clamped at
   the provider's max
-- **AgentResult**: `{ exitCode, completedItems, timedOut }`
-  -- returned by `spawnAgent`; `timedOut` is true when
-  the orchestrator killed the agent at the timeout, and
-  `exitCode` is non-zero in that case
+- **AgentResult**: `{ exitCode, completedItems, timedOut,
+  subagents?, costUsd? }` -- returned by `spawnAgent`;
+  `timedOut` is true when the orchestrator killed the
+  agent at the timeout, and `exitCode` is non-zero in that
+  case. `subagents` and `costUsd` are set for claude only
+  (the final `SubagentStats` from `src/stats.ts`, spread
+  in, so `costUsd` is absent, not `undefined`, until a
+  `result` message reports it); codex and pi results never
+  carry them, and neither does a claude result when the
+  spawn itself fails (the process `'error'` path)
 - **TicketOutcome**: discriminated union returned by
   `runTicketAttempts`; `'no-commits'` carries
   `worktreePath:string` and `branchName:string`;
@@ -334,7 +371,9 @@ Small orchestrator that runs a single-agent session per issue.
   `reason:'exit'|'tests'|'install'`. The variants that
   always follow an agent run carry
   `agentRun:AgentRunRecord`
-  (`{ exitCode, completedItems, timedOut, notes }`):
+  (`{ exitCode, completedItems, timedOut, notes,
+  subagents?, costUsd? }`, the last two copied only when
+  the `AgentResult` has them):
   `'ready'`, `'failed'` with reason `'exit'` or
   `'tests'`, and `'no-commits'`. `'failed'` with reason
   `'install'` has no `agentRun`, and `'error'` never
@@ -398,7 +437,33 @@ Small orchestrator that runs a single-agent session per issue.
   accepts optional `onLine` callback to redirect output
   lines (used by Display integration); for `pi`, writes
   prompt to a temp file and passes `@path` as a positional
-  arg instead of piping to stdin
+  arg instead of piping to stdin. Optional `preferSubagent`
+  (claude only; ignored for other providers) spawns with
+  `env:{ ...process.env,
+  CLAUDE_CODE_SUBAGENT_MODEL:<model> }`;
+  unset, no `env` option is passed, so a value exported in
+  the shell is inherited. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`
+  is never set. Each claude stdout line is `JSON.parse`d
+  once: the parsed value is folded into the stream stats
+  (`nextStreamStats`) and then formatted, and optional
+  `onStats(stats)` is called each time the stats change
+  (by identity of the returned state). A timed-out claude
+  agent resolves with the count seen so far and a cost only
+  if a `result` message arrived before the kill
+- **formatStreamLine(line)**: formats one claude
+  stream-json line for the log; a line that is not JSON is
+  returned as is. Non-object values and fields of the wrong
+  type yield `null` or a default rather than a throw. An
+  `assistant` message with a non-null `parent_tool_use_id`
+  (a subagent's output) yields `null`, so subagent text
+  never reaches the log or `COMPLETED_RE` and cannot check
+  items; otherwise the first text block whose `text` is a
+  string is returned (other blocks are skipped). `result`
+  yields `<subtype|done>[ ($<cost>)]`, and `system` with
+  subtype `api_retry` yields `retry: <error|unknown>`, both
+  typeof-guarding their fields. `spawnAgent` parses each
+  line itself and calls the same internal
+  `formatStreamObject`
 - **renderPrompt(specBody, ticket, opts)**: `opts.testCmd`
   is required; the prompt always includes /tdd
   instructions and names the test command the
@@ -431,7 +496,10 @@ Small orchestrator that runs a single-agent session per issue.
   `opts.installCmd` adds a rule
   that dependencies are installed with that command,
   the agent must not reinstall with any other command,
-  and new dependencies use the same package manager
+  and new dependencies use the same package manager.
+  Optional `opts.preferSubagent` adds the
+  `subagentRule(preferSubagent)` lines right after the
+  install rule
 - **stripSpecSection(specBody, heading)**: drops one
   markdown section from a spec, ignoring headings
   inside code fences; the CLI uses it to omit
@@ -447,7 +515,8 @@ Small orchestrator that runs a single-agent session per issue.
   `effort`, `retries`, `retryDelay`, and
   `concurrency` (default `DEFAULT_CONCURRENCY`; at
   most that many agents run at once within a wave,
-  via `runPool`) -- a
+  via `runPool`) and a last positional `preferSubagent`
+  (passed to `renderPrompt` and every `spawnAgent`) -- a
   non-zero exit is retried up to `retries` times
   with an escalated level and exponential backoff
   (timeouts are not retried); a per-run `failedKeys`
@@ -457,14 +526,17 @@ Small orchestrator that runs a single-agent session per issue.
   learnings and passes no history; the prompt still
   asks for `.nightralph/notes.md`, which the in-place
   runner neither ignores nor collects, so the file is
-  left in the project directory
-- **renderMergePrompt(specBody, ticket)**: prompt for
+  left in the project directory. Each ticket keeps a
+  running total of its attempts' stats (`addStats`) and
+  feeds it to `setTicketStats` from `onStats`, and every
+  `spawnAgent` result is added to the run's `RunStats`
+- **renderMergePrompt(specBody, ticket, opts?)**: prompt for
   a respawned agent resolving a merge conflict; tells
   the agent to resolve conflict markers, not
   re-implement, and to keep both sides' additions
   when AGENTS.md or other docs conflict; optional
-  third arg `{ installCmd? }` adds the same install
-  rule as `renderPrompt`
+  third arg `{ installCmd?, preferSubagent? }` adds the
+  same install and subagent rules as `renderPrompt`
 - **lookupSpec(specBodies, fallback, feature)**: returns
   the spec body for a given feature from a
   `Map<string, string>`, or `fallback` when the map is
@@ -484,7 +556,9 @@ Small orchestrator that runs a single-agent session per issue.
   `'install'` without running the agent, and it is
   retried like any failure), `display`, `effort`,
   `retries`,
-  `retryDelay`, `concurrency`,
+  `retryDelay`, `concurrency`, `preferSubagent` (passed
+  to every prompt builder and `spawnAgent` call: tickets,
+  merge-conflict respawns, reviewer and fixer),
   `review` (`{ reviewPath, forkedFrom? }`; unset means
   no review, so existing callers are unaffected),
   `specBodies` (`Map<string, string>`), and
@@ -524,13 +598,33 @@ Small orchestrator that runs a single-agent session per issue.
   running-process registry injected, and for a
   multi-feature run pastes every spec under a
   `# Feature: <name>` heading. After the finish summary
-  it logs the review line (`renderReviewSummary`, from
-  the review outcome; nothing when the review was
-  skipped or threw) and `Work is on <branch>`. The
+  it logs the run stats line (see below), the review line
+  (`renderReviewSummary`, from the review outcome;
+  nothing when the review was skipped or threw) and
+  `Work is on <branch>`. The
   review is advisory: any throw in it is caught,
   logged through the display as `Review failed: ...`,
   and never changes `allDone`. In-place `runWaves` has
   no review
+- **Subagent stats (both `runWaves` variants)**: each
+  runner keeps one `RunStats` tally (`addRun`) over every
+  `spawnAgent` result of the run. In `runWavesIsolated`
+  the tally is an `onAgentRun(result)` callback passed in
+  `TicketAttemptOpts` (called after every ticket attempt's
+  agent) and in the `respawnAndRetryMerge` opts (called
+  after the respawned agent), and the review pass gets a
+  wrapped `deps.spawnAgent` that tallies each reviewer and
+  fixer result; in-place `runWaves` tallies each first run
+  and retry directly. Right after `renderFinishSummary`
+  each runner logs `renderRunStats(runStats)` when it is
+  non-null. Per ticket, `runTicketAttempts` (and the
+  in-place pool callback) keeps a running total over
+  finished attempts (`addStats`) and on every `onStats`
+  call passes that total plus the live attempt's stats to
+  `display.setTicketStats`; merge respawns and review runs
+  count toward the run tally only, not a ticket row.
+  Stats are advisory: they never change an outcome, a
+  retry decision or an exit code
 - **Guarantees**: `runWavesIsolated` throws if the
   base branch working tree is dirty; a failed attempt
   (non-zero exit, exit 0 with no new commits, or a red
@@ -592,7 +686,10 @@ Small orchestrator that runs a single-agent session per issue.
   `no-commits`, `error` and `worktree-error` ->
   `error`. The entry's exit code always comes from
   `agentRun`, never from the outcome's top-level
-  `exitCode`. Every attempt rebuilds the prompt
+  `exitCode`. `agentRun` carries `subagents` and
+  `costUsd` when the `AgentResult` has them (claude
+  runs), so the entry shows them (see `renderEntry`).
+  Every attempt rebuilds the prompt
   history from the log, so a retry sees the entry its
   previous attempt just wrote: the ticket's last
   `MAX_OWN_ENTRIES` entries, plus the latest `done`
@@ -639,8 +736,9 @@ Small orchestrator that runs a single-agent session per issue.
   and the `typo` entries of `warnings` (default `[]`);
   each part is omitted when empty, so a run with
   nothing to explain gets no extra paragraph.
-  `runWaves` takes `warnings` as a trailing positional
-  argument and `runWavesIsolated` as `opts.warnings`.
+  `runWaves` takes `warnings` as the positional argument
+  before `preferSubagent`, and `runWavesIsolated` as
+  `opts.warnings`.
   This is why a run whose only
   open tickets are human ones exits 0 with an
   explanation instead of silently
@@ -653,15 +751,20 @@ Small orchestrator that runs a single-agent session per issue.
   in-run ticket in another non-human status (as
   `<label> (<status>)`), and a `Deadlocked tickets` line
   for tickets that wait on each other in a cycle
-- **dryRun(tickets, specBody, testCmd)**: in-place dry run;
-  prints the wave order, `Test command: <cmd>` (`(none)` for
-  `''`) and the first ready ticket's prompt
+- **dryRun(tickets, specBody, testCmd, preferSubagent?)**:
+  in-place dry run; prints the wave order,
+  `Test command: <cmd>` (`(none)` for `''`),
+  `Prefer subagent: <model>` (`(none)` when unset or `''`)
+  and the first ready ticket's prompt, rendered with
+  `preferSubagent`
 - **dryRunIsolated(opts)**: prints simulated wave order
   with worktree paths and branch names; requires
   `testCmd` (prints `Test command: (none)` for `''`); accepts
   `installCmd`, `effort`, `retries`,
-  `retryDelay`, and `concurrency` in opts and prints
-  them
+  `retryDelay`, `concurrency` and `preferSubagent` in
+  opts and prints them (`Prefer subagent: (none)` when
+  unset); the sample prompt is rendered with
+  `preferSubagent`
 
 ### blockers module (`src/blockers.ts`)
 - **Exposes**: types `RawRef` (`{ feature?, num }`),
@@ -781,13 +884,19 @@ Small orchestrator that runs a single-agent session per issue.
   `startWave(waveNum, totalWaves, tickets, progress?)`,
   `setTicketStatus(num, status, feature?)`,
   `setBlocked(num, feature, blockedBy)`,
+  `setTicketStats(num, feature, stats)`,
   `log(message)`, `cleanup()`. `tickets` are
-  `TicketRef`s. `setTicketStatus` and `setBlocked`
-  find the row by `num` and `feature` (by `num` alone
-  when `feature` is omitted) and ignore unknown tickets
+  `TicketRef`s. `setTicketStatus`, `setBlocked` and
+  `setTicketStats` find the row by `num` and `feature`
+  (by `num` alone when `feature` is omitted or
+  `undefined`) and ignore unknown tickets.
+  `setTicketStats` takes a `SubagentStats` (the ticket's
+  running total across attempts) and replaces the row's
+  stats with a copy
 - **TicketRef**: `{ num, filename, feature? }` -- the
   identity a caller passes in; `DisplayTicket` adds
-  `status` and optional `blockedBy`
+  `status`, optional `blockedBy` and optional `stats`
+  (`SubagentStats`)
 - **ticketLabel(ticket)**: the row name,
   `<feature>/<NN>` (number zero-padded to 2) when
   `feature` is set, else `filename`
@@ -832,6 +941,12 @@ Small orchestrator that runs a single-agent session per issue.
   from its fixed list, so the header
   (`Wave N/M - D/T done - P%`) and the rows cannot
   disagree
+- **Row stats**: a `StatusDisplay` row is the label, the
+  `(blocked by ...)` text when blocked, then
+  ` - <formatStats(stats)>` (e.g. `a/03 - 2 subagents,
+  $0.42`) whenever `formatStats` is non-null, in any
+  status. The whole row text goes through `fitLine`, so
+  the suffix never widens a row past the width guarantee
 - **Guarantees**: `StatusDisplay` never emits a row
   wider than `stream.columns - 1` visible characters;
   ticket names are clamped (`fitLine`) and log messages
@@ -849,8 +964,8 @@ Small orchestrator that runs a single-agent session per issue.
   message log; handles terminal resize
 - **PlainDisplay**: plain-text fallback when
   stdout is not a TTY; prints one line per wave;
-  `startRun`, `setTicketStatus` and `setBlocked` are
-  no-ops (it has no fixed list)
+  `startRun`, `setTicketStatus`, `setBlocked` and
+  `setTicketStats` are no-ops (it has no fixed list)
 - **createDisplay(stream?)**: factory that returns
   `StatusDisplay` when `stream` (default stdout) is a
   TTY, `PlainDisplay` otherwise
@@ -1028,9 +1143,10 @@ Small orchestrator that runs a single-agent session per issue.
   everything after the sentinel line, trimmed, without
   the trailing `---` separator
 - **AgentRunRecord**:
-  `{ exitCode, completedItems, timedOut, notes }` --
-  what one agent process did; `notes` is
-  `string|null`
+  `{ exitCode, completedItems, timedOut, notes,
+  subagents?, costUsd? }` -- what one agent process did;
+  `notes` is `string|null`; `subagents` and `costUsd` are
+  claude only, absent when not reported
 - **EntryInput**: `key`, `label`, `attempt`, `now`,
   plus per-outcome fields: `done`, `exit` and
   `no-commits` carry `run` (and optional `effort`);
@@ -1049,8 +1165,10 @@ Small orchestrator that runs a single-agent session per issue.
   `0` for `merge` entries
 - **renderEntry(input)**: pure; agent outcomes
   (`done`, `exit`, `no-commits`, `tests`) list effort
-  (when set), the agent's exit code, the checked
-  items, and the agent's notes (or a line saying it
+  (when set), the agent's exit code, `Subagents: <n>.`
+  and `Cost: $<x>.` (two decimals; each omitted when
+  absent from `run`), the checked items, and the agent's
+  notes (or a line saying it
   left none); `tests` also adds the log tail in a
   fence; `install` has no agent summary, only the log
   tail in a fence; `error` and `merge` show the error
@@ -1092,6 +1210,50 @@ Small orchestrator that runs a single-agent session per issue.
   every repo on the machine, e.g. via
   `init.templateDir`)
 
+### stats module (`src/stats.ts`)
+- **Exposes**: types `SubagentStats`
+  (`{ subagents, costUsd? }`), `StreamStatsState`
+  (`{ stats, seenToolIds }`), `RunStats`
+  (`{ agentRuns, withCost, subagents, costUsd }`);
+  functions `isRecord(value)`, `emptyStreamStats()`,
+  `nextStreamStats(state, obj)`, `addStats(total, run)`,
+  `formatStats(stats?)`, `emptyRunStats()`,
+  `addRun(run, result)`, `renderRunStats(run)`
+- **Imports nothing**, so the orchestrator, display and
+  tests can all use it. `isRecord` (a non-null, non-array
+  object) is also what the orchestrator's stream formatter
+  uses
+- **nextStreamStats(state, obj)**: pure, never throws;
+  folds one parsed stream-json value into the state. An
+  `assistant` message with a null or missing
+  `parent_tool_use_id` counts each `tool_use` block named
+  `Agent` (or `Task`, the name before Claude Code 2.1.63)
+  with a string `id` once per id; a non-null
+  `parent_tool_use_id` (a subagent's own message) is
+  ignored. A `result` message sets `costUsd` from a finite
+  numeric `total_cost_usd` and replaces the count with
+  `subagent_stats.spawned` when that is a non-negative
+  integer; the last `result` wins. Returns the same state
+  object when nothing changed (callers compare by
+  identity). `stats` never carries a `costUsd:undefined`
+  key
+- **addStats(total, run)**: a ticket's running total over
+  attempts; `costUsd` is kept once either side has one
+- **formatStats(stats?)**: the row suffix,
+  `<n> subagent(s)[, $<x.xx>]`; `null` for no stats or for
+  zero subagents with no cost
+- **addRun / renderRunStats**: `addRun` adds one
+  `spawnAgent` result (`withCost` counts results that had
+  a cost). `renderRunStats` is `null` when there were no
+  runs or no run reported a subagent or a cost (codex and
+  pi never do), else `Subagents: <n> started across <m>
+  agent run(s), cost $<x.xx>`, with
+  ` (cost from <k> of <m> runs)` appended when
+  `withCost < agentRuns` (an agent killed before its
+  `result` message reports no cost)
+- **Guarantees**: stats are advisory; nothing in the
+  orchestrator reads them to decide an outcome
+
 ### retry module (`src/retry.ts`)
 - **Exposes**: `EFFORT_LADDERS`, `ProviderName`,
   `EffortLevel`, `ALL_EFFORT_LEVELS`, `escalateEffort`,
@@ -1116,9 +1278,9 @@ Small orchestrator that runs a single-agent session per issue.
 
 ### rules module (`src/rules.ts`)
 - **Exposes**: `readDocsRule`, `installRule`,
-  `testGateRule`, `LINT_RULE`, `integrityRule`,
-  `CONFINEMENT_RULES`, `commitRule`, `notesRule`,
-  `agentsMdRule`
+  `subagentRule`, `testGateRule`, `LINT_RULE`,
+  `integrityRule`, `CONFINEMENT_RULES`, `commitRule`,
+  `notesRule`, `agentsMdRule`
 - **Guarantees**: the rule lines `renderPrompt` and
   `renderFixPrompt` share, parameterized by the unit of
   work (`checklist item` or `finding`) and the subject
@@ -1130,6 +1292,20 @@ Small orchestrator that runs a single-agent session per issue.
   (run the relevant tests before each commit, do not commit
   with failing tests, and the orchestrator runs no test
   command for this `<subject>`)
+- **subagentRule(preferSubagent?, readOnly = false)**:
+  positional boolean; `[]` when `preferSubagent` is unset
+  or `''`, else lines telling the agent to hand read-only
+  work (exploring, code search, experiments or test runs
+  whose output would flood its context) to subagents,
+  naming the model they default to, to brief each one
+  fully, and not to delegate a single-tool-call lookup,
+  plus a line that subagents never edit files or run git
+  commands that write (the agent makes every edit and
+  commit). `readOnly` drops that edit/commit line. Used
+  by all four prompt builders: `renderPrompt`,
+  `renderMergePrompt` and `renderFixPrompt` after their
+  install rule, and `renderReviewPrompt` with `readOnly`
+  (`subagentRule(opts.preferSubagent, true)`)
 
 ### review module (`src/review.ts`)
 - **Exposes**: `FINDINGS_FILE`, `FINDINGS_PATH`,
@@ -1137,7 +1313,8 @@ Small orchestrator that runs a single-agent session per issue.
   types `ReviewStatus`, `Finding`, `FixRecord`,
   `ReviewEntryInput`, `ReviewEntry`, `ReviewOutcome`,
   `FixFailure`, `FixResult`, `ReviewDeps`,
-  `ReviewPassOpts`; pure `reviewExcludeFor`, `reviewDiffCommand`,
+  `SpawnAgentFn`, `ReviewPassOpts`; pure `reviewExcludeFor`,
+  `reviewDiffCommand`,
   `renderReviewPrompt`, `renderFixPrompt`,
   `parseFindings`, `markFixed`, `renderReviewEntry`,
   `parseReviewEntries`, `selectReviewBase`,
@@ -1149,7 +1326,15 @@ Small orchestrator that runs a single-agent session per issue.
   and `appendEntry` directly. The orchestrator injects
   `deps` `{ spawnAgent, registry? }`; `registry` is the
   running-process set, so SIGINT kills review installs
-  and test gates too
+  and test gates too. `spawnAgent` is a `SpawnAgentFn`,
+  whose opts include `preferSubagent?`; the orchestrator
+  passes a wrapper that tallies each result into the run
+  stats
+- **preferSubagent**: `ReviewPassOpts.preferSubagent?`
+  (claude only; unset = off) is passed to
+  `renderReviewPrompt` and `renderFixPrompt` (both take
+  `preferSubagent?` in their opts) and to every reviewer
+  and fixer `spawnAgent` call
 - **Review log**: `review.md`, append-only, one entry per
   pass. Each starts with a sentinel
   `<!-- nightralph:review from=<sha> to=<sha>

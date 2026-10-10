@@ -55,6 +55,7 @@ import { runTestCmd } from './testcmd.js'
 import {
     readDocsRule,
     installRule,
+    subagentRule,
     testGateRule,
     LINT_RULE,
     integrityRule,
@@ -64,6 +65,16 @@ import {
     agentsMdRule,
 } from './rules.js'
 import { runReviewPass, renderReviewSummary } from './review.js'
+import {
+    addRun,
+    addStats,
+    emptyRunStats,
+    emptyStreamStats,
+    isRecord,
+    nextStreamStats,
+    renderRunStats,
+    type SubagentStats,
+} from './stats.js'
 import {
     EFFORT_LADDERS,
     escalateEffort,
@@ -563,6 +574,7 @@ export function renderPrompt (
         testCmd:string
         installCmd?:string
         history?:string
+        preferSubagent?:string
     }
 ):string {
     return [
@@ -586,6 +598,7 @@ export function renderPrompt (
             'via web search. Use the spec and ticket ' +
             'body as your sole reference for API shapes.',
         ...installRule(opts.installCmd),
+        ...subagentRule(opts.preferSubagent),
         '- Use /tdd for every checklist item. For ' +
             'each item, write a failing test at the ' +
             'seams named in the spec\'s Testing ' +
@@ -613,7 +626,7 @@ export function renderPrompt (
 export function renderMergePrompt (
     specBody:string,
     ticket:Ticket,
-    opts:{ installCmd?:string } = {}
+    opts:{ installCmd?:string; preferSubagent?:string } = {}
 ):string {
     return [
         '---- SPEC CONTEXT ----',
@@ -644,6 +657,7 @@ export function renderMergePrompt (
         '',
         'Do NOT re-implement the ticket from scratch.',
         ...installRule(opts.installCmd),
+        ...subagentRule(opts.preferSubagent),
         'Do NOT read or modify files outside your ' +
             'current directory (the worktree).',
         'Do NOT run git push.',
@@ -763,41 +777,64 @@ export function getProviderArgs (cmd:string):string[] {
 export function formatStreamLine (
     line:string
 ):string|null {
-    let obj:Record<string, unknown>
+    let value:unknown
     try {
-        obj = JSON.parse(line) as Record<string, unknown>
+        value = JSON.parse(line)
     } catch {
         return line
     }
+    return formatStreamObject(value)
+}
+
+// Renders one parsed claude stream-json message. Values that are
+// not objects (a bare `null` or number line) and fields of the
+// wrong type are ignored rather than thrown on, since one bad line
+// must not crash the run.
+function formatStreamObject (value:unknown):string|null {
+    if (!isRecord(value)) return null
+    const obj = value
 
     if (obj.type === 'assistant') {
-        const msg = obj.message as
-            Record<string, unknown>|undefined
-        const content = msg?.content as
-            Array<Record<string, unknown>>|undefined
+        // Subagent output is not the main agent's checklist
+        // progress, so it stays out of the ticket log.
+        if (obj.parent_tool_use_id != null) return null
+        const msg = isRecord(obj.message) ?
+            obj.message :
+            undefined
+        const content = Array.isArray(msg?.content) ?
+            msg.content :
+            undefined
         if (!content) return null
         for (const block of content) {
-            if (block.type === 'text') {
-                return String(block.text)
-            }
+            if (!isRecord(block)) continue
+            if (block.type !== 'text') continue
+            if (typeof block.text === 'string') return block.text
         }
         return null
     }
 
     if (obj.type === 'result') {
-        const sub = obj.subtype as string|undefined ?? 'done'
-        const cost = obj.total_cost_usd as number|undefined
-        const costStr = cost != null ?
+        const sub = typeof obj.subtype === 'string' ?
+            obj.subtype :
+            'done'
+        const cost = typeof obj.total_cost_usd === 'number' ?
+            obj.total_cost_usd :
+            undefined
+        const costStr = cost !== undefined ?
             ` ($${cost.toFixed(2)})` :
             ''
         return `${sub}${costStr}`
     }
 
     if (obj.type === 'system') {
-        const sub = obj.subtype as string|undefined
+        const sub = typeof obj.subtype === 'string' ?
+            obj.subtype :
+            undefined
         if (sub === 'api_retry') {
-            const error = obj.error as string|undefined
-            return `retry: ${error ?? 'unknown'}`
+            const error = typeof obj.error === 'string' ?
+                obj.error :
+                'unknown'
+            return `retry: ${error}`
         }
     }
 
@@ -922,6 +959,10 @@ export type AgentResult = {
     // true when the orchestrator killed the agent at
     // the timeout; exitCode is non-zero in that case
     timedOut:boolean
+    // claude only: how many subagents the agent spawned, and the
+    // run cost reported by its result message when there is one
+    subagents?:number
+    costUsd?:number
 }
 
 // How long to wait after the process exits before giving up on a
@@ -978,6 +1019,10 @@ export function spawnAgent (opts:{
     maxTurns?:number
     effort?:EffortLevel
     onLine?:(line:string) => void
+    // claude only: sets CLAUDE_CODE_SUBAGENT_MODEL for the agent
+    preferSubagent?:string
+    // claude only: called each time the subagent stats change
+    onStats?:(stats:SubagentStats) => void
 }):Promise<AgentResult> {
     const args:string[] = [
         ...getProviderArgs(opts.agentCmd),
@@ -1044,10 +1089,20 @@ export function spawnAgent (opts:{
         opts.logPath,
         { flags:'w' }
     )
+    // The subagent model is a default: CLAUDE_CODE_SUBAGENT_MODEL_FORCE
+    // is never set, so a model the user exported still wins when the
+    // option is absent.
+    const env = isClaude && opts.preferSubagent ?
+        {
+            ...process.env,
+            CLAUDE_CODE_SUBAGENT_MODEL:opts.preferSubagent,
+        } :
+        undefined
     const proc = spawn(opts.agentCmd, args, {
         stdio:['pipe', 'pipe', 'pipe'],
         cwd:opts.cwd,
         detached:true,
+        ...(env ? { env } : {}),
     })
 
     if (proc.pid !== undefined) runningAgents.add(proc.pid)
@@ -1080,10 +1135,30 @@ export function spawnAgent (opts:{
         }
     }
 
+    let streamStats = emptyStreamStats()
+
+    // Formats one claude stream-json line and tracks subagent stats.
+    // The stats are read from the raw object, so subagent text is
+    // formatted away but still counted.
+    function formatClaudeLine (line:string):string|null {
+        let obj:unknown
+        try {
+            obj = JSON.parse(line)
+        } catch {
+            return line
+        }
+        const next = nextStreamStats(streamStats, obj)
+        if (next !== streamStats) {
+            streamStats = next
+            opts.onStats?.(next.stats)
+        }
+        return formatStreamObject(obj)
+    }
+
     const rl = createInterface({ input:proc.stdout })
     rl.on('line', line => {
         if (isClaude) {
-            const formatted = formatStreamLine(line)
+            const formatted = formatClaudeLine(line)
             if (formatted !== null) {
                 collectCompleted(formatted)
                 const output = `${prefix}${formatted}`
@@ -1189,7 +1264,12 @@ export function spawnAgent (opts:{
             rlErr.close()
             logStream.end()
             if (promptFile) cleanupPromptFile(promptFile)
-            resolve({ exitCode, completedItems, timedOut })
+            resolve({
+                exitCode,
+                completedItems,
+                timedOut,
+                ...(isClaude ? streamStats.stats : {}),
+            })
         }
 
         // The process itself has exited, but 'close' waits for its
@@ -1244,7 +1324,8 @@ export function spawnAgent (opts:{
 export function dryRun (
     tickets:Array<Ticket>,
     specBody:string,
-    testCmd:string
+    testCmd:string,
+    preferSubagent?:string
 ):void {
     listTickets(tickets)
 
@@ -1265,6 +1346,7 @@ export function dryRun (
     }
 
     console.log(`\nTest command: ${testCmd || '(none)'}`)
+    console.log(`Prefer subagent: ${preferSubagent || '(none)'}`)
 
     const firstReady = findReadyTickets(tickets)
     if (firstReady.length > 0) {
@@ -1274,7 +1356,7 @@ export function dryRun (
         )
         console.log(
             renderPrompt(specBody, firstReady[0],
-                { testCmd })
+                { testCmd, preferSubagent })
         )
     }
 }
@@ -1291,6 +1373,8 @@ export function dryRunIsolated (opts:{
     retries?:number
     retryDelay?:number
     concurrency?:number
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
 }):void {
     listTickets(opts.tickets)
 
@@ -1336,6 +1420,7 @@ export function dryRunIsolated (opts:{
                 {
                     testCmd:opts.testCmd,
                     installCmd:opts.installCmd,
+                    preferSubagent:opts.preferSubagent,
                 }
             )
         )
@@ -1353,6 +1438,9 @@ export function dryRunIsolated (opts:{
     )
     console.log(
         `Effort:       ${opts.effort ?? '(provider default)'}`
+    )
+    console.log(
+        `Prefer subagent: ${opts.preferSubagent || '(none)'}`
     )
     console.log(
         `Retries:      ${opts.retries ?? DEFAULT_RETRIES}`
@@ -1467,7 +1555,11 @@ async function respawnAndRetryMerge (opts:{
     testCmd:string
     installCmd?:string
     maxTurns?:number
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     onLine?:(msg:string) => void
+    // called with every agent result, for the run's stats tally
+    onAgentRun?:(result:AgentResult) => void
 }):Promise<boolean> {
     const log = (msg:string):void => {
         if (opts.onLine) {
@@ -1505,7 +1597,10 @@ async function respawnAndRetryMerge (opts:{
 
     const prompt = renderMergePrompt(
         opts.specBody, opts.ticket,
-        { installCmd:opts.installCmd }
+        {
+            installCmd:opts.installCmd,
+            preferSubagent:opts.preferSubagent,
+        }
     )
     const logPath = join(
         opts.logsDir,
@@ -1523,8 +1618,10 @@ async function respawnAndRetryMerge (opts:{
         cwd:opts.worktreePath,
         label,
         maxTurns:opts.maxTurns,
+        preferSubagent:opts.preferSubagent,
         onLine:opts.onLine,
     })
+    opts.onAgentRun?.(result)
 
     if (result.exitCode !== 0) {
         const msg2 = `  ${opts.ticket.filename}: respawned agent ` +
@@ -1692,8 +1789,12 @@ type TicketAttemptOpts = {
     installCmd?:string
     maxTurns?:number
     effort?:EffortLevel
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     learningsPath:string
     d:Display
+    // called with every agent result, for the run's stats tally
+    onAgentRun?:(result:AgentResult) => void
 }
 
 /**
@@ -1754,7 +1855,11 @@ function buildHistory (
 // and the checks that decide whether the branch can merge.
 // A failed attempt removes its worktree before returning.
 async function runTicketAttempt (
-    opts:TicketAttemptOpts&{ attempt:number }
+    opts:TicketAttemptOpts&{
+        attempt:number
+        // live stats from this attempt's agent, as they change
+        onStats?:(stats:SubagentStats) => void
+    }
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
 
@@ -1822,6 +1927,7 @@ async function runTicketAttempt (
                 history:buildHistory(
                     opts.learningsPath, ticket, d
                 ),
+                preferSubagent:opts.preferSubagent,
             }
         ),
         agentCmd:opts.agentCmd,
@@ -1834,8 +1940,11 @@ async function runTicketAttempt (
         label:ticket.filename.replace(/\.md$/, ''),
         maxTurns:opts.maxTurns,
         effort:opts.effort,
+        preferSubagent:opts.preferSubagent,
+        onStats:opts.onStats,
         onLine:(line) => d.log(line),
     })
+    opts.onAgentRun?.(agentResult)
 
     // Collect before anything commits or removes the worktree,
     // so the notes never reach the timeout auto-commit.
@@ -1853,6 +1962,12 @@ async function runTicketAttempt (
         completedItems:agentResult.completedItems,
         timedOut:agentResult.timedOut,
         notes,
+        ...(agentResult.subagents === undefined ?
+            {} :
+            { subagents:agentResult.subagents }),
+        ...(agentResult.costUsd === undefined ?
+            {} :
+            { costUsd:agentResult.costUsd }),
     }
 
     // A timeout kill is not the agent reporting failure.
@@ -2058,6 +2173,11 @@ async function runTicketAttempts (
     opts:TicketAttemptOpts&{ retries:number; retryDelay:number }
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
+    // The row shows every attempt's subagents and cost so far.
+    let prior:SubagentStats = { subagents:0 }
+    const showStats = (stats:SubagentStats):void => {
+        d.setTicketStats(ticket.num, ticket.feature, stats)
+    }
     return runWithRetries<TicketOutcome>({
         maxAttempts:opts.retries + 1,
         retryDelay:opts.retryDelay,
@@ -2080,7 +2200,14 @@ async function runTicketAttempts (
         let outcome:TicketOutcome
         try {
             outcome = await runTicketAttempt({
-                ...opts, attempt, effort,
+                ...opts,
+                attempt,
+                effort,
+                onStats:stats => showStats(addStats(prior, stats)),
+                onAgentRun:result => {
+                    prior = addStats(prior, result)
+                    opts.onAgentRun?.(result)
+                },
             })
         } catch (error) {
             d.log(
@@ -2465,6 +2592,8 @@ export async function runWaves (
     concurrency?:number,
     // blocker problems found while loading, for the finish summary
     warnings:ReadonlyArray<BlockerWarning> = [],
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string,
 ):Promise<{ allDone:boolean }> {
     mkdirSync(logsDir, { recursive:true })
 
@@ -2481,6 +2610,8 @@ export async function runWaves (
     let waveNum = 0
     const failedKeys = new Set<string>()
     const session = sessionTickets(tickets)
+    // Every agent the run spawns, for the stats line at the end
+    let runStats = emptyRunStats()
 
     while (true) {
         if (waveNum > 0) reportBlocked(d, tickets, failedKeys)
@@ -2511,7 +2642,7 @@ export async function runWaves (
         const results = await runPool(
             ready, poolSize, async t => {
                 const prompt = renderPrompt(specBody, t,
-                    { testCmd })
+                    { testCmd, preferSubagent })
                 const label = t.filename.replace(
                     /\.md$/, ''
                 )
@@ -2519,6 +2650,18 @@ export async function runWaves (
                     t.num, 'in-progress', t.feature
                 )
                 d.log(`  Starting ${t.filename}`)
+                // The row shows every attempt's subagents and
+                // cost so far.
+                let prior:SubagentStats = { subagents:0 }
+                const onStats = (stats:SubagentStats):void => {
+                    d.setTicketStats(
+                        t.num, t.feature, addStats(prior, stats)
+                    )
+                }
+                const tally = (r:AgentResult):void => {
+                    prior = addStats(prior, r)
+                    runStats = addRun(runStats, r)
+                }
                 let level = effort
                 let result = await spawnAgent({
                     prompt,
@@ -2529,8 +2672,11 @@ export async function runWaves (
                     label,
                     maxTurns,
                     effort:level,
+                    preferSubagent,
+                    onStats,
                     onLine:(line) => d.log(line),
                 })
+                tally(result)
                 // In-place runs have no worktree or test
                 // gate, so a non-zero exit is the only
                 // failure that can be retried here.
@@ -2570,8 +2716,11 @@ export async function runWaves (
                         label,
                         maxTurns,
                         effort:level,
+                        preferSubagent,
+                        onStats,
                         onLine:(line) => d.log(line),
                     })
+                    tally(result)
                 }
                 return { ticket:t, result }
             }
@@ -2637,6 +2786,8 @@ export async function runWaves (
     d.log('\n' + renderFinishSummary(
         tickets, totalCompleted, failedKeys, warnings
     ))
+    const statsLine = renderRunStats(runStats)
+    if (statsLine) d.log(statsLine)
     d.cleanup()
 
     return { allDone:remaining.length === 0 }
@@ -2666,6 +2817,8 @@ export async function runWavesIsolated (opts:{
     retryDelay?:number
     // max agents running at once within a wave; default 5
     concurrency?:number
+    // claude only: model for subagents; unset = off
+    preferSubagent?:string
     // per-feature progress paths for multi-feature runs
     progressPaths?:Map<string, string>
     // blocker problems found while loading, for the finish summary
@@ -2763,6 +2916,11 @@ export async function runWavesIsolated (opts:{
     let waveNum = 0
     const failedKeys = new Set<string>()
     const session = sessionTickets(opts.tickets)
+    // Every agent the run spawns, for the stats line at the end
+    let runStats = emptyRunStats()
+    const onAgentRun = (result:AgentResult):void => {
+        runStats = addRun(runStats, result)
+    }
 
     while (true) {
         if (waveNum > 0) reportBlocked(d, opts.tickets, failedKeys)
@@ -2810,12 +2968,14 @@ export async function runWavesIsolated (opts:{
                 installCmd:opts.installCmd,
                 maxTurns:opts.maxTurns,
                 effort:opts.effort,
+                preferSubagent:opts.preferSubagent,
                 learningsPath:learningsPathFor(
                     tracker.pathFor(t.feature)
                 ),
                 retries,
                 retryDelay,
                 d,
+                onAgentRun,
             })
         )
 
@@ -3068,7 +3228,9 @@ export async function runWavesIsolated (opts:{
                                 testCmd:opts.testCmd,
                                 installCmd:opts.installCmd,
                                 maxTurns:opts.maxTurns,
+                                preferSubagent:opts.preferSubagent,
                                 onLine:(msg) => d.log(msg),
+                                onAgentRun,
                             }) :
                             false
 
@@ -3251,10 +3413,18 @@ export async function runWavesIsolated (opts:{
                 installCmd:opts.installCmd,
                 maxTurns:opts.maxTurns,
                 effort:opts.effort,
+                preferSubagent:opts.preferSubagent,
                 retries,
                 retryDelay,
                 log:(msg) => d.log(msg),
-            }, { spawnAgent, registry:runningAgents })
+            }, {
+                spawnAgent:async spawnOpts => {
+                    const result = await spawnAgent(spawnOpts)
+                    onAgentRun(result)
+                    return result
+                },
+                registry:runningAgents,
+            })
             reviewLine = renderReviewSummary(
                 outcome, relative(repoRoot, opts.review.reviewPath)
             )
@@ -3269,6 +3439,8 @@ export async function runWavesIsolated (opts:{
     d.log('\n' + renderFinishSummary(
         opts.tickets, totalCompleted, failedKeys, opts.warnings ?? []
     ))
+    const statsLine = renderRunStats(runStats)
+    if (statsLine) d.log(statsLine)
     if (reviewLine) d.log(reviewLine)
     d.log(`Work is on ${baseBranch}`)
     d.cleanup()

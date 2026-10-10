@@ -9,8 +9,11 @@ import { execFileSync, execSync } from 'node:child_process'
 import type { Display } from '../src/display.js'
 import { runWavesIsolated, scanTickets } from '../src/orchestrator.js'
 import { parseReviewEntries } from '../src/review.js'
+import { subagentRule } from '../src/rules.js'
+import { renderRunStats } from '../src/stats.js'
 
 const MOCK = join(process.cwd(), 'test', 'mock-agent-review.js')
+const FAKE_CLAUDE = join(process.cwd(), 'test', 'fake-claude', 'claude')
 const FEAT = 'feat'
 
 const GIT_ENV = {
@@ -34,6 +37,7 @@ function quietDisplay ():Display {
         startWave:noop,
         setTicketStatus:noop,
         setBlocked:noop,
+        setTicketStats:noop,
         log:noop,
         cleanup:noop,
     }
@@ -52,6 +56,26 @@ function countRoles (recordDir:string):Roles {
     return counts
 }
 
+// The prompts each role received, from the mock's records
+function promptsByRole (recordDir:string):Record<keyof Roles, string[]> {
+    const prompts:Record<keyof Roles, string[]> = {
+        reviewer:[], fixer:[], ticket:[],
+    }
+    for (const f of readdirSync(recordDir)) {
+        const { role, prompt } = JSON.parse(
+            readFileSync(join(recordDir, f), 'utf8')
+        ) as { role:keyof Roles; prompt:string }
+        prompts[role].push(prompt)
+    }
+    return prompts
+}
+
+function hasEveryLine (text:string, lines:string[]):boolean {
+    return lines.every(line => text.includes(line))
+}
+
+type RunOpts = Parameters<typeof runWavesIsolated>[0]
+
 type Harness = {
     projectDir:string
     recordDir:string
@@ -59,7 +83,9 @@ type Harness = {
     run:(
         review?:boolean,
         display?:Display,
-        forkedFrom?:string
+        forkedFrom?:string,
+        // spread last, over the harness defaults
+        extra?:Partial<RunOpts>
     ) => Promise<{
         allDone:boolean
         branch:string
@@ -68,6 +94,9 @@ type Harness = {
 
 const ENV_KEYS = [
     'MOCK_RECORD_DIR', 'MOCK_REVIEW', 'MOCK_FIX', 'MOCK_TICKET',
+    'FAKE_CLAUDE_DELEGATE', 'FAKE_CLAUDE_ENV_LOG', 'FAKE_CLAUDE_STREAM',
+    'FAKE_CLAUDE_PROMPT_DIR', 'FAKE_CLAUDE_HANG', 'FAKE_CLAUDE_FAIL_ONCE',
+    'CLAUDE_CODE_SUBAGENT_MODEL',
 ] as const
 
 async function withHarness (
@@ -99,6 +128,9 @@ async function withHarness (
         git(projectDir, ['commit', '-m', 'init'])
         git(projectDir, ['branch', '-M', 'main'])
 
+        // Start from a clean slate so values exported in the shell
+        // cannot leak into the mocks
+        for (const k of ENV_KEYS) Reflect.deleteProperty(process.env, k)
         process.env.MOCK_RECORD_DIR = recordDir
         for (const [k, v] of Object.entries(env)) process.env[k] = v
         process.chdir(projectDir)
@@ -108,7 +140,12 @@ async function withHarness (
             projectDir,
             recordDir,
             reviewPath,
-            run:(review = true, display = quietDisplay(), forkedFrom) => {
+            run:(
+                review = true,
+                display = quietDisplay(),
+                forkedFrom,
+                extra = {}
+            ) => {
                 return runWavesIsolated({
                     tickets:scanTickets(issuesDir, FEAT),
                     specBody:'SPEC',
@@ -127,6 +164,7 @@ async function withHarness (
                     retries:0,
                     retryDelay:0,
                     review:review ? { reviewPath, forkedFrom } : undefined,
+                    ...extra,
                 })
             },
         })
@@ -172,6 +210,56 @@ test('review pass - AC6.1 AC7.1 a fix merges and the log is ' +
         t.equal(entries[0].to, git(h.projectDir, ['rev-parse', 'HEAD~1']),
             'marker is the tip after the fix, before the log commit')
     })
+})
+
+test('review pass - prefer-subagent AC1.6 reaches the reviewer ' +
+    'and the fixer', async t => {
+    const logDir = mkdtempSync(join(tmpdir(), 'nightralph-envlog-'))
+    const envLog = join(logDir, 'env.log')
+    try {
+        await withHarness({
+            MOCK_REVIEW:'findings',
+            MOCK_FIX:'pass',
+            MOCK_TICKET:'pass',
+            FAKE_CLAUDE_DELEGATE:MOCK,
+            FAKE_CLAUDE_ENV_LOG:envLog,
+        }, async h => {
+            const result = await h.run(true, quietDisplay(), undefined, {
+                agentCmd:FAKE_CLAUDE,
+                preferSubagent:'haiku',
+            })
+            t.ok(result.allDone, 'tickets done')
+            t.deepEqual(countRoles(h.recordDir),
+                { reviewer:1, fixer:1, ticket:1 }, 'one of each')
+            const values = readFileSync(envLog, 'utf8')
+                .split('\n')
+                .filter(line => line !== '')
+                .map(line => JSON.parse(line))
+            t.deepEqual(values, ['haiku', 'haiku', 'haiku'],
+                'the ticket, reviewer and fixer agents get the model')
+
+            const rule = subagentRule('haiku')
+            const readOnlyRule = subagentRule('haiku', true)
+            const writeOnly = rule.filter(line => {
+                return !readOnlyRule.includes(line)
+            })
+            const prompts = promptsByRole(h.recordDir)
+            t.equal(writeOnly.length, 1,
+                'one rule line is missing from the read-only variant')
+            t.ok(prompts.reviewer.every(p => {
+                return hasEveryLine(p, readOnlyRule)
+            }), 'the reviewer prompt carries the read-only rule')
+            t.ok(prompts.reviewer.every(p => {
+                return writeOnly.every(line => !p.includes(line))
+            }), 'the reviewer prompt omits the edit-and-commit line')
+            t.ok(prompts.fixer.every(p => hasEveryLine(p, rule)),
+                'the fixer prompt carries the full rule')
+            t.ok(prompts.ticket.every(p => hasEveryLine(p, rule)),
+                'the ticket prompt carries the full rule')
+        })
+    } finally {
+        rmSync(logDir, { recursive:true, force:true })
+    }
 })
 
 test('review pass - AC6.2 AC6.3 a red fix merges nothing but ' +
@@ -275,4 +363,55 @@ test('review pass - a reviewer that writes no findings file is ' +
         t.equal(countRoles(h.recordDir).reviewer, 2,
             'the unreviewed range is reviewed again')
     })
+})
+
+test('review pass - prefer-subagent AC6.4 the stats tally counts ' +
+    'the reviewer and the fixer', async t => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'nightralph-stream-'))
+    const streamFile = join(dataDir, 'stream.jsonl')
+    writeFileSync(streamFile, [
+        {
+            type:'assistant',
+            message:{
+                content:[{
+                    type:'tool_use', id:'toolu_1', name:'Agent', input:{},
+                }],
+            },
+        },
+        {
+            type:'result',
+            subtype:'success',
+            total_cost_usd:0.25,
+            subagent_stats:{ spawned:1 },
+        },
+    ].map(line => JSON.stringify(line)).join('\n') + '\n')
+    try {
+        await withHarness({
+            MOCK_REVIEW:'findings',
+            MOCK_FIX:'pass',
+            MOCK_TICKET:'pass',
+            FAKE_CLAUDE_DELEGATE:MOCK,
+            FAKE_CLAUDE_STREAM:streamFile,
+        }, async h => {
+            const logs:string[] = []
+            const display = {
+                ...quietDisplay(),
+                log:(m:string) => { logs.push(m) },
+            }
+            const result = await h.run(true, display, undefined, {
+                agentCmd:FAKE_CLAUDE,
+            })
+            t.ok(result.allDone, 'tickets done')
+            t.deepEqual(countRoles(h.recordDir),
+                { reviewer:1, fixer:1, ticket:1 }, 'one of each')
+            const expected = renderRunStats({
+                agentRuns:3, withCost:3, subagents:3, costUsd:0.75,
+            })
+            t.ok(expected !== null, 'a stats line is expected')
+            t.ok(logs.includes(expected as string),
+                'the ticket, reviewer and fixer are tallied')
+        })
+    } finally {
+        rmSync(dataDir, { recursive:true, force:true })
+    }
 })
