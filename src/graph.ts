@@ -1,5 +1,7 @@
 import {
+    blockerLabel,
     findReadyTickets,
+    renderTypoWarnings,
     simulateRun,
     ticketKey,
     type Ticket,
@@ -252,4 +254,103 @@ export function buildGraph (
         })
     }
     return { reports, warnings }
+}
+
+function idLabel (id:TicketId):string {
+    return ticketLabel({ ...id, filename:'' })
+}
+
+function refLabel (ref:BlockerRef):string {
+    return ref.where === 'run' && ref.status ?
+        `${blockerLabel(ref)} (${ref.status})` :
+        blockerLabel(ref)
+}
+
+function byGroupKey (feature:string) {
+    return (a:string, b:string):number => {
+        const [fa, ua] = a.split('\n')
+        const [fb, ub] = b.split('\n')
+        return Number(fa !== feature) - Number(fb !== feature) ||
+            fa.localeCompare(fb) ||
+            ua.localeCompare(ub)
+    }
+}
+
+function renderBlock (report:FeatureReport, s:Suggestion):string[] {
+    const { feature } = report
+    const lines = [`${feature} (${report.ready}/${report.total} ready)`]
+
+    const groups = new Map<string, UpstreamRef[]>()
+    for (const e of s.edges) {
+        const key = `${e.from.feature}\n${e.ref.feature}`
+        groups.set(key, [...(groups.get(key) ?? []), e])
+    }
+    const keys = [...groups.keys()].sort(byGroupKey(feature))
+    for (const key of keys) {
+        const [from, upstream] = key.split('\n')
+        lines.push(`  ${from} waits on ${upstream}`)
+        for (const e of groups.get(key)!) {
+            lines.push(
+                `    ${idLabel(e.from)} waits on ${refLabel(e.ref)}`
+            )
+        }
+    }
+
+    // One feature: only dead refs into other features, so there
+    // is nothing to select together.
+    const n = s.features.length
+    if (n > 1) {
+        const hint = n === 2 ?
+            'select both in the picker' :
+            `select all ${n} in the picker`
+        lines.push(`  Run together: ${s.features.join(', ')} (${hint})`)
+    }
+    // Under "Run together" when there is one, else at group level
+    const pad = n > 1 ? '    ' : '  '
+    lines.push(
+        `${pad}${s.runnable} of ${s.total} ready-for-agent tickets ` +
+        'become runnable'
+    )
+
+    const stuck = new Map<string, string[]>()
+    for (const d of s.deadEnds) {
+        const label = idLabel(d.from)
+        stuck.set(label, [
+            ...(stuck.get(label) ?? []),
+            refLabel(d.ref),
+        ])
+    }
+    for (const [label, refs] of stuck) {
+        lines.push(`    ${label} stays blocked: ${refs.join(', ')}`)
+    }
+    if (s.cycles.length > 0) {
+        lines.push(
+            `    deadlocked: ${s.cycles.join(', ')} ` +
+            '(in or behind a cycle)'
+        )
+    }
+    return lines
+}
+
+/**
+ * The `graph` command's text: one block per feature that waits on
+ * another, one line naming the features that do not, then the typo
+ * warnings. Plain text, no color.
+ */
+export function renderGraph (
+    reports:ReadonlyArray<FeatureReport>,
+    warnings:ReadonlyArray<BlockerWarning>
+):string {
+    const blocks:string[][] = []
+    const free:string[] = []
+    for (const r of reports) {
+        if (r.suggestion) blocks.push(renderBlock(r, r.suggestion))
+        else free.push(r.feature)
+    }
+    if (free.length > 0) {
+        blocks.push([`Not waiting on other features: ${free.join(', ')}`])
+    }
+    const typos = renderTypoWarnings(warnings)
+    if (typos.length > 0) blocks.push(typos)
+    return blocks.map(b => b.join('\n')).join('\n\n')
 }

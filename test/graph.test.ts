@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { loadSelection } from '../src/resolve.js'
 import {
     buildGraph,
+    renderGraph,
     suggestSelection,
     type LoadFn,
     type Suggestion,
@@ -273,6 +274,274 @@ test('AC3.6: mutually waiting features terminate as deadlocked', t => {
         t.equal(s.runnable, 0, 'nothing runs')
         t.deepEqual(s.deadEnds, [], 'a cycle is not a dead ref')
         t.deepEqual(s.cycles, ['alpha/01', 'beta/01'], 'both in the cycle')
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+// -- renderGraph --
+
+function lineIndex (
+    lines:string[],
+    parts:string[],
+    after = -1
+):number {
+    return lines.findIndex((l, i) => i > after &&
+        parts.every(p => l.includes(p)))
+}
+
+function renderLines (load:LoadFn, names:string[]):string[] {
+    const { reports, warnings } = buildGraph(load, names)
+    return renderGraph(reports, warnings).split('\n')
+}
+
+test('AC2.2 and AC3.1: rebase.blog ref lines and Run together', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        rebaseBlog(scratchDir)
+        const lines = renderLines(load, [
+            'analytics', 'held-import-review', 'newsletter-audit',
+        ])
+        const ready = 'ready-for-agent'
+        const pairs:Array<[string, string]> = [
+            ['held-import-review/01', 'newsletter-audit/16'],
+            ['held-import-review/02', 'newsletter-audit/15'],
+            ['held-import-review/06', 'newsletter-audit/18'],
+        ]
+        for (const [from, to] of pairs) {
+            t.ok(
+                lineIndex(lines, [from, to, ready]) >= 0,
+                `a line has ${from}, ${to} and ${ready}`
+            )
+        }
+
+        const i01 = lineIndex(lines, ['held-import-review/01'])
+        const header = lines[i01 - 1]
+        t.ok(
+            header.includes('held-import-review') &&
+                header.includes('newsletter-audit') &&
+                !header.includes('/'),
+            'the group header names both features and no ref'
+        )
+        t.ok(
+            lineIndex(lines, [
+                'held-import-review', 'newsletter-audit', 'picker',
+            ], i01) > i01,
+            'a later Run together line names both features'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('AC2.3: upstream groups inside a block are ordered', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        const ready = 'ready-for-agent'
+        addFeature(scratchDir, 'alpha', [[1, ready, 'beta 01']])
+        addFeature(scratchDir, 'beta', [[1, ready, 'gamma 01']])
+        addFeature(scratchDir, 'gamma', [[1, ready, 'None']])
+        const lines = renderLines(load, ['alpha', 'beta', 'gamma'])
+        const start = lines.findIndex(l => l.startsWith('alpha ('))
+        const rest = lines.slice(start)
+        const blank = rest.indexOf('')
+        const block = blank < 0 ? rest : rest.slice(0, blank)
+        const first = lineIndex(block, ['alpha/01', 'beta/01'])
+        const second = lineIndex(block, ['beta/01', 'gamma/01'])
+        t.ok(first >= 0, 'alpha/01 line names beta/01')
+        t.ok(second > first, 'the beta/01 to gamma/01 line comes after')
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('AC2.9: only the target and its direct needs are shown', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        const ready = 'ready-for-agent'
+        addFeature(scratchDir, 'alpha', [
+            [1, ready, '02, beta 01'],
+            [2, ready, 'None'],
+            [3, 'ready-for-human', 'gamma 01'],
+            [4, ready, 'delta 01'],
+        ])
+        addFeature(scratchDir, 'beta', [[1, ready, 'None']])
+        addFeature(scratchDir, 'delta', [[1, 'done', 'None']])
+        addFeature(scratchDir, 'gamma', [[1, ready, 'None']])
+        const lines = renderLines(load, ['alpha', 'beta', 'delta', 'gamma'])
+        t.ok(lineIndex(lines, ['beta/01']) >= 0, 'beta/01 is shown')
+        t.equal(lineIndex(lines, ['gamma/01']), -1, 'no gamma/01 line')
+        t.equal(lineIndex(lines, ['delta/01']), -1, 'no delta/01 line')
+        t.equal(
+            lineIndex(lines, ['alpha/01', 'alpha/02']),
+            -1,
+            'no line pairs alpha/01 with alpha/02'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('AC2.10: order is by name and number, and output is stable', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        const ready = 'ready-for-agent'
+        addFeature(scratchDir, 'zeta', [
+            [2, ready, 'beta 01'],
+            [1, ready, 'gamma 01'],
+        ])
+        addFeature(scratchDir, 'alpha', [
+            [1, ready, 'beta 05'],
+            [2, ready, 'gamma 01'],
+            [3, ready, 'beta 02'],
+        ])
+        addFeature(scratchDir, 'beta', [
+            [1, ready, 'None'],
+            [2, ready, 'None'],
+            [5, ready, 'None'],
+        ])
+        addFeature(scratchDir, 'gamma', [[1, ready, 'None']])
+        const names = ['zeta', 'alpha', 'beta', 'gamma']
+        const once = renderLines(load, names)
+        const twice = renderLines(load, names)
+
+        const alphaAt = once.findIndex(l => l.startsWith('alpha ('))
+        const zetaAt = once.findIndex(l => l.startsWith('zeta ('))
+        t.ok(alphaAt >= 0 && alphaAt < zetaAt, 'alpha block before zeta')
+
+        const beta = once.indexOf('  alpha waits on beta')
+        const gamma = once.indexOf('  alpha waits on gamma')
+        t.ok(beta >= 0 && beta < gamma, 'beta group before gamma group')
+
+        const a01 = lineIndex(once, ['alpha/01', 'beta/05'])
+        const a03 = lineIndex(once, ['alpha/03', 'beta/02'])
+        t.ok(a01 >= 0 && a03 > a01, 'alpha/01 line before alpha/03 line')
+
+        t.equal(twice.join('\n'), once.join('\n'), 'rendering twice matches')
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('AC2.11: unblocked features share one line', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        rebaseBlog(scratchDir)
+        const lines = renderLines(load, [
+            'analytics', 'held-import-review', 'newsletter-audit',
+        ])
+        const withAnalytics = lines.filter(l => l.includes('analytics'))
+        t.equal(withAnalytics.length, 1, 'one line names analytics')
+        t.ok(
+            withAnalytics[0].includes('newsletter-audit'),
+            'that line also names newsletter-audit'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+
+    const fresh = makeScratch()
+    try {
+        const ready = 'ready-for-agent'
+        addFeature(fresh.scratchDir, 'alpha', [[1, ready, 'None']])
+        addFeature(fresh.scratchDir, 'beta', [[1, ready, 'None']])
+        const lines = renderLines(fresh.load, ['alpha', 'beta'])
+        t.equal(lines.length, 1, 'only unblocked features give one line')
+        t.ok(
+            lines[0].includes('alpha') && lines[0].includes('beta'),
+            'that line names both features'
+        )
+    } finally {
+        rmSync(fresh.root, { recursive:true, force:true })
+    }
+})
+
+test('AC2.11: a misspelt feature warning is shown once, last', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        rebaseBlog(scratchDir)
+        addFeature(scratchDir, 'analytics', [
+            [1, 'ready-for-agent', 'None'],
+            [2, 'ready-for-agent', 'newsleter-audit 15'],
+        ])
+        const lines = renderLines(load, [
+            'analytics', 'held-import-review', 'newsletter-audit',
+        ])
+        const hits = lines.filter(l => l.includes('newsleter-audit'))
+        t.equal(hits.length, 1, 'the misspelt name appears once')
+        t.equal(
+            lineIndex(lines, ['newsleter-audit']),
+            lines.length - 1,
+            'and it is on the last line'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('AC3.4: a human-gated upstream is shown after the count', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        addFeature(scratchDir, 'alpha', [
+            [1, 'ready-for-agent', 'beta 04'],
+        ])
+        addFeature(scratchDir, 'beta', [
+            [4, 'ready-for-human', 'None'],
+        ])
+        const lines = renderLines(load, ['alpha', 'beta'])
+        const count = lineIndex(lines, ['0 of 1'])
+        t.ok(count >= 0, 'the count line is shown')
+        t.ok(
+            lineIndex(
+                lines,
+                ['alpha/01', 'beta/04', 'ready-for-human'],
+                count
+            ) > count,
+            'a line names the human-gated ref after the count'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('AC3.6: a cycle is shown after the count', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        const ready = 'ready-for-agent'
+        addFeature(scratchDir, 'alpha', [[1, ready, 'beta 01']])
+        addFeature(scratchDir, 'beta', [[1, ready, 'alpha 01']])
+        const lines = renderLines(load, ['alpha', 'beta'])
+        const count = lineIndex(lines, ['0 of 1'])
+        t.ok(count >= 0, 'the count line is shown')
+        t.ok(
+            lineIndex(lines, ['alpha/01', 'beta/01'], count) > count,
+            'a line names both cycle tickets after the count'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('AC3.5: a missing ref is shown with no Run together line', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        const ready = 'ready-for-agent'
+        addFeature(scratchDir, 'alpha', [[1, ready, 'beta 40']])
+        addFeature(scratchDir, 'beta', [[1, ready, 'None']])
+        const lines = renderLines(load, ['alpha', 'beta'])
+        t.ok(
+            lineIndex(lines, ['alpha/01', 'beta/40']) >= 0,
+            'a line names alpha/01 and beta/40'
+        )
+        const bare = lines.findIndex(l => (
+            l.includes('beta') && !l.includes('/')
+        ))
+        t.ok(bare >= 0, 'the not-waiting line names beta')
+        t.ok(
+            !lines[bare].includes('alpha'),
+            'the not-waiting line does not name alpha'
+        )
+        t.equal(lineIndex(lines, ['picker']), -1, 'no picker line')
     } finally {
         rmSync(root, { recursive:true, force:true })
     }
