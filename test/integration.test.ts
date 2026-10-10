@@ -6629,6 +6629,35 @@ test('graph --spec - a nested feature is named by its path',
     }
 )
 
+test('graph - a Run together hint names a nested feature the picker lacks',
+    async t => {
+        const cwd = graphProject({
+            launch:[[1, 'ready-for-agent', 'rollout/billing 01']],
+            'newsletter-audit':[[16, 'ready-for-agent', 'None']],
+            'rollout/billing':[
+                [1, 'ready-for-agent', 'newsletter-audit 16'],
+            ],
+        })
+        try {
+            const { code, stdout } = await spawnCli(
+                ['graph'], { cwd, closeStdin:false }
+            )
+            t.equal(code, 0, 'exits 0 without opening the picker')
+            const line = stdout.split('\n')
+                .find(l => l.includes('Run together:')) ?? ''
+            t.ok(line.includes('rollout/billing'),
+                'the Run together line names the nested feature')
+            const hint = line.slice(line.lastIndexOf('(') + 1)
+            t.ok(hint.includes('rollout/billing'),
+                'the parenthetical names the feature the picker lacks')
+            t.ok(!hint.includes('launch'),
+                'the parenthetical omits features the picker lists')
+        } finally {
+            rmSync(cwd, { recursive:true, force:true })
+        }
+    }
+)
+
 test('graph --spec - a complete feature is still named explicitly',
     async t => {
         const cwd = graphProject({

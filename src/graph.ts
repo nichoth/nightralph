@@ -276,7 +276,31 @@ function byGroupKey (feature:string) {
     }
 }
 
-function renderBlock (report:FeatureReport, s:Suggestion):string[] {
+// The parenthetical after "Run together". With every feature in the
+// picker it says how to select them; otherwise it names the ones the
+// picker cannot list. Without a pickable set, all are pickable.
+function pickerHint (
+    features:string[],
+    pickable?:ReadonlySet<string>
+):string {
+    const hidden = pickable ?
+        features.filter(f => !pickable.has(f)) :
+        []
+    if (hidden.length === 1) return `${hidden[0]} is not in the picker`
+    if (hidden.length > 1) {
+        return `${hidden.join(', ')} are not in the picker`
+    }
+    const n = features.length
+    return n === 2 ?
+        'select both in the picker' :
+        `select all ${n} in the picker`
+}
+
+function renderBlock (
+    report:FeatureReport,
+    s:Suggestion,
+    pickable?:ReadonlySet<string>
+):string[] {
     const { feature } = report
     const lines = [`${feature} (${report.ready}/${report.total} ready)`]
 
@@ -300,9 +324,7 @@ function renderBlock (report:FeatureReport, s:Suggestion):string[] {
     // is nothing to select together.
     const n = s.features.length
     if (n > 1) {
-        const hint = n === 2 ?
-            'select both in the picker' :
-            `select all ${n} in the picker`
+        const hint = pickerHint(s.features, pickable)
         lines.push(`  Run together: ${s.features.join(', ')} (${hint})`)
     }
     // Under "Run together" when there is one, else at group level
@@ -335,17 +357,21 @@ function renderBlock (report:FeatureReport, s:Suggestion):string[] {
 /**
  * The `graph` command's text: one block per feature that waits on
  * another, one line naming the features that do not, then the typo
- * warnings. Plain text, no color.
+ * warnings. Plain text, no color. `pickable` is the set of features
+ * the picker lists; a Run together hint names any suggested feature
+ * outside it. Omitted, every feature counts as pickable.
  */
 export function renderGraph (
     reports:ReadonlyArray<FeatureReport>,
-    warnings:ReadonlyArray<BlockerWarning>
+    warnings:ReadonlyArray<BlockerWarning>,
+    pickable?:ReadonlySet<string>
 ):string {
     const blocks:string[][] = []
     const free:string[] = []
     for (const r of reports) {
-        if (r.suggestion) blocks.push(renderBlock(r, r.suggestion))
-        else free.push(r.feature)
+        if (r.suggestion) {
+            blocks.push(renderBlock(r, r.suggestion, pickable))
+        } else free.push(r.feature)
     }
     if (free.length > 0) {
         blocks.push([`Not waiting on other features: ${free.join(', ')}`])

@@ -137,9 +137,9 @@ its tests.
 - Exit codes: 0 when every ticket finished or nothing was ready, 1
   when tickets were left unfinished or on a usage error (with help
   text), 2 on a runtime error (`formatErrorMessage`, no stack).
-  Every yargs command handler in `src/index.ts` is async: only a
-  rejected promise reaches `.fail()`, and a sync throw escapes
-  `.parse()` as a raw stack trace.
+  Every yargs command handler in `src/index.ts` returns a promise:
+  only a rejected promise reaches `.fail()`, and a sync throw
+  escapes `.parse()` as a raw stack trace.
 
 ### Tickets and prompts
 - Tickets are identified by `ticketKey(feature, num)` in every map

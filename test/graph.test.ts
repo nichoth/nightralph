@@ -290,9 +290,13 @@ function lineIndex (
         parts.every(p => l.includes(p)))
 }
 
-function renderLines (load:LoadFn, names:string[]):string[] {
+function renderLines (
+    load:LoadFn,
+    names:string[],
+    pickable?:ReadonlySet<string>
+):string[] {
     const { reports, warnings } = buildGraph(load, names)
-    return renderGraph(reports, warnings).split('\n')
+    return renderGraph(reports, warnings, pickable).split('\n')
 }
 
 // A group header names the block feature or an upstream feature but
@@ -607,6 +611,80 @@ test('AC3.6: a cycle is shown after the count', t => {
         rmSync(root, { recursive:true, force:true })
     }
 })
+
+// The hint is the parenthetical after the last "(" on the Run
+// together line.
+function runTogetherLine (lines:string[]):string {
+    return lines.find(l => l.includes('Run together')) ?? ''
+}
+
+function parenthetical (line:string):string {
+    return line.slice(line.lastIndexOf('(') + 1)
+}
+
+// The target's suggestion reaches a nested feature that the picker
+// does not list, so its hint must not tell the user to select it.
+function nestedRollout (scratchDir:string):void {
+    const ready = 'ready-for-agent'
+    addFeature(scratchDir, 'hir', [[1, ready, 'rollout/billing 01']])
+    addFeature(scratchDir, 'newsletter-audit', [[16, ready, 'None']])
+    addFeature(scratchDir, 'rollout/billing', [
+        [1, ready, 'newsletter-audit 16'],
+    ])
+}
+
+test('a Run together hint names a feature the picker cannot list', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        nestedRollout(scratchDir)
+        const pickable = new Set(['hir', 'newsletter-audit'])
+        const lines = renderLines(load, ['hir', 'newsletter-audit'], pickable)
+        const run = runTogetherLine(lines)
+        t.ok(run.includes('picker'), 'the Run together line has a hint')
+        t.ok(
+            parenthetical(run).includes('rollout/billing'),
+            'the hint names the nested feature'
+        )
+        t.ok(
+            !parenthetical(run).includes('newsletter-audit') &&
+                !parenthetical(run).includes('hir'),
+            'the hint names no feature the picker lists'
+        )
+        const header = lineIndex(lines, ['hir waits on'])
+        t.ok(
+            header >= 0 && lines.indexOf(run) > header,
+            'the Run together line comes after the block header'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('a Run together hint with every feature pickable is today\'s hint',
+    t => {
+        const { root, scratchDir, load } = makeScratch()
+        try {
+            nestedRollout(scratchDir)
+            const names = ['hir', 'newsletter-audit', 'rollout/billing']
+            const all = new Set(names)
+            const run = runTogetherLine(renderLines(load, names, all))
+            t.ok(run.includes('picker'), 'the Run together line has a hint')
+            const hint = parenthetical(run)
+            t.ok(
+                names.every(n => !hint.includes(n)),
+                'the hint names none of the features'
+            )
+            const omitted = runTogetherLine(renderLines(load, names))
+            t.equal(
+                parenthetical(omitted),
+                hint,
+                'an omitted pickable set gives the same hint'
+            )
+        } finally {
+            rmSync(root, { recursive:true, force:true })
+        }
+    }
+)
 
 test('AC3.5: a missing ref is shown with no Run together line', t => {
     const { root, scratchDir, load } = makeScratch()

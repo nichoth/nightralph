@@ -275,6 +275,10 @@ yargs(hideBin(process.argv))
 async function runGraph (spec:string|undefined):Promise<void> {
     const cwd = process.cwd()
     const scratchDir = join(cwd, '.scratch')
+    // The features the picker lists. A Run together hint that names
+    // any other feature must say so, since the picker cannot select it.
+    const features = findFeatureDirs(cwd).map(f => f.name)
+    const pickable = new Set(features)
     let names:string[]
     if (spec) {
         const dir = join(scratchDir, spec, 'issues')
@@ -284,7 +288,7 @@ async function runGraph (spec:string|undefined):Promise<void> {
         }
         names = [spec]
     } else {
-        names = findFeatureDirs(cwd).map(f => f.name)
+        names = features
         if (names.length === 0) {
             console.error(NO_FEATURES_MESSAGE)
             process.exit(2)
@@ -294,7 +298,7 @@ async function runGraph (spec:string|undefined):Promise<void> {
         list => loadSelection(scratchDir, list),
         names
     )
-    console.log(renderGraph(reports, warnings))
+    console.log(renderGraph(reports, warnings, pickable))
 }
 
 function isGitRepo ():boolean {

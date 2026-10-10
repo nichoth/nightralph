@@ -338,7 +338,9 @@ suggestion is checked by simulating a run of those features with the
 same wave logic as `--dry-run`, assuming every ticket succeeds. The
 line under it counts how many of the feature's `ready-for-agent`
 tickets become runnable. That total can differ from the header's,
-which counts every ticket, as the picker does.
+which counts every ticket, as the picker does. A suggested feature the
+picker does not list, such as a nested one like `rollout/billing`, is
+named in the parenthetical as not in the picker.
 
 Some tickets can't run whatever you select:
 
