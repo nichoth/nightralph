@@ -314,7 +314,8 @@ Small orchestrator that runs a single-agent session per issue.
   (the final `SubagentStats` from `src/stats.ts`, spread
   in, so `costUsd` is absent, not `undefined`, until a
   `result` message reports it); codex and pi results never
-  carry them
+  carry them, and neither does a claude result when the
+  spawn itself fails (the process `'error'` path)
 - **TicketOutcome**: discriminated union returned by
   `runTicketAttempts`; `'no-commits'` carries
   `worktreePath:string` and `branchName:string`;
@@ -1113,8 +1114,8 @@ Small orchestrator that runs a single-agent session per issue.
   pi never do), else `Subagents: <n> started across <m>
   agent run(s), cost $<x.xx>`, with
   ` (cost from <k> of <m> runs)` appended when
-  `withCost < agentRuns` (a killed agent never reports a
-  cost)
+  `withCost < agentRuns` (an agent killed before its
+  `result` message reports no cost)
 - **Guarantees**: stats are advisory; nothing in the
   orchestrator reads them to decide an outcome
 
@@ -1177,7 +1178,8 @@ Small orchestrator that runs a single-agent session per issue.
   types `ReviewStatus`, `Finding`, `FixRecord`,
   `ReviewEntryInput`, `ReviewEntry`, `ReviewOutcome`,
   `FixFailure`, `FixResult`, `ReviewDeps`,
-  `SpawnAgentFn`, `ReviewPassOpts`; pure `reviewExcludeFor`, `reviewDiffCommand`,
+  `SpawnAgentFn`, `ReviewPassOpts`; pure `reviewExcludeFor`,
+  `reviewDiffCommand`,
   `renderReviewPrompt`, `renderFixPrompt`,
   `parseFindings`, `markFixed`, `renderReviewEntry`,
   `parseReviewEntries`, `selectReviewBase`,
