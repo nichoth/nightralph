@@ -2307,6 +2307,24 @@ function indentFilenames (tickets:ReadonlyArray<Ticket>):string {
 }
 
 /**
+ * The typo paragraph: words in **Blocked by:** lines that look like
+ * a feature name but match no feature dir. `[]` when there are none.
+ */
+export function renderTypoWarnings (
+    warnings:ReadonlyArray<BlockerWarning>
+):string[] {
+    const typos = warnings.filter(w => w.kind === 'typo')
+    if (typos.length === 0) return []
+    const n = typos.length
+    return [
+        `${n} word${n === 1 ? '' : 's'} in a **Blocked by:** ` +
+        `line look${n === 1 ? 's' : ''} like a feature name but ` +
+        'match no .scratch/<name>/issues directory:',
+        ...typos.map(w => `  ${w.ticket}: ${w.text}`),
+    ]
+}
+
+/**
  * The paragraphs that explain why open tickets did not run, each
  * preceded by a blank line: ready-for-human tickets and what they
  * block, then tickets waiting on blockers outside the run, blocker
@@ -2404,16 +2422,7 @@ function explainOpen (
             ...missing,
         )
     }
-    const typos = warnings.filter(w => w.kind === 'typo')
-    if (typos.length > 0) {
-        const n = typos.length
-        blockers.push(
-            `${n} word${n === 1 ? '' : 's'} in a **Blocked by:** ` +
-            `line look${n === 1 ? 's' : ''} like a feature name but ` +
-            'match no .scratch/<name>/issues directory:',
-            ...typos.map(w => `  ${w.ticket}: ${w.text}`),
-        )
-    }
+    blockers.push(...renderTypoWarnings(warnings))
     if (blockers.length > 0) lines.push('', ...blockers)
 
     return lines
