@@ -10,6 +10,7 @@ import {
     type Ticket,
 } from './orchestrator.js'
 import { ticketLabel } from './display.js'
+import { upstreamOf } from './graph.js'
 import {
     parseBlockerField,
     resolveBlockers,
@@ -149,11 +150,13 @@ export type FeatureCounts = {
     ready:number;
     total:number;
     badBlockers:number;   // refs that match no ticket
+    waitsOn:string[];     // features with unfinished blockers, sorted
 }
 
 /**
  * Counts for one feature as if it ran alone: the same
- * loadSelection a `--spec <name>` run uses.
+ * loadSelection a `--spec <name>` run uses. `waitsOn` names the
+ * other features its ready-for-agent tickets wait on.
  */
 export function featureCounts (
     scratchDir:string,
@@ -164,6 +167,8 @@ export function featureCounts (
         ready:findReadyTickets(tickets).length,
         total:tickets.length,
         badBlockers:warnings.filter(w => w.kind === 'missing').length,
+        waitsOn:[...upstreamOf(tickets).keys()]
+            .sort((a, b) => a.localeCompare(b)),
     }
 }
 
@@ -176,7 +181,10 @@ export function featureChoiceLabel (
         '' :
         `, ${c.badBlockers} bad blocker` +
             (c.badBlockers === 1 ? '' : 's')
-    return `${name} (${c.ready}/${c.total} ready${bad})`
+    const waits = c.waitsOn.length === 0 ?
+        '' :
+        `, waits on ${c.waitsOn.join(', ')}`
+    return `${name} (${c.ready}/${c.total} ready${bad}${waits})`
 }
 
 const ALL_VALUE = '__all__'

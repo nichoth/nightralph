@@ -9,6 +9,7 @@ import {
     resolveIssuesDir,
     loadSelection,
     featureCounts,
+    featureChoiceLabel,
 } from '../src/resolve.js'
 import {
     scanTickets,
@@ -332,7 +333,9 @@ test('featureCounts AC1.11: the picker counts what a run would', t => {
     }])
     const counts = featureCounts(scratchDir, HIR)
     t.deepEqual(
-        counts, { ready:1, total:2, badBlockers:0 }, 'counts'
+        counts,
+        { ready:1, total:2, badBlockers:0, waitsOn:[] },
+        'counts'
     )
     const run = loadSelection(scratchDir, [HIR])
     t.equal(
@@ -357,3 +360,124 @@ test('featureCounts AC2.4: only missing refs are bad blockers', t => {
         'a blocker that matches no ticket is bad'
     )
 })
+
+test('featureCounts AC1.1: names the feature it waits on', t => {
+    const scratchDir = crossFeatureTree('ready-for-agent')
+    t.deepEqual(
+        featureCounts(scratchDir, HIR).waitsOn, [NA], 'waitsOn'
+    )
+    const label = featureChoiceLabel(scratchDir, HIR)
+    t.ok(
+        label.endsWith(`, waits on ${NA})`),
+        'label ends with the upstream feature'
+    )
+})
+
+test('featureCounts AC1.2: several upstream features, all named', t => {
+    const scratchDir = crossFeatureTree('ready-for-agent')
+    addFeature(scratchDir, 'zeta-feat', [{
+        filename:'01-x.md',
+        body:ticketBody('ready-for-agent', 'None'),
+    }])
+    addFeature(scratchDir, 'beta-feat', [{
+        filename:'01-x.md',
+        body:ticketBody('ready-for-agent', 'None'),
+    }])
+    addFeature(scratchDir, HIR, [
+        {
+            filename:'02-zeta.md',
+            body:ticketBody('ready-for-agent', 'zeta-feat 01'),
+        },
+        {
+            filename:'03-beta.md',
+            body:ticketBody('ready-for-agent', 'beta-feat 01'),
+        },
+    ])
+    const { waitsOn } = featureCounts(scratchDir, HIR)
+    t.deepEqual(
+        waitsOn,
+        ['beta-feat', NA, 'zeta-feat'],
+        'sorted, none dropped'
+    )
+    const label = featureChoiceLabel(scratchDir, HIR)
+    for (const name of ['beta-feat', NA, 'zeta-feat']) {
+        t.ok(label.includes(name), `label names ${name}`)
+    }
+})
+
+test('featureCounts AC1.3: no pending ref gives the old label', t => {
+    const scratchDir = crossFeatureTree('done')
+    const c = featureCounts(scratchDir, HIR)
+    t.deepEqual(c.waitsOn, [], 'waitsOn is empty')
+    t.equal(
+        featureChoiceLabel(scratchDir, HIR),
+        `${HIR} (${c.ready}/${c.total} ready)`,
+        'label has no waits clause'
+    )
+})
+
+test('featureCounts AC1.4: done, missing and human refs add nothing', t => {
+    const { scratchDir } = makeTempScratch()
+    addFeature(scratchDir, NA, [{
+        filename:'16-done.md',
+        body:ticketBody('done', 'None'),
+    }])
+    addFeature(scratchDir, 'other-feat', [{
+        filename:'01-x.md',
+        body:ticketBody('ready-for-agent', 'None'),
+    }])
+    addFeature(scratchDir, HIR, [
+        {
+            filename:'01-done-ref.md',
+            body:ticketBody('ready-for-agent', 'newsletter-audit 16'),
+        },
+        {
+            filename:'02-missing.md',
+            body:ticketBody('ready-for-agent', 'newsletter-audit 40'),
+        },
+        {
+            filename:'03-done-ticket.md',
+            body:ticketBody('done', 'other-feat 01'),
+        },
+        {
+            filename:'04-human.md',
+            body:ticketBody('ready-for-human', 'other-feat 01'),
+        },
+    ])
+    t.deepEqual(
+        featureCounts(scratchDir, HIR).waitsOn,
+        [],
+        'waitsOn is empty'
+    )
+})
+
+test('featureCounts AC1.5: ready is still the run-alone count', t => {
+    const scratchDir = crossFeatureTree('ready-for-agent')
+    const c = featureCounts(scratchDir, HIR)
+    const alone = loadSelection(scratchDir, [HIR]).tickets
+    t.equal(
+        c.ready,
+        findReadyTickets(alone).length,
+        'ready matches a solo run'
+    )
+    t.equal(c.ready, 0, 'the pending blocker keeps it from running alone')
+    t.equal(c.total, 1, 'total is the feature alone')
+})
+
+test('featureChoiceLabel AC1.6: bad blockers sit between ready and waits',
+    t => {
+        const scratchDir = crossFeatureTree('ready-for-agent')
+        addFeature(scratchDir, HIR, [{
+            filename:'02-bad.md',
+            body:ticketBody('ready-for-agent', 'newsletter-audit 40'),
+        }])
+        const label = featureChoiceLabel(scratchDir, HIR)
+        const ready = label.indexOf('ready')
+        const bad = label.indexOf('bad blocker')
+        const waits = label.indexOf('waits on')
+        t.ok(
+            ready < bad && bad < waits,
+            `order is ready, bad blockers, waits on: ${label}`
+        )
+    }
+)
