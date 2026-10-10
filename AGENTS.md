@@ -77,6 +77,8 @@ merges into that branch.
 - `src/resolve.ts` -- feature discovery, the picker, and
   `loadSelection`, the one ticket loader
 - `src/blockers.ts` -- `**Blocked by:**` parsing and resolution
+- `src/graph.ts` -- cross-feature waits and the `graph` command's
+  suggestion
 - `src/skills/` -- bundled skill definitions
 - `src/docs-templates/` -- doc templates copied to target projects
 
@@ -108,6 +110,8 @@ its tests.
   since `.scratch/` may be ignored).
 - Agents stay inside their worktree and never `git push`; the
   prompt rules in `src/rules.ts` say so.
+- `nightralph graph` is read-only: no git, no provider preflight,
+  no writes. It reads the checkout in place.
 
 ### Processes
 - Agents and test commands run in their own process group and
@@ -138,10 +142,13 @@ its tests.
 - Tickets are identified by `ticketKey(feature, num)` in every map
   and set, since numbers repeat across features.
 - `blockerSatisfied` is the one readiness check; ready tickets,
-  dry-run waves and deadlock detection all use it, so they agree.
+  dry-run waves, deadlock detection and the `graph` suggestion all
+  use it, so they agree.
 - Prompt rule lines live in `src/rules.ts`, shared by the ticket,
   merge, fix and review prompts. Change a rule there so the
   prompts cannot drift.
+- `renderTypoWarnings` in `src/orchestrator.ts` is the one typo
+  paragraph, shared by the nothing-ready explanation and `graph`.
 - Provider-specific options (`--max-turns`, `--prefer-subagent`)
   warn and are dropped on providers without them. Each provider's
   effort ladder is in `src/retry.ts`.
@@ -160,6 +167,10 @@ its tests.
   `rules` import no values from `src/orchestrator.ts`; `review`
   imports only its `AgentResult` type and takes `spawnAgent` and
   the process registry as injected `deps`.
+- `graph` imports values only from `orchestrator` and `display`
+  and takes its loader as an injected `LoadFn`. `resolve` imports
+  `upstreamOf` from `graph`, so a value import of `loadSelection`
+  would be a cycle.
 
 ## Keeping this file small
 A line belongs here when the code cannot tell a reader: a rule
