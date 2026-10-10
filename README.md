@@ -200,7 +200,8 @@ Flags:
 
 * When `--spec <name>` is omitted, the CLI looks for
   `.scratch/<feature>/issues/` directories. If multiple features exist,
-  **it prompts you to pick one** with an interactive selector.
+  **it prompts you to pick one or more** with an interactive
+  selector.
 * Tickets are selected by `**Status:** ready-for-agent` in the file body.
 * Dependencies are read from the `**Blocked by:**` field; the orchestrator
   skips tickets whose blockers haven't completed.
@@ -301,6 +302,18 @@ is `.scratch/<name>/issues/`.
 in other features, and the features to select together to unblock
 them. It is read-only: it runs no git, no provider check, and
 writes nothing.
+
+Each feature's line gives the picker's counts for a run of that
+feature alone: `(0/2 ready)` means none of its two tickets is ready
+to run on its own. A `waits on` line names a feature whose tickets
+block this one, and the picker's labels carry the same `waits on`
+names. `Run together` lists the features to select in the picker.
+Its count comes from a dry run of the waves over those features
+(`simulateRun`), so it reports what a real run would schedule.
+Tickets that can never run appear under `stays blocked` with the ref
+that stops them, and `deadlocked` names tickets in or behind a cycle.
+Features with no cross-feature wait are listed on the last line, and
+typo warnings come after that.
 
 With `--spec <name>` it shows only that feature. The sample below
 is from a run with three features: `held-import-review` has a ticket
