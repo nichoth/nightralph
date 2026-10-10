@@ -295,6 +295,21 @@ function renderLines (load:LoadFn, names:string[]):string[] {
     return renderGraph(reports, warnings).split('\n')
 }
 
+// A group header names the block feature or an upstream feature but
+// no ticket, so it has no "/" in it.
+function headerAt (lines:string[], parts:string[]):number {
+    return lines.findIndex(l => (
+        parts.every(p => l.includes(p)) && !l.includes('/')
+    ))
+}
+
+function blockOf (lines:string[], feature:string):string[] {
+    const start = lines.findIndex(l => l.startsWith(`${feature} (`))
+    const rest = lines.slice(start)
+    const blank = rest.indexOf('')
+    return blank < 0 ? rest : rest.slice(0, blank)
+}
+
 test('AC2.2 and AC3.1: rebase.blog ref lines and Run together', t => {
     const { root, scratchDir, load } = makeScratch()
     try {
@@ -355,6 +370,73 @@ test('AC2.3: upstream groups inside a block are ordered', t => {
     }
 })
 
+test('AC2.3: groups put the target first, then sort by name', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        const ready = 'ready-for-agent'
+        // The target is a late name, and beta/02 names alpha after
+        // beta/01 names gamma, so ticket order and name order differ.
+        addFeature(scratchDir, 'alpha', [[1, ready, 'delta 01']])
+        addFeature(scratchDir, 'beta', [
+            [1, ready, 'gamma 01'],
+            [2, ready, 'alpha 01'],
+        ])
+        addFeature(scratchDir, 'delta', [[1, ready, 'None']])
+        addFeature(scratchDir, 'gamma', [[1, ready, 'delta 01']])
+        const lines = renderLines(load, [
+            'alpha', 'beta', 'delta', 'gamma',
+        ])
+        const block = blockOf(lines, 'beta')
+        const betaAlpha = headerAt(block, ['beta', 'alpha'])
+        const betaGamma = headerAt(block, ['beta', 'gamma'])
+        const alphaDelta = headerAt(block, ['alpha', 'delta'])
+        const gammaDelta = headerAt(block, ['gamma', 'delta'])
+        t.ok(
+            betaAlpha >= 0 && betaGamma >= 0 &&
+                alphaDelta >= 0 && gammaDelta >= 0,
+            'all four group headers are in the block'
+        )
+        t.ok(
+            betaAlpha < betaGamma,
+            'the upstream groups of beta sort by name'
+        )
+        t.ok(
+            betaGamma < alphaDelta,
+            'the groups of the block feature come first'
+        )
+        t.ok(
+            alphaDelta < gammaDelta,
+            'the other groups sort by from-feature name'
+        )
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('AC2.2: the picker hint names all three features', t => {
+    const { root, scratchDir, load } = makeScratch()
+    try {
+        const ready = 'ready-for-agent'
+        addFeature(scratchDir, 'alpha', [
+            [1, ready, 'beta 01, gamma 01'],
+        ])
+        addFeature(scratchDir, 'beta', [[1, ready, 'None']])
+        addFeature(scratchDir, 'gamma', [[1, ready, 'None']])
+        const lines = renderLines(load, ['alpha', 'beta', 'gamma'])
+        const hint = lineIndex(lines, [
+            'alpha', 'beta', 'gamma', 'picker', '3',
+        ])
+        t.ok(hint >= 0, 'one line names all three and the count')
+        t.ok(!lines[hint].includes('/'), 'the hint line names no ticket')
+    } finally {
+        rmSync(root, { recursive:true, force:true })
+    }
+})
+
+test('renderGraph with no reports is an empty string', t => {
+    t.equal(renderGraph([], []), '', 'nothing to render')
+})
+
 test('AC2.9: only the target and its direct needs are shown', t => {
     const { root, scratchDir, load } = makeScratch()
     try {
@@ -409,9 +491,12 @@ test('AC2.10: order is by name and number, and output is stable', t => {
         const zetaAt = once.findIndex(l => l.startsWith('zeta ('))
         t.ok(alphaAt >= 0 && alphaAt < zetaAt, 'alpha block before zeta')
 
-        const beta = once.indexOf('  alpha waits on beta')
-        const gamma = once.indexOf('  alpha waits on gamma')
-        t.ok(beta >= 0 && beta < gamma, 'beta group before gamma group')
+        const betaAt = headerAt(once, ['alpha', 'beta'])
+        const gammaAt = headerAt(once, ['alpha', 'gamma'])
+        t.ok(
+            betaAt >= 0 && betaAt < gammaAt,
+            'beta group before gamma group'
+        )
 
         const a01 = lineIndex(once, ['alpha/01', 'beta/05'])
         const a03 = lineIndex(once, ['alpha/03', 'beta/02'])
