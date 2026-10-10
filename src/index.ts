@@ -269,8 +269,10 @@ yargs(hideBin(process.argv))
     .parse()
 
 // Read-only: no provider, no git, no writes. Reads the current
-// checkout, like the picker.
-function runGraph (spec:string|undefined):void {
+// checkout, like the picker. Async so a throw becomes a rejected
+// promise that yargs routes to .fail() (exit 2, no stack); a sync
+// throw escapes .parse() as a raw stack trace.
+async function runGraph (spec:string|undefined):Promise<void> {
     const cwd = process.cwd()
     const scratchDir = join(cwd, '.scratch')
     let names:string[]

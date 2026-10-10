@@ -6669,6 +6669,22 @@ test('graph --spec - an unknown feature exits 2 without a picker',
     }
 )
 
+test('graph - a repeated --spec exits 2 with no stack trace',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const { code, stderr } = await spawnCli(
+                ['graph', '--spec', 'a', '--spec', 'b'], { cwd }
+            )
+            t.equal(code, 2, 'exits 2 for a runtime error')
+            t.ok(stderr.length > 0, 'explains on stderr')
+            t.ok(!/^\s+at /m.test(stderr), 'prints no stack frames')
+        } finally {
+            rmSync(cwd, { recursive:true, force:true })
+        }
+    }
+)
+
 test('graph - exits 2 with no features to show',
     async t => {
         const bare = tmp()
@@ -6684,7 +6700,7 @@ test('graph - exits 2 with no features to show',
 
             markFinished(complete, 'finished')
             const done = await spawnCli(
-                ['graph'], { cwd:complete, closeStdin:true }
+                ['graph'], { cwd:complete }
             )
             t.equal(done.code, 2,
                 'a project with only complete features exits 2')
