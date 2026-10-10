@@ -296,10 +296,14 @@ function renderLines (load:LoadFn, names:string[]):string[] {
 }
 
 // A group header names the block feature or an upstream feature but
-// no ticket, so it has no "/" in it.
+// no ticket, so it has no "/" in it. The "Run together" line also
+// names features and has no "/", so it is excluded by its "picker"
+// hint text.
 function headerAt (lines:string[], parts:string[]):number {
     return lines.findIndex(l => (
-        parts.every(p => l.includes(p)) && !l.includes('/')
+        parts.every(p => l.includes(p)) &&
+            !l.includes('/') &&
+            !l.includes('picker')
     ))
 }
 
@@ -357,10 +361,7 @@ test('AC2.3: upstream groups inside a block are ordered', t => {
         addFeature(scratchDir, 'beta', [[1, ready, 'gamma 01']])
         addFeature(scratchDir, 'gamma', [[1, ready, 'None']])
         const lines = renderLines(load, ['alpha', 'beta', 'gamma'])
-        const start = lines.findIndex(l => l.startsWith('alpha ('))
-        const rest = lines.slice(start)
-        const blank = rest.indexOf('')
-        const block = blank < 0 ? rest : rest.slice(0, blank)
+        const block = blockOf(lines, 'alpha')
         const first = lineIndex(block, ['alpha/01', 'beta/01'])
         const second = lineIndex(block, ['beta/01', 'gamma/01'])
         t.ok(first >= 0, 'alpha/01 line names beta/01')
@@ -370,7 +371,7 @@ test('AC2.3: upstream groups inside a block are ordered', t => {
     }
 })
 
-test('AC2.3: groups put the target first, then sort by name', t => {
+test('AC2.3 and AC2.10: groups put the target first, then sort', t => {
     const { root, scratchDir, load } = makeScratch()
     try {
         const ready = 'ready-for-agent'
@@ -413,7 +414,7 @@ test('AC2.3: groups put the target first, then sort by name', t => {
     }
 })
 
-test('AC2.2: the picker hint names all three features', t => {
+test('AC3.1 (n > 2): the picker hint names all three features', t => {
     const { root, scratchDir, load } = makeScratch()
     try {
         const ready = 'ready-for-agent'
