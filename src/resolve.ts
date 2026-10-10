@@ -189,6 +189,10 @@ export function featureChoiceLabel (
 
 const ALL_VALUE = '__all__'
 
+export const NO_FEATURES_MESSAGE =
+    'No .scratch/<feature>/issues/ directories found.\n' +
+    'Provide --spec <feature-name>.'
+
 export async function resolveIssuesDir (
     specName:string|undefined,
     cwd:string = process.cwd(),
@@ -205,10 +209,7 @@ export async function resolveIssuesDir (
     const features = findFeatureDirs(cwd)
 
     if (features.length === 0) {
-        console.error(
-            'No .scratch/<feature>/issues/ directories ' +
-            'found.\nProvide --spec <feature-name>.'
-        )
+        console.error(NO_FEATURES_MESSAGE)
         process.exit(2)
     }
 

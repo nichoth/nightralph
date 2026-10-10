@@ -32,9 +32,11 @@ import {
     resolveIssuesDir,
     getScriptDir,
     loadSelection,
+    NO_FEATURES_MESSAGE,
     type FeatureSelection,
     type BlockerWarning,
 } from './resolve.js'
+import { buildGraph, renderGraph } from './graph.js'
 import {
     getRepoRoot,
     getRepoName,
@@ -97,6 +99,16 @@ yargs(hideBin(process.argv))
                 tracker,
             })
         }
+    )
+    .command(
+        'graph',
+        'Show which features wait on tickets in other features',
+        y => y.option('spec', {
+            type:'string',
+            describe:'Feature name (resolves .scratch/<name>/); ' +
+                'shows that feature and what it waits on',
+        }),
+        argv => runGraph(argv.spec)
     )
     .command(
         '$0 <provider> [turns]',
@@ -255,6 +267,33 @@ yargs(hideBin(process.argv))
         process.exit(1)
     })
     .parse()
+
+// Read-only: no provider, no git, no writes. Reads the current
+// checkout, like the picker.
+function runGraph (spec:string|undefined):void {
+    const cwd = process.cwd()
+    const scratchDir = join(cwd, '.scratch')
+    let names:string[]
+    if (spec) {
+        const dir = join(scratchDir, spec, 'issues')
+        if (!existsSync(dir)) {
+            console.error(`Directory not found: ${dir}`)
+            process.exit(2)
+        }
+        names = [spec]
+    } else {
+        names = findFeatureDirs(cwd).map(f => f.name)
+        if (names.length === 0) {
+            console.error(NO_FEATURES_MESSAGE)
+            process.exit(2)
+        }
+    }
+    const { reports, warnings } = buildGraph(
+        list => loadSelection(scratchDir, list),
+        names
+    )
+    console.log(renderGraph(reports, warnings))
+}
 
 function isGitRepo ():boolean {
     try {

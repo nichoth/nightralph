@@ -31,7 +31,9 @@ import {
 } from '../src/orchestrator.js'
 import type { BlockerRef } from '../src/blockers.js'
 import { parseEntries, readEntries } from '../src/learnings.js'
-import { readProgress } from '../src/progress.js'
+import {
+    readProgress, generateProgress, checkTicket, writeProgress,
+} from '../src/progress.js'
 import { parseReviewEntries } from '../src/review.js'
 import { subagentRule } from '../src/rules.js'
 import { renderRunStats } from '../src/stats.js'
@@ -6498,6 +6500,218 @@ test('runWavesIsolated - a ticket row shows the total across attempts',
             removeWorktreesAndRepo(projectDir)
             rmSync(dataDir, { recursive:true, force:true })
             rmSync(templateDir, { recursive:true, force:true })
+        }
+    }
+)
+
+// -- graph command --
+
+type GraphRow = [num:number, status:string, blockedBy:string]
+
+function graphProject (
+    features:Record<string, GraphRow[]>
+):string {
+    const cwd = tmp()
+    for (const [name, rows] of Object.entries(features)) {
+        const featureDir = join(cwd, '.scratch', name)
+        const issuesDir = join(featureDir, 'issues')
+        mkdirSync(issuesDir, { recursive:true })
+        writeFileSync(join(featureDir, 'spec.md'), `# ${name}\n`)
+        for (const [num, status, blockedBy] of rows) {
+            const file = `${String(num).padStart(2, '0')}-t.md`
+            writeFileSync(
+                join(issuesDir, file),
+                `# T\n\n**Status:** ${status}\n` +
+                `**Blocked by:** ${blockedBy}\n`
+            )
+        }
+    }
+    return cwd
+}
+
+const GRAPH_BASE:Record<string, GraphRow[]> = {
+    'held-import-review':[
+        [1, 'ready-for-agent', 'newsletter-audit 16'],
+        [2, 'ready-for-agent', '01'],
+    ],
+    'newsletter-audit':[[16, 'ready-for-agent', 'None']],
+    analytics:[[1, 'ready-for-agent', 'None']],
+}
+
+// A feature whose every ticket is done, so its progress.md marks
+// the spec complete and the picker and recursive scan skip it.
+function markFinished (cwd:string, name:string):void {
+    const featureDir = join(cwd, '.scratch', name)
+    const issuesDir = join(featureDir, 'issues')
+    const data = generateProgress(
+        name, scanTickets(issuesDir, name)
+    )
+    checkTicket(data, 1, { branch:'b', exitCode:0, done:true })
+    writeProgress(join(featureDir, 'progress.md'), data)
+}
+
+test('graph - lists the waiting feature and its blocker',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const { code, stdout } = await spawnCli(
+                ['graph'], { cwd }
+            )
+            t.equal(code, 0, 'exits 0')
+            t.ok(stdout.includes('held-import-review/01'),
+                'names the waiting ticket')
+            t.ok(stdout.includes('newsletter-audit/16'),
+                'names the blocker')
+            const waiting = stdout.split('\n')
+                .filter(l => l.startsWith('held-import-review'))
+            t.equal(waiting.length, 1,
+                'one line starts with the waiting feature')
+            const others = stdout.split('\n').filter(l =>
+                l.startsWith('newsletter-audit') ||
+                l.startsWith('analytics'))
+            t.equal(others.length, 0,
+                'unblocked features get no column-0 line')
+        } finally {
+            rmSync(cwd, { recursive:true, force:true })
+        }
+    }
+)
+
+test('graph --spec - shows the named feature and what it waits on',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const held = await spawnCli(
+                ['graph', '--spec', 'held-import-review'], { cwd }
+            )
+            t.equal(held.code, 0, 'exits 0 for a waiting feature')
+            t.ok(held.stdout.includes('held-import-review/01'),
+                'shows the waiting ticket')
+            t.ok(!held.stdout.includes('analytics'),
+                'omits unrelated features')
+
+            const solo = await spawnCli(
+                ['graph', '--spec', 'analytics'], { cwd }
+            )
+            t.equal(solo.code, 0, 'exits 0 for an unblocked feature')
+            t.ok(solo.stdout.includes('analytics'),
+                'shows the named feature')
+            t.ok(!solo.stdout.includes('held-import-review'),
+                'omits the feature that waits on it')
+            t.ok(!solo.stdout.includes('newsletter-audit/'),
+                'omits features it does not wait on')
+        } finally {
+            rmSync(cwd, { recursive:true, force:true })
+        }
+    }
+)
+
+test('graph --spec - a nested feature is named by its path',
+    async t => {
+        const cwd = graphProject({
+            ...GRAPH_BASE,
+            'rollout/billing':[
+                [1, 'ready-for-agent', 'newsletter-audit 16'],
+            ],
+        })
+        try {
+            const { code, stdout } = await spawnCli(
+                ['graph', '--spec', 'rollout/billing'], { cwd }
+            )
+            t.equal(code, 0, 'exits 0')
+            t.ok(stdout.includes('rollout/billing/01'),
+                'names the nested ticket')
+            t.ok(stdout.includes('newsletter-audit/16'),
+                'names the blocker')
+        } finally {
+            rmSync(cwd, { recursive:true, force:true })
+        }
+    }
+)
+
+test('graph --spec - a complete feature is still named explicitly',
+    async t => {
+        const cwd = graphProject({
+            ...GRAPH_BASE,
+            finished:[[1, 'ready-for-agent', 'newsletter-audit 16']],
+        })
+        try {
+            markFinished(cwd, 'finished')
+            const listed = findFeatureDirs(cwd).map(f => f.name)
+            t.ok(!listed.includes('finished'),
+                'the complete feature is hidden from discovery')
+
+            const { code, stdout } = await spawnCli(
+                ['graph', '--spec', 'finished'], { cwd }
+            )
+            t.equal(code, 0, 'exits 0')
+            t.ok(stdout.includes('finished/01'),
+                'shows the named complete feature')
+        } finally {
+            rmSync(cwd, { recursive:true, force:true })
+        }
+    }
+)
+
+test('graph --spec - an unknown feature exits 2 without a picker',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const { code, stderr, stdout } = await spawnCli(
+                ['graph', '--spec', 'nope'], { cwd }
+            )
+            t.equal(code, 2, 'exits 2')
+            t.ok(stderr.includes('nope'), 'names the missing feature')
+            t.equal(stdout, '', 'prints nothing to stdout')
+        } finally {
+            rmSync(cwd, { recursive:true, force:true })
+        }
+    }
+)
+
+test('graph - exits 2 with no features to show',
+    async t => {
+        const bare = tmp()
+        const complete = graphProject({
+            finished:[[1, 'ready-for-agent', 'None']],
+        })
+        try {
+            const none = await spawnCli(['graph'], { cwd:bare })
+            t.equal(none.code, 2, 'no .scratch exits 2')
+            t.ok(none.stderr.length > 0, 'explains on stderr')
+            t.ok(none.stderr.includes('.scratch'),
+                'stderr mentions .scratch')
+
+            markFinished(complete, 'finished')
+            const done = await spawnCli(
+                ['graph'], { cwd:complete, closeStdin:true }
+            )
+            t.equal(done.code, 2,
+                'a project with only complete features exits 2')
+        } finally {
+            rmSync(bare, { recursive:true, force:true })
+            rmSync(complete, { recursive:true, force:true })
+        }
+    }
+)
+
+test('graph - read-only, git-free, no provider or branch output',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const before = readdirSync(cwd, { recursive:true }).sort()
+            const { code, stdout, stderr } = await spawnCli(
+                ['graph'], { cwd }
+            )
+            const after = readdirSync(cwd, { recursive:true }).sort()
+            t.deepEqual(after, before, 'writes no files')
+            t.equal(code, 0, 'exits 0 outside a git repo')
+            const all = stdout + stderr
+            t.ok(!all.includes('Provider'), 'no provider preflight line')
+            t.ok(!all.includes('nightralph--'),
+                'no integration branch name')
+        } finally {
+            rmSync(cwd, { recursive:true, force:true })
         }
     }
 )
