@@ -30,6 +30,7 @@ so they can't drift as long as you install the skills with this package.
 - [Command Line Arguments](#command-line-arguments)
   * [Notes](#notes)
   * [`--spec ` option](#--spec--option)
+  * [`graph` command](#graph-command)
   * [`--prefer-subagent` option](#--prefer-subagent-option)
 - [How It Works](#how-it-works)
   * [Select a ticket](#select-a-ticket)
