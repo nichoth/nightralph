@@ -2319,7 +2319,7 @@ export function renderTypoWarnings (
     return [
         `${n} word${n === 1 ? '' : 's'} in a **Blocked by:** ` +
         `line look${n === 1 ? 's' : ''} like a feature name but ` +
-        'match no .scratch/<name>/issues directory:',
+        `match${n === 1 ? 'es' : ''} no .scratch/<name>/issues directory:`,
         ...typos.map(w => `  ${w.ticket}: ${w.text}`),
     ]
 }
