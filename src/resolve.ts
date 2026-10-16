@@ -10,6 +10,7 @@ import {
     type Ticket,
 } from './orchestrator.js'
 import { ticketLabel } from './display.js'
+import { upstreamOf } from './graph.js'
 import {
     parseBlockerField,
     resolveBlockers,
@@ -36,7 +37,7 @@ export function findFeatureDirs (cwd:string):{
     const scratchDir = join(cwd, '.scratch')
     if (!existsSync(scratchDir)) return []
     const entries = readdirSync(
-        scratchDir, { withFileTypes:true }
+        scratchDir, { withFileTypes: true }
     )
     const results:{ name:string; dir:string; spec:string }[] = []
     for (const entry of entries) {
@@ -53,9 +54,9 @@ export function findFeatureDirs (cwd:string):{
         )
         if (isSpecComplete(progressFile)) continue
         results.push({
-            name:entry.name,
-            dir:issuesDir,
-            spec:specFile,
+            name: entry.name,
+            dir: issuesDir,
+            spec: specFile,
         })
     }
     results.sort((a, b) => a.name.localeCompare(b.name))
@@ -75,7 +76,7 @@ function knownFeatureNames (scratchDir:string):Set<string> {
     const names = new Set<string>()
     const walk = (rel:string) => {
         const dir = rel === '' ? scratchDir : join(scratchDir, rel)
-        for (const e of readdirSync(dir, { withFileTypes:true })) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
             if (!e.isDirectory() || e.name === 'issues') continue
             const name = rel === '' ? e.name : `${rel}/${e.name}`
             if (existsSync(join(scratchDir, name, 'issues'))) {
@@ -133,12 +134,12 @@ export function loadSelection (
         )
         const ticket = ticketLabel(t)
         for (const word of parsed.typos) {
-            warnings.push({ ticket, kind:'typo', text:word })
+            warnings.push({ ticket, kind: 'typo', text: word })
         }
         for (const ref of t.blockers) {
             if (ref.where !== 'missing') continue
             warnings.push({
-                ticket, kind:'missing', text:blockerLabel(ref),
+                ticket, kind: 'missing', text: blockerLabel(ref),
             })
         }
     }
@@ -149,11 +150,13 @@ export type FeatureCounts = {
     ready:number;
     total:number;
     badBlockers:number;   // refs that match no ticket
+    waitsOn:string[];     // features with unfinished blockers, sorted
 }
 
 /**
  * Counts for one feature as if it ran alone: the same
- * loadSelection a `--spec <name>` run uses.
+ * loadSelection a `--spec <name>` run uses. `waitsOn` names the
+ * other features its ready-for-agent tickets wait on.
  */
 export function featureCounts (
     scratchDir:string,
@@ -161,9 +164,11 @@ export function featureCounts (
 ):FeatureCounts {
     const { tickets, warnings } = loadSelection(scratchDir, [name])
     return {
-        ready:findReadyTickets(tickets).length,
-        total:tickets.length,
-        badBlockers:warnings.filter(w => w.kind === 'missing').length,
+        ready: findReadyTickets(tickets).length,
+        total: tickets.length,
+        badBlockers: warnings.filter(w => w.kind === 'missing').length,
+        waitsOn: [...upstreamOf(tickets).keys()]
+            .sort((a, b) => a.localeCompare(b)),
     }
 }
 
@@ -176,10 +181,17 @@ export function featureChoiceLabel (
         '' :
         `, ${c.badBlockers} bad blocker` +
             (c.badBlockers === 1 ? '' : 's')
-    return `${name} (${c.ready}/${c.total} ready${bad})`
+    const waits = c.waitsOn.length === 0 ?
+        '' :
+        `, waits on ${c.waitsOn.join(', ')}`
+    return `${name} (${c.ready}/${c.total} ready${bad}${waits})`
 }
 
 const ALL_VALUE = '__all__'
+
+export const NO_FEATURES_MESSAGE =
+    'No .scratch/<feature>/issues/ directories found.\n' +
+    'Provide --spec <feature-name>.'
 
 export async function resolveIssuesDir (
     specName:string|undefined,
@@ -188,39 +200,36 @@ export async function resolveIssuesDir (
     if (specName) {
         const featureDir = join(cwd, '.scratch', specName)
         return [{
-            dir:join(featureDir, 'issues'),
-            spec:join(featureDir, 'spec.md'),
-            name:specName,
+            dir: join(featureDir, 'issues'),
+            spec: join(featureDir, 'spec.md'),
+            name: specName,
         }]
     }
 
     const features = findFeatureDirs(cwd)
 
     if (features.length === 0) {
-        console.error(
-            'No .scratch/<feature>/issues/ directories ' +
-            'found.\nProvide --spec <feature-name>.'
-        )
+        console.error(NO_FEATURES_MESSAGE)
         process.exit(2)
     }
 
     if (features.length === 1) {
         const f = features[0]
         console.log(`Using feature: ${f.name}`)
-        return [{ dir:f.dir, spec:f.spec, name:f.name }]
+        return [{ dir: f.dir, spec: f.spec, name: f.name }]
     }
 
     const scratchDir = join(cwd, '.scratch')
     const featureChoices = features.map(f => ({
-        name:featureChoiceLabel(scratchDir, f.name),
-        value:f.name,
+        name: featureChoiceLabel(scratchDir, f.name),
+        value: f.name,
     }))
 
     while (true) {
         const selected = await checkbox({
-            message:'Which features?',
-            choices:[
-                { name:'All', value:ALL_VALUE },
+            message: 'Which features?',
+            choices: [
+                { name: 'All', value: ALL_VALUE },
                 new Separator(),
                 ...featureChoices,
             ],
@@ -239,7 +248,7 @@ export async function resolveIssuesDir (
             const f = features.find(
                 ff => ff.name === name
             )!
-            return { dir:f.dir, spec:f.spec, name:f.name }
+            return { dir: f.dir, spec: f.spec, name: f.name }
         })
     }
 }

@@ -30,6 +30,7 @@ so they can't drift as long as you install the skills with this package.
 - [Command Line Arguments](#command-line-arguments)
   * [Notes](#notes)
   * [`--spec ` option](#--spec--option)
+  * [`graph` command](#graph-command)
   * [`--prefer-subagent` option](#--prefer-subagent-option)
 - [How It Works](#how-it-works)
   * [Select a ticket](#select-a-ticket)
@@ -153,6 +154,9 @@ npx nightralph pi -m openrouter/z-ai/glm-5.3-flash
 # Dry run to inspect the dependency graph and prompt
 npx nightralph codex --dry-run
 
+# Show which features wait on tickets in other features
+npx nightralph graph
+
 # Use codex with a specific model
 npx nightralph codex -m gpt-5.6-luna
 
@@ -197,7 +201,8 @@ Flags:
 
 * When `--spec <name>` is omitted, the CLI looks for
   `.scratch/<feature>/issues/` directories. If multiple features exist,
-  **it prompts you to pick one** with an interactive selector.
+  **it prompts you to pick one or more** with an interactive
+  selector.
 * Tickets are selected by `**Status:** ready-for-agent` in the file body.
 * Dependencies are read from the `**Blocked by:**` field; the orchestrator
   skips tickets whose blockers haven't completed.
@@ -290,6 +295,78 @@ Flags:
 A feature name that resolves to `.scratch/<name>/`.
 The spec file is `.scratch/<name>/spec.md` and the issues directory
 is `.scratch/<name>/issues/`.
+
+
+### `graph` command
+
+`nightralph graph` lists the features whose tickets wait on tickets
+in other features, the tickets that wait, and the features to select
+together so the work can run.
+
+Without `--spec` it reports every feature the picker shows. With
+`--spec <name>` it reports that one feature and what it waits on.
+The name can be one the picker hides: a nested feature such as
+`rollout/billing`, or a complete one.
+
+The sample below is from a run with three features.
+`held-import-review` has two tickets: `01` is blocked by
+`newsletter-audit/16`, and `02` by `01`. `analytics` has no
+blockers.
+
+```bash
+npx nightralph graph
+```
+
+```text
+held-import-review (0/2 ready)
+  held-import-review waits on newsletter-audit
+    held-import-review/01 waits on newsletter-audit/16 (ready-for-agent)
+  Run together: held-import-review, newsletter-audit (select both in the picker)
+    2 of 2 ready-for-agent tickets become runnable
+
+Not waiting on other features: analytics, newsletter-audit
+```
+
+Each block opens with the feature's counts as the picker shows them,
+for a run of that feature alone. `(0/2 ready)` means neither ticket
+can start: `01` waits on another feature and `02` waits on `01`. The
+`X waits on Y` lines group the blocking refs by feature pair, so a
+block also shows waits further up the chain, such as a feature this
+one waits on that itself waits on a third.
+
+`Run together` names the features to select in the picker. The
+suggestion is checked by simulating a run of those features with the
+same wave logic as `--dry-run`, assuming every ticket succeeds. The
+line under it counts how many of the feature's `ready-for-agent`
+tickets become runnable. That total can differ from the header's,
+which counts every ticket, as the picker does. A suggested feature the
+picker does not list, such as a nested one like `rollout/billing`, is
+named in the parenthetical as not in the picker.
+
+Some tickets can't run whatever you select:
+
+* `stays blocked` names a ticket and the blocker that stops it: a
+  ticket in a status an agent doesn't pick up, such as
+  `ready-for-human`, or a ref that matches no ticket, shown as
+  `(not found)`.
+* `deadlocked` names tickets in or behind a cycle.
+
+A feature whose only problem is a ref into another feature that
+matches no ticket gets a block with no `Run together` line. The
+remaining features share the `Not waiting on other features` line,
+and any typo warnings come last.
+
+The picker labels a feature that waits on others the same way, for
+example `held-import-review (0/2 ready, waits on newsletter-audit)`.
+The label names only the features its tickets wait on directly, and
+the counts still mean ready if the feature runs alone.
+
+`graph` is read-only: it runs no git, no provider check, and writes
+nothing. It reads `.scratch/` in the current checkout, not an
+integration branch, so tickets a run finished on
+`nightralph--<feature>` show as open until that branch is merged.
+`Run together` can only be acted on in the picker, since `--spec`
+takes one name.
 
 
 ### `--prefer-subagent` option

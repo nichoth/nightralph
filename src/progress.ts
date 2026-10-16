@@ -29,15 +29,15 @@ export function generateProgress (
 ):ProgressData {
     return {
         feature,
-        startedAt:new Date().toISOString(),
-        tickets:tickets.map((ticket) => ({
-            num:ticket.num,
-            slug:ticket.slug,
-            filename:ticket.filename,
-            done:false,
-            branch:null,
-            exitCode:null,
-            completedAt:null,
+        startedAt: new Date().toISOString(),
+        tickets: tickets.map((ticket) => ({
+            num: ticket.num,
+            slug: ticket.slug,
+            filename: ticket.filename,
+            done: false,
+            branch: null,
+            exitCode: null,
+            completedAt: null,
         })),
     }
 }
@@ -114,13 +114,13 @@ export function readProgress (
             const filename = ticketMatch[2]
             const parsed = filename.match(TICKET_FILENAME_RE)
             current = {
-                num:parsed ? Number(parsed[1]) : NaN,
-                slug:parsed ? parsed[2] : '',
+                num: parsed ? Number(parsed[1]) : NaN,
+                slug: parsed ? parsed[2] : '',
                 filename,
-                done:ticketMatch[1] === 'x',
-                branch:null,
-                exitCode:null,
-                completedAt:null,
+                done: ticketMatch[1] === 'x',
+                branch: null,
+                exitCode: null,
+                completedAt: null,
             }
             continue
         }
@@ -145,8 +145,8 @@ export function readProgress (
     if (current) tickets.push(current)
 
     return {
-        feature:featureMatch ? featureMatch[1] : '',
-        startedAt:startedMatch ? startedMatch[1] : '',
+        feature: featureMatch ? featureMatch[1] : '',
+        startedAt: startedMatch ? startedMatch[1] : '',
         tickets,
     }
 }
@@ -163,7 +163,7 @@ export function mergeProgress (
 
     return {
         ...fresh,
-        tickets:fresh.tickets.map((ticket) => {
+        tickets: fresh.tickets.map((ticket) => {
             const prior = existingByFilename.get(ticket.filename)
             return (prior && prior.done) ? { ...prior } : ticket
         }),
@@ -243,14 +243,14 @@ export async function commitProgress (
     await execFileAsync(
         'git',
         ['add', '--force', '--', ...list],
-        { cwd:repoRoot }
+        { cwd: repoRoot }
     )
 
     try {
         await execFileAsync(
             'git',
             ['diff', '--cached', '--quiet', '--', ...list],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
         return false
     } catch {
@@ -260,7 +260,7 @@ export async function commitProgress (
     await execFileAsync(
         'git',
         ['commit', '-m', message, '--', ...list],
-        { cwd:repoRoot }
+        { cwd: repoRoot }
     )
     return true
 }

@@ -130,11 +130,11 @@ export type FixFailure =
     'install'|'exit'|'no-commits'|'tests'|'merge'
 
 export const FIX_FAILURE_TEXT:Record<FixFailure, string> = {
-    install:'dependency install failed',
-    exit:'the agent exited with an error',
-    'no-commits':'the agent made no commits',
-    tests:'the test command failed after the agent finished',
-    merge:'the fix branch did not merge cleanly',
+    install: 'dependency install failed',
+    exit: 'the agent exited with an error',
+    'no-commits': 'the agent made no commits',
+    tests: 'the test command failed after the agent finished',
+    merge: 'the fix branch did not merge cleanly',
 }
 
 function findingLines (findings:ReadonlyArray<Finding>):string[] {
@@ -289,9 +289,9 @@ export function parseFindings (text:string):Finding[]|null {
         const m = line.match(FINDING_RE)
         if (m) {
             findings.push({
-                summary:collapse(m[2]),
-                detail:'',
-                checked:m[1] !== ' ',
+                summary: collapse(m[2]),
+                detail: '',
+                checked: m[1] !== ' ',
             })
             details.push([])
         } else if (findings.length > 0 && line.trim()) {
@@ -300,7 +300,7 @@ export function parseFindings (text:string):Finding[]|null {
     }
     if (findings.length > 0) {
         return findings.map((f, i) => {
-            return { ...f, detail:details[i].join('\n') }
+            return { ...f, detail: details[i].join('\n') }
         })
     }
     const clean = splitLines(text).some(line => {
@@ -317,7 +317,7 @@ export function markFixed (
 ):Finding[] {
     const done = new Set(completedItems.map(normalize))
     return findings.map(f => {
-        return { ...f, checked:done.has(normalize(f.summary)) }
+        return { ...f, checked: done.has(normalize(f.summary)) }
     })
 }
 
@@ -404,8 +404,8 @@ function parseEntry (
         from,
         to,
         status,
-        findings:parseFindings(findingLines.join('\n')) ?? [],
-        body:lines.join('\n').trim(),
+        findings: parseFindings(findingLines.join('\n')) ?? [],
+        body: lines.join('\n').trim(),
     }
 }
 
@@ -548,8 +548,8 @@ async function runStep (
     const result = await runTestCmd({
         cmd,
         cwd,
-        timeout:opts.timeout,
-        registry:deps.registry,
+        timeout: opts.timeout,
+        registry: deps.registry,
     })
     writeFileSync(path, result.output)
     return result.exitCode === 0
@@ -560,7 +560,7 @@ async function discardWorktree (
     wt:{ worktreePath:string; branchName:string }
 ):Promise<void> {
     try {
-        await removeWorktree(wt.worktreePath, { force:true })
+        await removeWorktree(wt.worktreePath, { force: true })
         await deleteBranch(opts.repoRoot, wt.branchName)
     } catch (err) {
         opts.log(
@@ -580,18 +580,18 @@ export async function runReviewer (
     range:{ from:string; to:string }
 ):Promise<Finding[]|null> {
     return runWithRetries({
-        maxAttempts:opts.retries + 1,
-        retryDelay:opts.retryDelay,
-        agentCmd:opts.agentCmd,
-        effort:opts.effort,
-        label:'review',
-        log:opts.log,
+        maxAttempts: opts.retries + 1,
+        retryDelay: opts.retryDelay,
+        agentCmd: opts.agentCmd,
+        effort: opts.effort,
+        label: 'review',
+        log: opts.log,
     }, async (attempt, effort) => {
         const wt = await createNamedWorktree({
-            repoRoot:opts.repoRoot,
-            repoName:opts.repoName,
-            baseBranch:opts.baseBranch,
-            name:'review',
+            repoRoot: opts.repoRoot,
+            repoName: opts.repoName,
+            baseBranch: opts.baseBranch,
+            name: 'review',
         })
         try {
             if (opts.installCmd && !(await runStep(
@@ -599,35 +599,35 @@ export async function runReviewer (
                 logPath(opts.logsDir, 'review', attempt, '.install.log')
             ))) {
                 opts.log('  review: install failed')
-                return { result:null, stop:false }
+                return { result: null, stop: false }
             }
             ensureNotesIgnored(wt.worktreePath)
             await deps.spawnAgent({
-                prompt:renderReviewPrompt({
-                    specBody:opts.specBody,
+                prompt: renderReviewPrompt({
+                    specBody: opts.specBody,
                     ...range,
-                    exclude:reviewExcludeFor(
+                    exclude: reviewExcludeFor(
                         opts.repoRoot, opts.reviewPath
                     ),
-                    preferSubagent:opts.preferSubagent,
+                    preferSubagent: opts.preferSubagent,
                 }),
-                agentCmd:opts.agentCmd,
-                model:opts.model,
-                timeout:opts.timeout,
-                logPath:logPath(opts.logsDir, 'review', attempt, '.log'),
-                cwd:wt.worktreePath,
-                label:'review',
-                maxTurns:opts.maxTurns,
+                agentCmd: opts.agentCmd,
+                model: opts.model,
+                timeout: opts.timeout,
+                logPath: logPath(opts.logsDir, 'review', attempt, '.log'),
+                cwd: wt.worktreePath,
+                label: 'review',
+                maxTurns: opts.maxTurns,
                 effort,
-                preferSubagent:opts.preferSubagent,
-                onLine:opts.log,
+                preferSubagent: opts.preferSubagent,
+                onLine: opts.log,
             })
             const text = collectNotes(wt.worktreePath, FINDINGS_FILE)
             const findings = text === null ? null : parseFindings(text)
             if (findings === null) {
                 opts.log('  review: no usable findings file')
             }
-            return { result:findings, stop:findings !== null }
+            return { result: findings, stop: findings !== null }
         } finally {
             await discardWorktree(opts, wt)
         }
@@ -654,16 +654,16 @@ export async function runFixer (
     deps:ReviewDeps,
     findings:ReadonlyArray<Finding>
 ):Promise<FixResult> {
-    const unchecked = findings.map(f => ({ ...f, checked:false }))
+    const unchecked = findings.map(f => ({ ...f, checked: false }))
     let previous:{ reason:FixFailure; notes:string|null }|undefined
 
     return runWithRetries<FixResult>({
-        maxAttempts:opts.retries + 1,
-        retryDelay:opts.retryDelay,
-        agentCmd:opts.agentCmd,
-        effort:opts.effort,
-        label:'review fix',
-        log:opts.log,
+        maxAttempts: opts.retries + 1,
+        retryDelay: opts.retryDelay,
+        agentCmd: opts.agentCmd,
+        effort: opts.effort,
+        label: 'review fix',
+        log: opts.log,
     }, async (attempt, effort) => {
         const fail = (
             reason:FixFailure,
@@ -673,24 +673,24 @@ export async function runFixer (
             previous = { reason, notes }
             opts.log(`  review fix: ${FIX_FAILURE_TEXT[reason]}`)
             return {
-                result:{
-                    merged:false,
-                    findings:unchecked,
-                    attempts:attempt,
+                result: {
+                    merged: false,
+                    findings: unchecked,
+                    attempts: attempt,
                     effort,
                     exitCode,
-                    result:FIX_FAILURE_TEXT[reason],
+                    result: FIX_FAILURE_TEXT[reason],
                     notes,
                 },
-                stop:false,
+                stop: false,
             }
         }
 
         const wt = await createNamedWorktree({
-            repoRoot:opts.repoRoot,
-            repoName:opts.repoName,
-            baseBranch:opts.baseBranch,
-            name:'review-fix',
+            repoRoot: opts.repoRoot,
+            repoName: opts.repoName,
+            baseBranch: opts.baseBranch,
+            name: 'review-fix',
         })
         try {
             if (opts.installCmd && !(await runStep(
@@ -704,26 +704,26 @@ export async function runFixer (
             }
             ensureNotesIgnored(wt.worktreePath)
             const agent = await deps.spawnAgent({
-                prompt:renderFixPrompt({
-                    specBody:opts.specBody,
+                prompt: renderFixPrompt({
+                    specBody: opts.specBody,
                     findings,
-                    testCmd:opts.testCmd,
-                    installCmd:opts.installCmd,
+                    testCmd: opts.testCmd,
+                    installCmd: opts.installCmd,
                     previous,
-                    preferSubagent:opts.preferSubagent,
+                    preferSubagent: opts.preferSubagent,
                 }),
-                agentCmd:opts.agentCmd,
-                model:opts.model,
-                timeout:opts.timeout,
-                logPath:logPath(
+                agentCmd: opts.agentCmd,
+                model: opts.model,
+                timeout: opts.timeout,
+                logPath: logPath(
                     opts.logsDir, 'review-fix', attempt, '.log'
                 ),
-                cwd:wt.worktreePath,
-                label:'review-fix',
-                maxTurns:opts.maxTurns,
+                cwd: wt.worktreePath,
+                label: 'review-fix',
+                maxTurns: opts.maxTurns,
                 effort,
-                preferSubagent:opts.preferSubagent,
-                onLine:opts.log,
+                preferSubagent: opts.preferSubagent,
+                onLine: opts.log,
             })
             // Before any auto-commit, so notes never get committed
             const notes = collectNotes(wt.worktreePath)
@@ -766,16 +766,16 @@ export async function runFixer (
             }
             opts.log('  review fix: merged')
             return {
-                result:{
-                    merged:true,
-                    findings:markFixed(findings, agent.completedItems),
-                    attempts:attempt,
+                result: {
+                    merged: true,
+                    findings: markFixed(findings, agent.completedItems),
+                    attempts: attempt,
                     effort,
-                    exitCode:agent.exitCode,
-                    result:'merged',
+                    exitCode: agent.exitCode,
+                    result: 'merged',
                     notes,
                 },
-                stop:true,
+                stop: true,
             }
         } finally {
             await discardWorktree(opts, wt)
@@ -802,14 +802,14 @@ export async function runReviewPass (
         mergeBase(opts.repoRoot, opts.forkedFrom, to) :
         null
     const from = selectReviewBase(readReviewEntries(opts.reviewPath), {
-        isAncestor:sha => isAncestor(opts.repoRoot, sha, to),
+        isAncestor: sha => isAncestor(opts.repoRoot, sha, to),
         forkPoint,
-        launchCommit:opts.launchCommit,
+        launchCommit: opts.launchCommit,
     })
     const exclude = reviewExcludeFor(opts.repoRoot, opts.reviewPath)
     if (!hasChangesOutside(opts.repoRoot, from, to, exclude)) {
         opts.log('\nReview: nothing new to review')
-        return { status:'skipped', findings:0, fixed:0 }
+        return { status: 'skipped', findings: 0, fixed: 0 }
     }
 
     opts.log(`\nReviewing ${from.slice(0, 7)}..${to.slice(0, 7)}`)
@@ -820,12 +820,12 @@ export async function runReviewPass (
         entry = {
             from,
             to,
-            status:'review-failed',
-            now:now(),
-            findings:[]
+            status: 'review-failed',
+            now: now(),
+            findings: []
         }
     } else if (findings.length === 0) {
-        entry = { from, to, status:'clean', now:now(), findings:[] }
+        entry = { from, to, status: 'clean', now: now(), findings: [] }
     } else {
         opts.log(
             `Review: ${findings.length} finding` +
@@ -835,17 +835,17 @@ export async function runReviewPass (
         entry = {
             from,
             // A merged fix counts as reviewed
-            to:fix.merged ? headCommit(opts.repoRoot) : to,
-            status:fix.merged ? 'fixed' : 'unresolved',
-            now:now(),
-            findings:fix.findings,
-            fix:{
-                attempts:fix.attempts,
-                maxAttempts:opts.retries + 1,
-                effort:fix.effort,
-                exitCode:fix.exitCode,
-                result:fix.result,
-                notes:fix.notes,
+            to: fix.merged ? headCommit(opts.repoRoot) : to,
+            status: fix.merged ? 'fixed' : 'unresolved',
+            now: now(),
+            findings: fix.findings,
+            fix: {
+                attempts: fix.attempts,
+                maxAttempts: opts.retries + 1,
+                effort: fix.effort,
+                exitCode: fix.exitCode,
+                result: fix.result,
+                notes: fix.notes,
             },
         }
     }
@@ -855,8 +855,8 @@ export async function runReviewPass (
         opts.repoRoot, opts.reviewPath, 'nightralph: record review'
     )
     return {
-        status:entry.status,
-        findings:entry.findings.length,
-        fixed:entry.findings.filter(f => f.checked).length,
+        status: entry.status,
+        findings: entry.findings.length,
+        fixed: entry.findings.filter(f => f.checked).length,
     }
 }

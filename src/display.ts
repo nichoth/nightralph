@@ -219,7 +219,7 @@ export class StatusDisplay implements Display {
 
     constructor (config?:Readonly<Partial<DisplayConfig>>) {
         this.config = {
-            stream:config?.stream ?? process.stdout,
+            stream: config?.stream ?? process.stdout,
         }
     }
 
@@ -245,7 +245,7 @@ export class StatusDisplay implements Display {
     startRun (tickets:ReadonlyArray<TicketRef>):void {
         this.tickets = tickets.map(t => ({
             ...t,
-            status:'pending' as const,
+            status: 'pending' as const,
         }))
         this.hasRun = true
         this.viewportStart = 0
@@ -555,7 +555,7 @@ export class PlainDisplay implements Display {
 export function createDisplay (stream?:NodeJS.WriteStream):Display {
     const s = stream ?? process.stdout
     if (s.isTTY) {
-        return new StatusDisplay({ stream:s })
+        return new StatusDisplay({ stream: s })
     }
 
     return new PlainDisplay()

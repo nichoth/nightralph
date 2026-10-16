@@ -20,15 +20,15 @@ import { localBranchExists } from '../src/worktree.js'
 
 const GIT_ENV = {
     ...process.env,
-    GIT_COMMITTER_NAME:'Test',
-    GIT_COMMITTER_EMAIL:'test@example.com',
-    GIT_AUTHOR_NAME:'Test',
-    GIT_AUTHOR_EMAIL:'test@example.com',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@example.com',
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@example.com',
 }
 
 function git (cwd:string, args:string[]):string {
     return execFileSync('git', args, {
-        cwd, env:GIT_ENV, encoding:'utf8',
+        cwd, env: GIT_ENV, encoding: 'utf8',
     }).trim()
 }
 
@@ -42,9 +42,9 @@ function withRepo (
         mkdtempSync(join(tmpdir(), 'nightralph-review-'))
     )
     execFileSync('git', ['init', `--template=${templateDir}`],
-        { cwd:repoRoot, stdio:'ignore' })
-    execSync('git config core.excludesFile /dev/null', { cwd:repoRoot })
-    execSync('git config core.hooksPath /dev/null', { cwd:repoRoot })
+        { cwd: repoRoot, stdio: 'ignore' })
+    execSync('git config core.excludesFile /dev/null', { cwd: repoRoot })
+    execSync('git config core.hooksPath /dev/null', { cwd: repoRoot })
     git(repoRoot, ['commit', '--allow-empty', '-m', 'init'])
     git(repoRoot, ['branch', '-M', 'main'])
     writeFileSync(join(repoRoot, 'a.ts'), 'export const a = 1\n')
@@ -53,10 +53,10 @@ function withRepo (
     const cleanup = ():void => {
         for (const name of ['review', 'review-fix']) {
             rmSync(join(repoRoot, '..', `${basename(repoRoot)}.${name}`),
-                { recursive:true, force:true })
+                { recursive: true, force: true })
         }
-        rmSync(repoRoot, { recursive:true, force:true })
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(repoRoot, { recursive: true, force: true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
     return fn(repoRoot).finally(cleanup)
 }
@@ -66,22 +66,22 @@ function passOpts (
     overrides?:Partial<ReviewPassOpts>
 ):ReviewPassOpts {
     const logsDir = join(repoRoot, '.scratch', 'feat', 'logs')
-    mkdirSync(logsDir, { recursive:true })
+    mkdirSync(logsDir, { recursive: true })
     return {
         repoRoot,
-        repoName:basename(repoRoot),
-        baseBranch:'main',
-        reviewPath:join(repoRoot, '.scratch', 'feat', 'review.md'),
-        launchCommit:git(repoRoot, ['rev-parse', 'HEAD~1']),
-        specBody:'SPEC',
-        agentCmd:'node',
-        model:null,
-        timeout:30,
+        repoName: basename(repoRoot),
+        baseBranch: 'main',
+        reviewPath: join(repoRoot, '.scratch', 'feat', 'review.md'),
+        launchCommit: git(repoRoot, ['rev-parse', 'HEAD~1']),
+        specBody: 'SPEC',
+        agentCmd: 'node',
+        model: null,
+        timeout: 30,
         logsDir,
-        testCmd:'true',
-        retries:0,
-        retryDelay:0,
-        log:() => {},
+        testCmd: 'true',
+        retries: 0,
+        retryDelay: 0,
+        log: () => {},
         ...overrides,
     }
 }
@@ -103,26 +103,26 @@ function fakeAgent (
     const calls:Array<{ prompt:string; cwd:string }> = []
     const spawnAgent:SpawnAgentFn = async opts => {
         const cwd = opts.cwd ?? process.cwd()
-        calls.push({ prompt:opts.prompt, cwd })
+        calls.push({ prompt: opts.prompt, cwd })
         const r = act(cwd, calls.length) ?? {}
         return {
-            exitCode:r.exitCode ?? 0,
-            timedOut:r.timedOut ?? false,
-            completedItems:r.completedItems ?? [],
+            exitCode: r.exitCode ?? 0,
+            timedOut: r.timedOut ?? false,
+            completedItems: r.completedItems ?? [],
         }
     }
     return { spawnAgent, calls }
 }
 
 function writeFindings (cwd:string, text:string):void {
-    mkdirSync(join(cwd, '.nightralph'), { recursive:true })
+    mkdirSync(join(cwd, '.nightralph'), { recursive: true })
     writeFileSync(join(cwd, FINDINGS_PATH), text)
 }
 
 function range (repoRoot:string):{ from:string; to:string } {
     return {
-        from:git(repoRoot, ['rev-parse', 'HEAD~1']),
-        to:git(repoRoot, ['rev-parse', 'HEAD']),
+        from: git(repoRoot, ['rev-parse', 'HEAD~1']),
+        to: git(repoRoot, ['rev-parse', 'HEAD']),
     }
 }
 
@@ -132,7 +132,7 @@ test('runReviewer - AC5.1 returns findings and removes its ' +
         const agent = fakeAgent(cwd => {
             writeFindings(cwd, '- [ ] one\n    a.ts:1\n- [ ] two\n')
         })
-        const deps:ReviewDeps = { spawnAgent:agent.spawnAgent }
+        const deps:ReviewDeps = { spawnAgent: agent.spawnAgent }
         const opts = passOpts(repoRoot)
         const found = await runReviewer(opts, deps, range(repoRoot))
 
@@ -148,7 +148,7 @@ test('runReviewer - AC5.2 a clean review returns []', async t => {
     await withRepo(async repoRoot => {
         const agent = fakeAgent(cwd => writeFindings(cwd, NO_FINDINGS))
         const found = await runReviewer(
-            passOpts(repoRoot), { spawnAgent:agent.spawnAgent },
+            passOpts(repoRoot), { spawnAgent: agent.spawnAgent },
             range(repoRoot)
         )
         t.deepEqual(found, [], 'clean')
@@ -160,10 +160,10 @@ test('runReviewer - AC5.3 findings written before a timeout count',
         await withRepo(async repoRoot => {
             const agent = fakeAgent(cwd => {
                 writeFindings(cwd, '- [ ] slow one\n')
-                return { exitCode:137, timedOut:true }
+                return { exitCode: 137, timedOut: true }
             })
             const found = await runReviewer(
-                passOpts(repoRoot), { spawnAgent:agent.spawnAgent },
+                passOpts(repoRoot), { spawnAgent: agent.spawnAgent },
                 range(repoRoot)
             )
             t.equal(found?.length, 1, 'kept')
@@ -175,8 +175,8 @@ test('runReviewer - AC5.4 no findings file is retried, then null',
         await withRepo(async repoRoot => {
             const agent = fakeAgent(() => {})
             const found = await runReviewer(
-                passOpts(repoRoot, { retries:1 }),
-                { spawnAgent:agent.spawnAgent },
+                passOpts(repoRoot, { retries: 1 }),
+                { spawnAgent: agent.spawnAgent },
                 range(repoRoot)
             )
             t.equal(agent.calls.length, 2, 'retried once')
@@ -195,7 +195,7 @@ test('runReviewer - AC5.5 reviewer commits never reach main',
                 writeFindings(cwd, NO_FINDINGS)
             })
             await runReviewer(
-                passOpts(repoRoot), { spawnAgent:agent.spawnAgent },
+                passOpts(repoRoot), { spawnAgent: agent.spawnAgent },
                 range(repoRoot)
             )
             t.equal(git(repoRoot, ['rev-parse', 'main']), before,
@@ -204,8 +204,8 @@ test('runReviewer - AC5.5 reviewer commits never reach main',
     })
 
 const FINDINGS = [
-    { summary:'first thing', detail:'', checked:false },
-    { summary:'second thing', detail:'', checked:false },
+    { summary: 'first thing', detail: '', checked: false },
+    { summary: 'second thing', detail: '', checked: false },
 ]
 
 function commitIn (cwd:string, file:string):void {
@@ -219,10 +219,10 @@ test('runFixer - AC6.1 a green fix merges and checks echoed ' +
     await withRepo(async repoRoot => {
         const agent = fakeAgent(cwd => {
             commitIn(cwd, 'fix.ts')
-            return { completedItems:['first thing'] }
+            return { completedItems: ['first thing'] }
         })
         const result = await runFixer(
-            passOpts(repoRoot), { spawnAgent:agent.spawnAgent },
+            passOpts(repoRoot), { spawnAgent: agent.spawnAgent },
             FINDINGS
         )
         t.ok(result.merged, 'merged')
@@ -239,15 +239,15 @@ test('runFixer - an empty test command writes no fixer test log ' +
     await withRepo(async repoRoot => {
         const agent = fakeAgent(cwd => {
             commitIn(cwd, 'fix.ts')
-            return { completedItems:['first thing'] }
+            return { completedItems: ['first thing'] }
         })
         const lines:string[] = []
         const opts = passOpts(repoRoot, {
-            testCmd:'',
-            log:msg => { lines.push(msg) },
+            testCmd: '',
+            log: msg => { lines.push(msg) },
         })
         const result = await runFixer(
-            opts, { spawnAgent:agent.spawnAgent }, FINDINGS
+            opts, { spawnAgent: agent.spawnAgent }, FINDINGS
         )
         t.ok(result.merged, 'merged')
         t.ok(lines.some(l => /no test gate/.test(l)),
@@ -267,13 +267,13 @@ test('runFixer - AC6.2 a red test gate is retried, then nothing ' +
         const before = git(repoRoot, ['rev-parse', 'main'])
         const agent = fakeAgent(cwd => {
             commitIn(cwd, 'broken.txt')
-            return { completedItems:['first thing'] }
+            return { completedItems: ['first thing'] }
         })
         const result = await runFixer(
             passOpts(repoRoot, {
-                retries:1, testCmd:'test ! -f broken.txt',
+                retries: 1, testCmd: 'test ! -f broken.txt',
             }),
-            { spawnAgent:agent.spawnAgent },
+            { spawnAgent: agent.spawnAgent },
             FINDINGS
         )
         t.equal(agent.calls.length, 2, 'retried once')
@@ -288,9 +288,9 @@ test('runFixer - AC6.2 a red test gate is retried, then nothing ' +
 test('runFixer - non-zero exit and no commits both fail',
     async t => {
         await withRepo(async repoRoot => {
-            const exitAgent = fakeAgent(() => ({ exitCode:1 }))
+            const exitAgent = fakeAgent(() => ({ exitCode: 1 }))
             const exited = await runFixer(
-                passOpts(repoRoot), { spawnAgent:exitAgent.spawnAgent },
+                passOpts(repoRoot), { spawnAgent: exitAgent.spawnAgent },
                 FINDINGS
             )
             t.ok(!exited.merged, 'exit 1 does not merge')
@@ -298,7 +298,7 @@ test('runFixer - non-zero exit and no commits both fail',
 
             const idleAgent = fakeAgent(() => {})
             const idle = await runFixer(
-                passOpts(repoRoot), { spawnAgent:idleAgent.spawnAgent },
+                passOpts(repoRoot), { spawnAgent: idleAgent.spawnAgent },
                 FINDINGS
             )
             t.ok(!idle.merged, 'no commits does not merge')
@@ -313,18 +313,18 @@ test('runFixer - AC6.4 a retry sees the previous attempt\'s notes',
             const agent = fakeAgent((cwd, call) => {
                 if (call === 1) {
                     mkdirSync(join(cwd, '.nightralph'),
-                        { recursive:true })
+                        { recursive: true })
                     writeFileSync(
                         join(cwd, '.nightralph', 'notes.md'),
                         'NOTES-TOKEN'
                     )
-                    return { exitCode:1 }
+                    return { exitCode: 1 }
                 }
                 commitIn(cwd, 'fix.ts')
             })
             await runFixer(
-                passOpts(repoRoot, { retries:1 }),
-                { spawnAgent:agent.spawnAgent },
+                passOpts(repoRoot, { retries: 1 }),
+                { spawnAgent: agent.spawnAgent },
                 FINDINGS
             )
             t.ok(!agent.calls[0].prompt.includes('NOTES-TOKEN'),

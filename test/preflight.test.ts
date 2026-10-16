@@ -32,17 +32,17 @@ test('resolveExecutable - bare name resolves to first PATH entry',
         try {
             const { a, b } = makeFixtures(root)
             t.equal(
-                resolveExecutable('tool', { path:[a, b].join(delimiter) }),
+                resolveExecutable('tool', { path: [a, b].join(delimiter) }),
                 join(a, 'tool'),
                 'first entry wins'
             )
             t.equal(
-                resolveExecutable('tool', { path:[b, a].join(delimiter) }),
+                resolveExecutable('tool', { path: [b, a].join(delimiter) }),
                 join(b, 'tool'),
                 'order of PATH is respected'
             )
         } finally {
-            rmSync(root, { recursive:true, force:true })
+            rmSync(root, { recursive: true, force: true })
         }
     })
 
@@ -52,7 +52,7 @@ test('resolveExecutable - path with a slash resolves against cwd',
         try {
             const { a } = makeFixtures(root)
             t.equal(
-                resolveExecutable('./tool', { cwd:a }),
+                resolveExecutable('./tool', { cwd: a }),
                 join(a, 'tool'),
                 'relative path resolved against cwd'
             )
@@ -62,7 +62,7 @@ test('resolveExecutable - path with a slash resolves against cwd',
                 'absolute path returned as is'
             )
         } finally {
-            rmSync(root, { recursive:true, force:true })
+            rmSync(root, { recursive: true, force: true })
         }
     })
 
@@ -94,12 +94,12 @@ test('resolveExecutable - returns null when nothing executable is found',
             )
             t.equal(
                 resolveExecutable('tool', {
-                    path:[join(root, 'no-such-dir'), a].join(delimiter),
+                    path: [join(root, 'no-such-dir'), a].join(delimiter),
                 }),
                 join(a, 'tool'),
                 'missing PATH directory is skipped'
             )
         } finally {
-            rmSync(root, { recursive:true, force:true })
+            rmSync(root, { recursive: true, force: true })
         }
     })

@@ -26,6 +26,7 @@ import {
     spawnAgent,
     dryRun,
     dryRunIsolated,
+    simulateRun,
     getProviderArgs,
     formatStreamLine,
     createPiStreamFormatter,
@@ -66,25 +67,25 @@ function tmp ():string {
 
 function initTempGitRepo ():string {
     const dir = tmp()
-    execSync('git init', { cwd:dir })
+    execSync('git init', { cwd: dir })
     execSync(
         'git config user.email test@example.com',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync(
         'git config user.name "Test User"',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync(
         'git commit --allow-empty -m "init" --no-verify',
         {
-            cwd:dir,
-            env:{
+            cwd: dir,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         }
     )
@@ -116,18 +117,18 @@ function makeTicket (overrides:Omit<Partial<Ticket>, 'blockers'>&{
     const feature = overrides.feature ?? ''
     const blockers = (overrides.blockers ?? []).map(b => (
         typeof b === 'number' ?
-            { feature, num:b, where:'run' as const } :
+            { feature, num: b, where: 'run' as const } :
             b
     ))
     return {
-        slug:overrides.filename.replace(
+        slug: overrides.filename.replace(
             /^\d+-(.+)\.md$/, '$1'
         ),
-        filepath:`/fake/${overrides.filename}`,
-        body:makeTicketBody({
-            status:overrides.status ?? 'ready-for-agent',
+        filepath: `/fake/${overrides.filename}`,
+        body: makeTicketBody({
+            status: overrides.status ?? 'ready-for-agent',
         }),
-        status:overrides.status ?? 'ready-for-agent',
+        status: overrides.status ?? 'ready-for-agent',
         feature,
         ...overrides,
         blockers,
@@ -204,13 +205,13 @@ test('scanTickets reads blockers as refs in its feature', t => {
     const dir = tmp()
     writeFileSync(
         join(dir, '01-a.md'),
-        makeTicketBody({ status:'ready-for-agent', blockers:[1, 2, 3] })
+        makeTicketBody({ status: 'ready-for-agent', blockers: [1, 2, 3] })
     )
     const [ticket] = scanTickets(dir, 'f')
     t.deepEqual(ticket.blockers, [
-        { feature:'f', num:1, where:'run' },
-        { feature:'f', num:2, where:'run' },
-        { feature:'f', num:3, where:'run' },
+        { feature: 'f', num: 1, where: 'run' },
+        { feature: 'f', num: 2, where: 'run' },
+        { feature: 'f', num: 3, where: 'run' },
     ], 'three run refs in feature f')
 })
 
@@ -225,7 +226,7 @@ test('scanTickets reads a cross-feature blocker', t => {
         dir, 'f', new Set(['newsletter-audit'])
     )
     t.deepEqual(ticket.blockers, [
-        { feature:'newsletter-audit', num:16, where:'run' },
+        { feature: 'newsletter-audit', num: 16, where: 'run' },
     ], 'ref in the named feature')
 })
 
@@ -246,15 +247,15 @@ test('scanTickets reads and parses ticket files', t => {
     writeFileSync(
         join(dir, '01-first.md'),
         makeTicketBody({
-            status:'ready-for-agent',
-            blockers:[],
+            status: 'ready-for-agent',
+            blockers: [],
         })
     )
     writeFileSync(
         join(dir, '02-second.md'),
         makeTicketBody({
-            status:'ready-for-agent',
-            blockers:[1],
+            status: 'ready-for-agent',
+            blockers: [1],
         })
     )
     writeFileSync(
@@ -279,7 +280,7 @@ test('scanTickets reads and parses ticket files', t => {
     t.equal(tickets[1].num, 2, 'second ticket num')
     t.deepEqual(
         tickets[1].blockers,
-        [{ feature:'', num:1, where:'run' }],
+        [{ feature: '', num: 1, where: 'run' }],
         'second blocked by 1'
     )
 })
@@ -288,15 +289,15 @@ test('scanTickets returns sorted by number', t => {
     const dir = tmp()
     writeFileSync(
         join(dir, '10-z.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
     writeFileSync(
         join(dir, '02-a.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
     writeFileSync(
         join(dir, '03-b.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
 
     const tickets = scanTickets(dir)
@@ -312,15 +313,15 @@ test('scanTickets populates feature on every ticket', t => {
     writeFileSync(
         join(dir, '01-first.md'),
         makeTicketBody({
-            status:'ready-for-agent',
-            blockers:[],
+            status: 'ready-for-agent',
+            blockers: [],
         })
     )
     writeFileSync(
         join(dir, '02-second.md'),
         makeTicketBody({
-            status:'ready-for-agent',
-            blockers:[1],
+            status: 'ready-for-agent',
+            blockers: [1],
         })
     )
 
@@ -342,22 +343,22 @@ test('scanTickets populates feature on every ticket', t => {
 test('findReadyTickets returns unblocked ready tickets', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
         makeTicket({
-            num:3,
-            filename:'03-c.md',
-            status:'done',
-            blockers:[],
+            num: 3,
+            filename: '03-c.md',
+            status: 'done',
+            blockers: [],
         }),
     ]
 
@@ -369,22 +370,22 @@ test('findReadyTickets returns unblocked ready tickets', t => {
 test('findReadyTickets unblocks after deps done', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            status:'done',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            status: 'done',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
         makeTicket({
-            num:3,
-            filename:'03-c.md',
-            status:'ready-for-agent',
-            blockers:[1, 2],
+            num: 3,
+            filename: '03-c.md',
+            status: 'ready-for-agent',
+            blockers: [1, 2],
         }),
     ]
 
@@ -400,16 +401,16 @@ test('findReadyTickets unblocks after deps done', t => {
 test('findReadyTickets returns nothing when all blocked', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            status:'ready-for-agent',
-            blockers:[2],
+            num: 1,
+            filename: '01-a.md',
+            status: 'ready-for-agent',
+            blockers: [2],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
     ]
 
@@ -422,16 +423,16 @@ test(
     t => {
         const tickets:Ticket[] = [
             makeTicket({
-                num:1,
-                filename:'01-a.md',
-                status:'',
-                blockers:[],
+                num: 1,
+                filename: '01-a.md',
+                status: '',
+                blockers: [],
             }),
             makeTicket({
-                num:2,
-                filename:'02-b.md',
-                status:'ready-for-agent',
-                blockers:[1],
+                num: 2,
+                filename: '02-b.md',
+                status: 'ready-for-agent',
+                blockers: [1],
             }),
         ]
 
@@ -449,16 +450,16 @@ test(
     t => {
         const tickets:Ticket[] = [
             makeTicket({
-                num:1,
-                filename:'01-a.md',
-                status:'claimed',
-                blockers:[],
+                num: 1,
+                filename: '01-a.md',
+                status: 'claimed',
+                blockers: [],
             }),
             makeTicket({
-                num:2,
-                filename:'02-b.md',
-                status:'ready-for-agent',
-                blockers:[1],
+                num: 2,
+                filename: '02-b.md',
+                status: 'ready-for-agent',
+                blockers: [1],
             }),
         ]
 
@@ -476,16 +477,16 @@ test(
     t => {
         const tickets:Ticket[] = [
             makeTicket({
-                num:1,
-                filename:'01-a.md',
-                status:'resolved',
-                blockers:[],
+                num: 1,
+                filename: '01-a.md',
+                status: 'resolved',
+                blockers: [],
             }),
             makeTicket({
-                num:2,
-                filename:'02-b.md',
-                status:'ready-for-agent',
-                blockers:[1],
+                num: 2,
+                filename: '02-b.md',
+                status: 'ready-for-agent',
+                blockers: [1],
             }),
         ]
 
@@ -501,16 +502,16 @@ test(
 test('findReadyTickets unblocks on done status', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            status:'done',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            status: 'done',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
     ]
 
@@ -525,23 +526,23 @@ test(
     t => {
         const tickets:Ticket[] = [
             makeTicket({
-                num:1,
-                filename:'01-setup.md',
-                status:'done',
-                feature:'auth',
+                num: 1,
+                filename: '01-setup.md',
+                status: 'done',
+                feature: 'auth',
             }),
             makeTicket({
-                num:1,
-                filename:'01-base.md',
-                status:'ready-for-agent',
-                feature:'payments',
+                num: 1,
+                filename: '01-base.md',
+                status: 'ready-for-agent',
+                feature: 'payments',
             }),
             makeTicket({
-                num:2,
-                filename:'02-charge.md',
-                status:'ready-for-agent',
-                blockers:[1],
-                feature:'payments',
+                num: 2,
+                filename: '02-charge.md',
+                status: 'ready-for-agent',
+                blockers: [1],
+                feature: 'payments',
             }),
         ]
 
@@ -572,18 +573,18 @@ const keysOf = (refs?:BlockerRef[]) =>
 test('findBlockedTickets: direct blocker failed', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
     ]
 
@@ -601,25 +602,25 @@ test('findBlockedTickets: direct blocker failed', t => {
 test('findBlockedTickets: chain through ready ticket', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
         makeTicket({
-            num:3,
-            filename:'03-c.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[2],
+            num: 3,
+            filename: '03-c.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [2],
         }),
     ]
 
@@ -644,25 +645,25 @@ test('findBlockedTickets: chain through ready ticket', t => {
 test('findBlockedTickets: multiple failed blockers', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:3,
-            filename:'03-c.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1, 2],
+            num: 3,
+            filename: '03-c.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1, 2],
         }),
     ]
 
@@ -683,25 +684,25 @@ test('findBlockedTickets: multiple failed blockers', t => {
 test('findBlockedTickets: different features', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'a',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'a',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:1,
-            filename:'01-x.md',
-            feature:'b',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-x.md',
+            feature: 'b',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-y.md',
-            feature:'b',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-y.md',
+            feature: 'b',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
     ]
 
@@ -719,18 +720,18 @@ test('findBlockedTickets: different features', t => {
 test('findBlockedTickets: human status blocker', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'f',
-            status:HUMAN_STATUS,
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'f',
+            status: HUMAN_STATUS,
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
     ]
 
@@ -749,18 +750,18 @@ test('findBlockedTickets: a failed ticket is never a key', t => {
     // were a candidate; it has failed itself, so it is not.
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'f',
-            status:HUMAN_STATUS,
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'f',
+            status: HUMAN_STATUS,
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
     ]
 
@@ -772,25 +773,25 @@ test('findBlockedTickets: a failed ticket is never a key', t => {
 test('findBlockedTickets: chain to human ticket', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'f',
-            status:HUMAN_STATUS,
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'f',
+            status: HUMAN_STATUS,
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
         makeTicket({
-            num:3,
-            filename:'03-c.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[2],
+            num: 3,
+            filename: '03-c.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [2],
         }),
     ]
 
@@ -813,25 +814,25 @@ test('findBlockedTickets: chain to human ticket', t => {
 test('findBlockedTickets: done blocker not blocking', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'f',
-            status:'done',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'f',
+            status: 'done',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:3,
-            filename:'03-c.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1, 2],
+            num: 3,
+            filename: '03-c.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1, 2],
         }),
     ]
 
@@ -842,32 +843,32 @@ test('findBlockedTickets: done blocker not blocking', t => {
 test('findBlockedTickets: diamond pattern', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
         makeTicket({
-            num:3,
-            filename:'03-c.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 3,
+            filename: '03-c.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
         makeTicket({
-            num:4,
-            filename:'04-d.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[2, 3],
+            num: 4,
+            filename: '04-d.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [2, 3],
         }),
     ]
 
@@ -894,11 +895,11 @@ test('findBlockedTickets: diamond pattern', t => {
 test('findBlockedTickets: missing blocker number', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[9],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [9],
         }),
     ]
 
@@ -909,18 +910,18 @@ test('findBlockedTickets: missing blocker number', t => {
 test('findBlockedTickets: cycle', t => {
     const tickets:Ticket[] = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[2],
+            num: 1,
+            filename: '01-a.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [2],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            feature:'f',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-b.md',
+            feature: 'f',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
     ]
 
@@ -936,10 +937,10 @@ test('findBlockedTickets: dense graph', t => {
         if (i > 2) blockers.push(i - 2)
         tickets.push(
             makeTicket({
-                num:i,
-                filename:`${String(i).padStart(3, '0')}-ticket.md`,
-                feature:'f',
-                status:'ready-for-agent',
+                num: i,
+                filename: `${String(i).padStart(3, '0')}-ticket.md`,
+                feature: 'f',
+                status: 'ready-for-agent',
                 blockers,
             })
         )
@@ -986,26 +987,26 @@ function lineWith (lines:string[], prefix:string):string {
 test('blockerSatisfied decides each kind of ref', t => {
     const doneKeys = new Set(['a:1'])
     t.ok(
-        blockerSatisfied({ feature:'a', num:1, where:'run' }, doneKeys),
+        blockerSatisfied({ feature: 'a', num: 1, where: 'run' }, doneKeys),
         'run ref to a done ticket'
     )
     t.ok(
-        !blockerSatisfied({ feature:'a', num:2, where:'run' }, doneKeys),
+        !blockerSatisfied({ feature: 'a', num: 2, where: 'run' }, doneKeys),
         'run ref to an unfinished ticket'
     )
     t.ok(
-        blockerSatisfied({ feature:'b', num:1, where:'done' }, doneKeys),
+        blockerSatisfied({ feature: 'b', num: 1, where: 'done' }, doneKeys),
         'done outside the run'
     )
     t.ok(
         !blockerSatisfied(
-            { feature:'b', num:1, where:'pending' }, doneKeys
+            { feature: 'b', num: 1, where: 'pending' }, doneKeys
         ),
         'pending outside the run'
     )
     t.ok(
         !blockerSatisfied(
-            { feature:'b', num:1, where:'missing' }, doneKeys
+            { feature: 'b', num: 1, where: 'missing' }, doneKeys
         ),
         'missing'
     )
@@ -1013,10 +1014,10 @@ test('blockerSatisfied decides each kind of ref', t => {
 
 test('AC2.1: a done blocker outside the run lets a ticket run', t => {
     const ticket = makeTicket({
-        num:2,
-        filename:'02-x.md',
-        feature:'a',
-        blockers:[{ feature:'b', num:1, where:'done', status:'done' }],
+        num: 2,
+        filename: '02-x.md',
+        feature: 'a',
+        blockers: [{ feature: 'b', num: 1, where: 'done', status: 'done' }],
     })
     t.deepEqual(
         findReadyTickets([ticket]).map(x => x.num), [2], 'ready'
@@ -1025,10 +1026,10 @@ test('AC2.1: a done blocker outside the run lets a ticket run', t => {
 
 test('AC2.2: an unfinished blocker outside the run blocks', t => {
     const ref:BlockerRef = {
-        feature:'b', num:1, where:'pending', status:'ready-for-agent',
+        feature: 'b', num: 1, where: 'pending', status: 'ready-for-agent',
     }
     const ticket = makeTicket({
-        num:2, filename:'02-x.md', feature:'a', blockers:[ref],
+        num: 2, filename: '02-x.md', feature: 'a', blockers: [ref],
     })
     t.deepEqual(findReadyTickets([ticket]), [], 'not ready')
     t.deepEqual(
@@ -1042,12 +1043,12 @@ test('AC2.2: an unfinished blocker outside the run blocks', t => {
 })
 
 test('AC2.3: a selected cross-feature blocker runs first', t => {
-    const b1 = makeTicket({ num:1, filename:'01-first.md', feature:'b' })
+    const b1 = makeTicket({ num: 1, filename: '01-first.md', feature: 'b' })
     const a2 = makeTicket({
-        num:2,
-        filename:'02-second.md',
-        feature:'a',
-        blockers:[{ feature:'b', num:1, where:'run' }],
+        num: 2,
+        filename: '02-second.md',
+        feature: 'a',
+        blockers: [{ feature: 'b', num: 1, where: 'run' }],
     })
     t.deepEqual(
         findReadyTickets([b1, a2]).map(x => x.filename),
@@ -1055,7 +1056,7 @@ test('AC2.3: a selected cross-feature blocker runs first', t => {
         'only the blocker is ready'
     )
     t.deepEqual(
-        findReadyTickets([{ ...b1, status:'done' }, a2])
+        findReadyTickets([{ ...b1, status: 'done' }, a2])
             .map(x => x.filename),
         ['02-second.md'],
         'the dependent is ready once the blocker is done'
@@ -1073,14 +1074,14 @@ test('AC2.3: a selected cross-feature blocker runs first', t => {
 })
 
 test('AC2.4: a blocker that matches no ticket blocks', t => {
-    const other:BlockerRef = { feature:'b', num:9, where:'missing' }
-    const own:BlockerRef = { feature:'a', num:9, where:'missing' }
+    const other:BlockerRef = { feature: 'b', num: 9, where: 'missing' }
+    const own:BlockerRef = { feature: 'a', num: 9, where: 'missing' }
     const tickets = [
         makeTicket({
-            num:2, filename:'02-x.md', feature:'a', blockers:[other],
+            num: 2, filename: '02-x.md', feature: 'a', blockers: [other],
         }),
         makeTicket({
-            num:3, filename:'03-y.md', feature:'a', blockers:[own],
+            num: 3, filename: '03-y.md', feature: 'a', blockers: [own],
         }),
     ]
     t.deepEqual(findReadyTickets(tickets), [], 'neither is ready')
@@ -1093,17 +1094,17 @@ test('AC2.4: a blocker that matches no ticket blocks', t => {
 test('AC2.5: a chain is blocked by the outside ticket', t => {
     const tickets = [
         makeTicket({
-            num:1,
-            filename:'01-x.md',
-            feature:'a',
-            blockers:[{ feature:'a', num:2, where:'run' }],
+            num: 1,
+            filename: '01-x.md',
+            feature: 'a',
+            blockers: [{ feature: 'a', num: 2, where: 'run' }],
         }),
         makeTicket({
-            num:2,
-            filename:'02-y.md',
-            feature:'a',
-            blockers:[{
-                feature:'b', num:5, where:'pending', status:'claimed',
+            num: 2,
+            filename: '02-y.md',
+            feature: 'a',
+            blockers: [{
+                feature: 'b', num: 5, where: 'pending', status: 'claimed',
             }],
         }),
     ]
@@ -1115,25 +1116,25 @@ test('AC2.5: a chain is blocked by the outside ticket', t => {
 test('AC2.6: a human ticket blocks only its own feature', t => {
     const tickets = [
         makeTicket({
-            num:2,
-            filename:'02-human.md',
-            feature:'a',
-            status:HUMAN_STATUS,
+            num: 2,
+            filename: '02-human.md',
+            feature: 'a',
+            status: HUMAN_STATUS,
         }),
         makeTicket({
-            num:2, filename:'02-done.md', feature:'b', status:'done',
+            num: 2, filename: '02-done.md', feature: 'b', status: 'done',
         }),
         makeTicket({
-            num:3,
-            filename:'03-waits.md',
-            feature:'b',
-            blockers:[{ feature:'b', num:2, where:'run' }],
+            num: 3,
+            filename: '03-waits.md',
+            feature: 'b',
+            blockers: [{ feature: 'b', num: 2, where: 'run' }],
         }),
         makeTicket({
-            num:4,
-            filename:'04-needs-human.md',
-            feature:'b',
-            blockers:[{ feature:'a', num:2, where:'run' }],
+            num: 4,
+            filename: '04-needs-human.md',
+            feature: 'b',
+            blockers: [{ feature: 'a', num: 2, where: 'run' }],
         }),
     ]
     const summary = renderFinishSummary(tickets, 0, new Set())
@@ -1153,23 +1154,23 @@ test('AC2.6: a human ticket blocks only its own feature', t => {
 
 test('AC2.8: dry run waves agree with readiness', t => {
     const pending:BlockerRef = {
-        feature:'b', num:4, where:'pending', status:'ready-for-agent',
+        feature: 'b', num: 4, where: 'pending', status: 'ready-for-agent',
     }
     const tickets = [
         makeTicket({
-            num:1,
-            filename:'01-free.md',
-            feature:'a',
-            blockers:[{ feature:'b', num:1, where:'done', status:'done' }],
+            num: 1,
+            filename: '01-free.md',
+            feature: 'a',
+            blockers: [{ feature: 'b', num: 1, where: 'done', status: 'done' }],
         }),
         makeTicket({
-            num:2, filename:'02-stuck.md', feature:'a', blockers:[pending],
+            num: 2, filename: '02-stuck.md', feature: 'a', blockers: [pending],
         }),
         makeTicket({
-            num:3,
-            filename:'03-after.md',
-            feature:'a',
-            blockers:[{ feature:'a', num:1, where:'run' }],
+            num: 3,
+            filename: '03-after.md',
+            feature: 'a',
+            blockers: [{ feature: 'a', num: 1, where: 'run' }],
         }),
     ]
     t.deepEqual(
@@ -1207,16 +1208,16 @@ test(
     t => {
         const tickets:Array<Ticket> = [
             makeTicket({
-                num:1,
-                filename:'01-a.md',
-                status:'claimed',
-                blockers:[],
+                num: 1,
+                filename: '01-a.md',
+                status: 'claimed',
+                blockers: [],
             }),
             makeTicket({
-                num:2,
-                filename:'02-b.md',
-                status:'ready-for-agent',
-                blockers:[1],
+                num: 2,
+                filename: '02-b.md',
+                status: 'ready-for-agent',
+                blockers: [1],
             }),
         ]
 
@@ -1248,16 +1249,16 @@ test(
     t => {
         const tickets:Array<Ticket> = [
             makeTicket({
-                num:1,
-                filename:'01-a.md',
-                status:'claimed',
-                blockers:[],
+                num: 1,
+                filename: '01-a.md',
+                status: 'claimed',
+                blockers: [],
             }),
             makeTicket({
-                num:2,
-                filename:'02-b.md',
-                status:'ready-for-agent',
-                blockers:[1],
+                num: 2,
+                filename: '02-b.md',
+                status: 'ready-for-agent',
+                blockers: [1],
             }),
         ]
 
@@ -1287,23 +1288,23 @@ test(
     t => {
         const tickets:Array<Ticket> = [
             makeTicket({
-                num:1,
-                filename:'01-base.md',
-                status:'ready-for-agent',
-                feature:'auth',
+                num: 1,
+                filename: '01-base.md',
+                status: 'ready-for-agent',
+                feature: 'auth',
             }),
             makeTicket({
-                num:1,
-                filename:'01-base.md',
-                status:'ready-for-agent',
-                feature:'payments',
+                num: 1,
+                filename: '01-base.md',
+                status: 'ready-for-agent',
+                feature: 'payments',
             }),
             makeTicket({
-                num:2,
-                filename:'02-after.md',
-                status:'ready-for-agent',
-                blockers:[1],
-                feature:'payments',
+                num: 2,
+                filename: '02-after.md',
+                status: 'ready-for-agent',
+                blockers: [1],
+                feature: 'payments',
             }),
         ]
 
@@ -1341,17 +1342,17 @@ test(
     t => {
         const tickets:Array<Ticket> = [
             makeTicket({
-                num:1,
-                filename:'01-base.md',
-                status:'done',
-                feature:'auth',
+                num: 1,
+                filename: '01-base.md',
+                status: 'done',
+                feature: 'auth',
             }),
             makeTicket({
-                num:2,
-                filename:'02-needs-1.md',
-                status:'ready-for-agent',
-                blockers:[1],
-                feature:'payments',
+                num: 2,
+                filename: '02-needs-1.md',
+                status: 'ready-for-agent',
+                blockers: [1],
+                feature: 'payments',
             }),
         ]
 
@@ -1375,25 +1376,180 @@ test(
     }
 )
 
+// -- simulateRun --
+
+function runFixture ():Array<Ticket> {
+    return [
+        makeTicket({
+            num: 1,
+            filename: '01-a-base.md',
+            status: 'done',
+            feature: 'a',
+        }),
+        makeTicket({
+            num: 2,
+            filename: '02-a-after-base.md',
+            blockers: [1],
+            feature: 'a',
+        }),
+        makeTicket({
+            num: 3,
+            filename: '03-a-after-two.md',
+            blockers: [2],
+            feature: 'a',
+        }),
+        makeTicket({
+            num: 1,
+            filename: '01-b-needs-a3.md',
+            blockers: [{ feature: 'a', num: 3, where: 'run' }],
+            feature: 'b',
+        }),
+        makeTicket({
+            num: 4,
+            filename: '04-a-human.md',
+            status: 'ready-for-human',
+            feature: 'a',
+        }),
+        makeTicket({
+            num: 5,
+            filename: '05-a-behind-human.md',
+            blockers: [4],
+            feature: 'a',
+        }),
+        makeTicket({
+            num: 2,
+            filename: '02-b-cycle.md',
+            blockers: [3],
+            feature: 'b',
+        }),
+        makeTicket({
+            num: 3,
+            filename: '03-b-cycle.md',
+            blockers: [2],
+            feature: 'b',
+        }),
+        makeTicket({
+            num: 4,
+            filename: '04-b-pending.md',
+            blockers: [{
+                feature: 'c',
+                num: 9,
+                where: 'pending',
+                status: 'ready-for-agent',
+            }],
+            feature: 'b',
+        }),
+    ]
+}
+
+function dryRunWaveLines (tickets:Array<Ticket>):Array<string> {
+    const output:Array<string> = []
+    const originalLog = console.log
+    console.log = function (msg:unknown) {
+        output.push(String(msg))
+    }
+
+    try {
+        dryRun(tickets, 'spec body', 'npm test')
+    } finally {
+        console.log = originalLog
+    }
+    return output.join('\n').split('\n')
+}
+
+test('simulateRun waves match the dry-run waves', t => {
+    const tickets = runFixture()
+    const run = simulateRun(tickets)
+
+    const dryWaves:Array<Array<string>> = dryRunWaveLines(tickets)
+        .map(line => /^ {2}Wave \d+: (.*)$/.exec(line))
+        .filter((m):m is RegExpExecArray => m !== null)
+        .map(m => m[1]!.split(', '))
+
+    t.deepEqual(
+        dryWaves,
+        run.waves.map(w => w.map(ticket => ticket.filename)),
+        'simulated waves are the dry-run waves'
+    )
+    t.equal(run.waves.length, 3, 'the chain takes three waves')
+})
+
+test('simulateRun neverRun is ready tickets in no wave', t => {
+    const tickets = runFixture()
+    const run = simulateRun(tickets)
+
+    const inWave = new Set(
+        run.waves.flat().map(ticket => ticketKey(
+            ticket.feature, ticket.num
+        ))
+    )
+    const expected = tickets
+        .filter(ticket => ticket.status === 'ready-for-agent')
+        .map(ticket => ticketKey(ticket.feature, ticket.num))
+        .filter(key => !inWave.has(key))
+        .sort()
+    const actual = run.neverRun
+        .map(ticket => ticketKey(ticket.feature, ticket.num))
+        .sort()
+
+    t.deepEqual(
+        actual,
+        expected,
+        'neverRun is the ready-for-agent tickets in no wave'
+    )
+    t.deepEqual(
+        actual,
+        ['a:5', 'b:2', 'b:3', 'b:4'].sort(),
+        'the fixture leaves a:5, b:2, b:3 and b:4 out of every wave'
+    )
+})
+
+test('simulateRun deadRefs equals findBlockedTickets', t => {
+    const tickets = runFixture()
+    const run = simulateRun(tickets)
+    const expected = findBlockedTickets(tickets, new Set())
+
+    t.deepEqual(
+        [...run.deadRefs.entries()],
+        [...expected.entries()],
+        'deadRefs matches findBlockedTickets with no failed keys'
+    )
+    t.ok(run.deadRefs.has(ticketKey('a', 5)), 'a:5 has a dead ref')
+    t.ok(run.deadRefs.has(ticketKey('b', 4)), 'b:4 has a dead ref')
+    t.ok(
+        !run.deadRefs.has(ticketKey('b', 2)) &&
+            !run.deadRefs.has(ticketKey('b', 3)),
+        'cycle tickets have no dead refs'
+    )
+})
+
+test('simulateRun on no tickets is empty', t => {
+    const run = simulateRun([])
+
+    t.deepEqual(run.waves, [], 'no waves')
+    t.deepEqual(run.neverRun, [], 'nothing is never-run')
+    t.equal(run.deadRefs.size, 0, 'no dead refs')
+})
+
 // -- markDone --
 
 test('markDone updates file and ticket object', t => {
     const dir = tmp()
     const filepath = join(dir, '01-test.md')
     const body = makeTicketBody({
-        status:'ready-for-agent',
+        status: 'ready-for-agent',
     })
     writeFileSync(filepath, body)
 
     const ticket:Ticket = {
-        num:1,
-        slug:'test',
-        filename:'01-test.md',
+        num: 1,
+        slug: 'test',
+        filename: '01-test.md',
         filepath,
         body,
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
     }
 
     markDone(ticket)
@@ -1512,14 +1668,14 @@ test('checkItems checks off matching items on disk', t => {
     writeFileSync(filepath, body)
 
     const ticket:Ticket = {
-        num:1,
-        slug:'test',
-        filename:'01-test.md',
+        num: 1,
+        slug: 'test',
+        filename: '01-test.md',
         filepath,
         body,
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
     }
 
     checkItems(ticket, ['first item', 'third item'])
@@ -1552,14 +1708,14 @@ test('checkItems is a no-op for empty list', t => {
     writeFileSync(filepath, body)
 
     const ticket:Ticket = {
-        num:1,
-        slug:'noop',
-        filename:'01-noop.md',
+        num: 1,
+        slug: 'noop',
+        filename: '01-noop.md',
         filepath,
         body,
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
     }
 
     checkItems(ticket, [])
@@ -1582,14 +1738,14 @@ test('checkItems handles special regex characters', t => {
     writeFileSync(filepath, body)
 
     const ticket:Ticket = {
-        num:1,
-        slug:'special',
-        filename:'01-special.md',
+        num: 1,
+        slug: 'special',
+        filename: '01-special.md',
         filepath,
         body,
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
     }
 
     checkItems(ticket, [itemText])
@@ -1620,14 +1776,14 @@ test('checkItems checks items wrapped across lines', t => {
     writeFileSync(filepath, body)
 
     const ticket:Ticket = {
-        num:1,
-        slug:'wrapped',
-        filename:'01-wrapped.md',
+        num: 1,
+        slug: 'wrapped',
+        filename: '01-wrapped.md',
         filepath,
         body,
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
     }
 
     checkItems(ticket, [
@@ -1667,14 +1823,14 @@ test('checkItems matches bullet-prefixed echoes case-insensitively', t => {
     writeFileSync(filepath, body)
 
     const ticket:Ticket = {
-        num:1,
-        slug:'bullet',
-        filename:'01-bullet.md',
+        num: 1,
+        slug: 'bullet',
+        filename: '01-bullet.md',
         filepath,
         body,
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
     }
 
     checkItems(ticket, ['- [x] first item here'])
@@ -1702,14 +1858,14 @@ test('checkItems does not touch items inside code fences', t => {
     writeFileSync(filepath, body)
 
     const ticket:Ticket = {
-        num:1,
-        slug:'fence',
-        filename:'01-fence.md',
+        num: 1,
+        slug: 'fence',
+        filename: '01-fence.md',
         filepath,
         body,
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
     }
 
     checkItems(ticket, ['fenced example not an item', itemText])
@@ -1740,14 +1896,14 @@ test('markDone checks off all remaining items', t => {
     writeFileSync(filepath, body)
 
     const ticket:Ticket = {
-        num:1,
-        slug:'done-items',
-        filename:'01-done-items.md',
+        num: 1,
+        slug: 'done-items',
+        filename: '01-done-items.md',
         filepath,
         body,
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
     }
 
     markDone(ticket)
@@ -1788,14 +1944,14 @@ test('markDone keeps on-disk edits missing from ticket.body', t => {
     writeFileSync(filepath, merged)
 
     const ticket:Ticket = {
-        num:1,
-        slug:'merged',
-        filename:'01-merged.md',
+        num: 1,
+        slug: 'merged',
+        filename: '01-merged.md',
         filepath,
-        body:scanned,
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        body: scanned,
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
     }
 
     markDone(ticket)
@@ -1819,11 +1975,11 @@ test('markDone keeps on-disk edits missing from ticket.body', t => {
 
 test('renderPrompt includes spec and ticket', t => {
     const ticket = makeTicket({
-        num:1,
-        filename:'01-thing.md',
+        num: 1,
+        filename: '01-thing.md',
     })
     const prompt = renderPrompt('spec body here', ticket,
-        { testCmd:'npm test' })
+        { testCmd: 'npm test' })
     t.ok(
         prompt.includes('spec body here'),
         'contains spec'
@@ -1863,17 +2019,17 @@ test('subagentRule read-only drops exactly one line', t => {
 })
 
 test('renderPrompt is unchanged without preferSubagent', t => {
-    const ticket = makeTicket({ num:1, filename:'01-thing.md' })
-    const base = renderPrompt('spec', ticket, { testCmd:'npm test' })
+    const ticket = makeTicket({ num: 1, filename: '01-thing.md' })
+    const base = renderPrompt('spec', ticket, { testCmd: 'npm test' })
     t.equal(
         renderPrompt('spec', ticket,
-            { testCmd:'npm test', preferSubagent:'' }),
+            { testCmd: 'npm test', preferSubagent: '' }),
         base,
         'empty string renders the same prompt'
     )
     t.equal(
         renderPrompt('spec', ticket,
-            { testCmd:'npm test', preferSubagent:undefined }),
+            { testCmd: 'npm test', preferSubagent: undefined }),
         base,
         'undefined renders the same prompt'
     )
@@ -1882,24 +2038,24 @@ test('renderPrompt is unchanged without preferSubagent', t => {
 })
 
 test('renderPrompt includes the subagent rule when set', t => {
-    const ticket = makeTicket({ num:1, filename:'01-thing.md' })
+    const ticket = makeTicket({ num: 1, filename: '01-thing.md' })
     const prompt = renderPrompt('spec', ticket,
-        { testCmd:'npm test', preferSubagent:'haiku' })
+        { testCmd: 'npm test', preferSubagent: 'haiku' })
     t.ok(subagentRule('haiku').every(line => prompt.includes(line)),
         'every subagent rule line')
 })
 
 test('renderMergePrompt is unchanged without preferSubagent', t => {
-    const ticket = makeTicket({ num:1, filename:'01-thing.md' })
+    const ticket = makeTicket({ num: 1, filename: '01-thing.md' })
     const base = renderMergePrompt('spec', ticket)
     t.equal(
-        renderMergePrompt('spec', ticket, { preferSubagent:'' }),
+        renderMergePrompt('spec', ticket, { preferSubagent: '' }),
         base,
         'empty string renders the same prompt'
     )
     t.equal(
         renderMergePrompt('spec', ticket,
-            { preferSubagent:undefined }),
+            { preferSubagent: undefined }),
         base,
         'undefined renders the same prompt'
     )
@@ -1908,9 +2064,9 @@ test('renderMergePrompt is unchanged without preferSubagent', t => {
 })
 
 test('renderMergePrompt includes the subagent rule when set', t => {
-    const ticket = makeTicket({ num:1, filename:'01-thing.md' })
+    const ticket = makeTicket({ num: 1, filename: '01-thing.md' })
     const prompt = renderMergePrompt('spec', ticket,
-        { preferSubagent:'haiku' })
+        { preferSubagent: 'haiku' })
     t.ok(subagentRule('haiku').every(line => prompt.includes(line)),
         'every subagent rule line')
 })
@@ -1950,12 +2106,12 @@ test('lookupSpec returns per-feature spec when available', t => {
 test('renderPrompt instructs agent to use /tdd',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const prompt = renderPrompt(
             'spec body here', ticket,
-            { testCmd:'npm test' }
+            { testCmd: 'npm test' }
         )
         t.ok(
             prompt.includes('/tdd'),
@@ -1971,12 +2127,12 @@ test('renderPrompt instructs agent to use /tdd',
 test('renderPrompt instructs agent to report [x] items',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const prompt = renderPrompt(
             'spec body here', ticket,
-            { testCmd:'npm test' }
+            { testCmd: 'npm test' }
         )
         t.ok(
             prompt.includes('[x]'),
@@ -1988,12 +2144,12 @@ test('renderPrompt instructs agent to report [x] items',
 test('renderPrompt includes the test command',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const prompt = renderPrompt(
             'spec body here', ticket,
-            { testCmd:'npm run check' }
+            { testCmd: 'npm run check' }
         )
         t.ok(
             prompt.includes('npm run check'),
@@ -2004,16 +2160,16 @@ test('renderPrompt includes the test command',
 test('renderPrompt with an empty test command names no gate',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const withCmd = renderPrompt(
             'spec body here', ticket,
-            { testCmd:'npm run check' }
+            { testCmd: 'npm run check' }
         )
         const without = renderPrompt(
             'spec body here', ticket,
-            { testCmd:'' }
+            { testCmd: '' }
         )
         t.ok(
             withCmd.includes('npm run check'),
@@ -2032,16 +2188,16 @@ test('renderPrompt with an empty test command names no gate',
 test('renderPrompt names the install command when given',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const withCmd = renderPrompt(
             'spec body', ticket,
-            { testCmd:'npm test', installCmd:'pnpm i -x' }
+            { testCmd: 'npm test', installCmd: 'pnpm i -x' }
         )
         const without = renderPrompt(
             'spec body', ticket,
-            { testCmd:'npm test' }
+            { testCmd: 'npm test' }
         )
         t.ok(
             withCmd.includes('pnpm i -x'),
@@ -2055,11 +2211,11 @@ test('renderPrompt names the install command when given',
 
 test('renderPrompt contains git push rule', t => {
     const ticket = makeTicket({
-        num:1,
-        filename:'01-thing.md',
+        num: 1,
+        filename: '01-thing.md',
     })
     const prompt = renderPrompt('spec body', ticket,
-        { testCmd:'npm test' })
+        { testCmd: 'npm test' })
     t.ok(
         prompt.toLowerCase().includes('git push'),
         'prompt mentions git push'
@@ -2069,11 +2225,11 @@ test('renderPrompt contains git push rule', t => {
 test('renderPrompt contains current directory rule',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const prompt = renderPrompt('spec body', ticket,
-            { testCmd:'npm test' })
+            { testCmd: 'npm test' })
         t.ok(
             prompt.toLowerCase().includes(
                 'current directory'
@@ -2085,11 +2241,11 @@ test('renderPrompt contains current directory rule',
 test('renderMergePrompt names the install command when ' +
     'given', t => {
     const ticket = makeTicket({
-        num:1,
-        filename:'01-thing.md',
+        num: 1,
+        filename: '01-thing.md',
     })
     const prompt = renderMergePrompt(
-        'spec body', ticket, { installCmd:'pnpm i -x' }
+        'spec body', ticket, { installCmd: 'pnpm i -x' }
     )
     t.ok(
         prompt.includes('pnpm i -x'),
@@ -2099,8 +2255,8 @@ test('renderMergePrompt names the install command when ' +
 
 test('renderMergePrompt contains git push rule', t => {
     const ticket = makeTicket({
-        num:1,
-        filename:'01-thing.md',
+        num: 1,
+        filename: '01-thing.md',
     })
     const prompt = renderMergePrompt('spec body', ticket)
     t.ok(
@@ -2111,8 +2267,8 @@ test('renderMergePrompt contains git push rule', t => {
 
 test('renderMergePrompt contains current directory rule', t => {
     const ticket = makeTicket({
-        num:1,
-        filename:'01-thing.md',
+        num: 1,
+        filename: '01-thing.md',
     })
     const prompt = renderMergePrompt('spec body', ticket)
     t.ok(
@@ -2124,11 +2280,11 @@ test('renderMergePrompt contains current directory rule', t => {
 test('renderPrompt asks agent to record learnings in AGENTS.md',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const prompt = renderPrompt('spec body', ticket,
-            { testCmd:'npm test' })
+            { testCmd: 'npm test' })
         t.ok(
             prompt.includes('AGENTS.md'),
             'prompt mentions AGENTS.md'
@@ -2141,11 +2297,11 @@ test('renderPrompt asks agent to record learnings in AGENTS.md',
 
 test('renderPrompt contains test integrity rule', t => {
     const ticket = makeTicket({
-        num:1,
-        filename:'01-thing.md',
+        num: 1,
+        filename: '01-thing.md',
     })
     const prompt = renderPrompt('spec body', ticket,
-        { testCmd:'npm test' })
+        { testCmd: 'npm test' })
     const lower = prompt.toLowerCase()
     t.ok(
         lower.includes('weaken'),
@@ -2160,11 +2316,11 @@ test('renderPrompt contains test integrity rule', t => {
 test('renderPrompt asks agent to read nearby docs first',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const prompt = renderPrompt('spec body', ticket,
-            { testCmd:'npm test' })
+            { testCmd: 'npm test' })
         t.ok(
             prompt.includes('CONTEXT.md'),
             'prompt mentions CONTEXT.md'
@@ -2178,11 +2334,11 @@ test('renderPrompt asks agent to read nearby docs first',
 test('renderPrompt asks for a commit per checklist item',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const prompt = renderPrompt('spec body', ticket,
-            { testCmd:'npm test' })
+            { testCmd: 'npm test' })
         t.ok(
             prompt.toLowerCase().includes(
                 'commit after each checklist item'
@@ -2194,13 +2350,13 @@ test('renderPrompt asks for a commit per checklist item',
 test('renderPrompt includes history when provided ' +
     '(AC4.1)', t => {
     const ticket = makeTicket({
-        num:1,
-        filename:'01-thing.md',
+        num: 1,
+        filename: '01-thing.md',
     })
     const token = randomUUID()
     const history = `Some history\ncontaining ${token}`
     const prompt = renderPrompt('spec body', ticket, {
-        testCmd:'npm test',
+        testCmd: 'npm test',
         history,
     })
     const tokenIdx = prompt.indexOf(token)
@@ -2225,14 +2381,14 @@ test('renderPrompt includes history when provided ' +
 test('renderPrompt with empty history equals no history ' +
     '(AC4.2)', t => {
     const ticket = makeTicket({
-        num:1,
-        filename:'01-thing.md',
+        num: 1,
+        filename: '01-thing.md',
     })
     const noHistory = renderPrompt('spec body', ticket,
-        { testCmd:'npm test' })
+        { testCmd: 'npm test' })
     const emptyHistory = renderPrompt('spec body', ticket, {
-        testCmd:'npm test',
-        history:'',
+        testCmd: 'npm test',
+        history: '',
     })
     t.equal(
         noHistory,
@@ -2244,7 +2400,7 @@ test('renderPrompt with empty history equals no history ' +
     // no-history prompt cannot carry an empty header or extra lines
     const history = 'HIST-' + randomUUID()
     const withHistory = renderPrompt('spec body', ticket, {
-        testCmd:'npm test',
+        testCmd: 'npm test',
         history,
     })
     t.equal(
@@ -2256,11 +2412,11 @@ test('renderPrompt with empty history equals no history ' +
 
 test('renderPrompt includes NOTES_PATH', t => {
     const ticket = makeTicket({
-        num:1,
-        filename:'01-thing.md',
+        num: 1,
+        filename: '01-thing.md',
     })
     const prompt = renderPrompt('spec body', ticket,
-        { testCmd:'npm test' })
+        { testCmd: 'npm test' })
     t.ok(
         prompt.includes(NOTES_PATH),
         'prompt mentions NOTES_PATH'
@@ -2270,8 +2426,8 @@ test('renderPrompt includes NOTES_PATH', t => {
 test('renderMergePrompt keeps both sides of doc conflicts',
     t => {
         const ticket = makeTicket({
-            num:1,
-            filename:'01-thing.md',
+            num: 1,
+            filename: '01-thing.md',
         })
         const prompt = renderMergePrompt('spec body', ticket)
         t.ok(
@@ -2297,10 +2453,10 @@ test('spawnAgent with cwd option runs in that directory',
         )
 
         const result = await spawnAgent({
-            prompt:'test',
-            agentCmd:MOCK_CWD,
-            model:null,
-            timeout:10,
+            prompt: 'test',
+            agentCmd: MOCK_CWD,
+            model: null,
+            timeout: 10,
             logPath,
             cwd,
         })
@@ -2335,10 +2491,10 @@ test('spawnAgent collects completed items from output',
         )
 
         const result = await spawnAgent({
-            prompt:'test',
-            agentCmd:MOCK_CHECKLIST,
-            model:null,
-            timeout:10,
+            prompt: 'test',
+            agentCmd: MOCK_CHECKLIST,
+            model: null,
+            timeout: 10,
             logPath,
         })
 
@@ -2366,10 +2522,10 @@ test('spawnAgent keeps logging stderr after stdout closes',
         )
 
         const result = await spawnAgent({
-            prompt:'test',
-            agentCmd:MOCK_CLOSE_STDOUT,
-            model:null,
-            timeout:10,
+            prompt: 'test',
+            agentCmd: MOCK_CLOSE_STDOUT,
+            model: null,
+            timeout: 10,
             logPath,
         })
 
@@ -2394,12 +2550,12 @@ test('spawnAgent reports spawn errors through onLine and the log',
             const logPath = join(tmpDir, 'agent.log')
 
             const result = await spawnAgent({
-                prompt:'x',
-                agentCmd:join(tmpDir, 'nightralph-no-such-agent'),
-                model:null,
-                timeout:10,
+                prompt: 'x',
+                agentCmd: join(tmpDir, 'nightralph-no-such-agent'),
+                model: null,
+                timeout: 10,
                 logPath,
-                onLine:(line:string) => lines.push(line),
+                onLine: (line:string) => lines.push(line),
             })
 
             t.equal(result.exitCode, 1, 'spawn failure exits 1')
@@ -2413,7 +2569,7 @@ test('spawnAgent reports spawn errors through onLine and the log',
                 'spawn error is written to the log'
             )
         } finally {
-            rmSync(tmpDir, { recursive:true, force:true })
+            rmSync(tmpDir, { recursive: true, force: true })
         }
     }
 )
@@ -2474,9 +2630,9 @@ function readEnvLog (path:string):unknown[] {
 
 function agentLine (id:string) {
     return {
-        type:'assistant',
-        message:{
-            content:[{ type:'tool_use', id, name:'Agent', input:{} }],
+        type: 'assistant',
+        message: {
+            content: [{ type: 'tool_use', id, name: 'Agent', input: {} }],
         },
     }
 }
@@ -2487,16 +2643,16 @@ test('spawnAgent sets CLAUDE_CODE_SUBAGENT_MODEL from preferSubagent',
         const envLog = join(base, 'env.log')
 
         await withFakeEnv({
-            CLAUDE_CODE_SUBAGENT_MODEL:'shell-model',
-            FAKE_CLAUDE_ENV_LOG:envLog,
+            CLAUDE_CODE_SUBAGENT_MODEL: 'shell-model',
+            FAKE_CLAUDE_ENV_LOG: envLog,
         }, async () => {
             const result = await spawnAgent({
-                prompt:'test',
-                agentCmd:FAKE_CLAUDE,
-                model:null,
-                timeout:10,
-                logPath:join(base, 'test.log'),
-                preferSubagent:'haiku',
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE,
+                model: null,
+                timeout: 10,
+                logPath: join(base, 'test.log'),
+                preferSubagent: 'haiku',
             })
             t.equal(result.exitCode, 0, 'agent exits successfully')
         })
@@ -2515,15 +2671,15 @@ test('spawnAgent keeps the shell subagent model without an option',
         const envLog = join(base, 'env.log')
 
         await withFakeEnv({
-            CLAUDE_CODE_SUBAGENT_MODEL:'shell-model',
-            FAKE_CLAUDE_ENV_LOG:envLog,
+            CLAUDE_CODE_SUBAGENT_MODEL: 'shell-model',
+            FAKE_CLAUDE_ENV_LOG: envLog,
         }, async () => {
             await spawnAgent({
-                prompt:'test',
-                agentCmd:FAKE_CLAUDE,
-                model:null,
-                timeout:10,
-                logPath:join(base, 'test.log'),
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE,
+                model: null,
+                timeout: 10,
+                logPath: join(base, 'test.log'),
             })
         })
 
@@ -2540,13 +2696,13 @@ test('spawnAgent leaves the subagent model unset without an option',
         const base = tmp()
         const envLog = join(base, 'env.log')
 
-        await withFakeEnv({ FAKE_CLAUDE_ENV_LOG:envLog }, async () => {
+        await withFakeEnv({ FAKE_CLAUDE_ENV_LOG: envLog }, async () => {
             await spawnAgent({
-                prompt:'test',
-                agentCmd:FAKE_CLAUDE,
-                model:null,
-                timeout:10,
-                logPath:join(base, 'test.log'),
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE,
+                model: null,
+                timeout: 10,
+                logPath: join(base, 'test.log'),
             })
         })
 
@@ -2563,14 +2719,14 @@ test('spawnAgent sets no subagent model for non-claude agents',
         const base = tmp()
         const envLog = join(base, 'env.log')
 
-        await withFakeEnv({ FAKE_CLAUDE_ENV_LOG:envLog }, async () => {
+        await withFakeEnv({ FAKE_CLAUDE_ENV_LOG: envLog }, async () => {
             await spawnAgent({
-                prompt:'test',
-                agentCmd:FAKE_CLAUDE_JS,
-                model:null,
-                timeout:10,
-                logPath:join(base, 'test.log'),
-                preferSubagent:'haiku',
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE_JS,
+                model: null,
+                timeout: 10,
+                logPath: join(base, 'test.log'),
+                preferSubagent: 'haiku',
             })
         })
 
@@ -2590,29 +2746,29 @@ test('spawnAgent reports subagent stats through onStats',
             agentLine('toolu_a'),
             agentLine('toolu_b'),
             {
-                type:'result',
-                subtype:'success',
-                total_cost_usd:0.5,
-                subagent_stats:{ spawned:3 },
+                type: 'result',
+                subtype: 'success',
+                total_cost_usd: 0.5,
+                subagent_stats: { spawned: 3 },
             },
         ])
 
-        await withFakeEnv({ FAKE_CLAUDE_STREAM:streamFile }, async () => {
+        await withFakeEnv({ FAKE_CLAUDE_STREAM: streamFile }, async () => {
             const result = await spawnAgent({
-                prompt:'test',
-                agentCmd:FAKE_CLAUDE,
-                model:null,
-                timeout:10,
-                logPath:join(base, 'test.log'),
-                onStats:stats => seen.push(stats),
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE,
+                model: null,
+                timeout: 10,
+                logPath: join(base, 'test.log'),
+                onStats: stats => seen.push(stats),
             })
 
             t.deepEqual(
                 seen,
                 [
-                    { subagents:1 },
-                    { subagents:2 },
-                    { subagents:3, costUsd:0.5 },
+                    { subagents: 1 },
+                    { subagents: 2 },
+                    { subagents: 3, costUsd: 0.5 },
                 ],
                 'onStats fires each time the stats change'
             )
@@ -2628,15 +2784,15 @@ test('spawnAgent keeps the subagent count but no cost on timeout',
         const streamFile = writeStreamFile(base, [agentLine('toolu_a')])
 
         await withFakeEnv({
-            FAKE_CLAUDE_STREAM:streamFile,
-            FAKE_CLAUDE_HANG:'1',
+            FAKE_CLAUDE_STREAM: streamFile,
+            FAKE_CLAUDE_HANG: '1',
         }, async () => {
             const result = await spawnAgent({
-                prompt:'test',
-                agentCmd:FAKE_CLAUDE,
-                model:null,
-                timeout:1,
-                logPath:join(base, 'test.log'),
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE,
+                model: null,
+                timeout: 1,
+                logPath: join(base, 'test.log'),
             })
 
             t.equal(result.timedOut, true, 'agent was killed at timeout')
@@ -2657,19 +2813,19 @@ test('spawnAgent survives wrong-typed stream lines',
             '{"type":"assistant","message":{"content":5}}',
             '{"type":"assistant","message":{"content":[null]}}',
             {
-                type:'result',
-                subtype:'success',
-                total_cost_usd:0.1,
+                type: 'result',
+                subtype: 'success',
+                total_cost_usd: 0.1,
             },
         ])
 
-        await withFakeEnv({ FAKE_CLAUDE_STREAM:streamFile }, async () => {
+        await withFakeEnv({ FAKE_CLAUDE_STREAM: streamFile }, async () => {
             const result = await spawnAgent({
-                prompt:'test',
-                agentCmd:FAKE_CLAUDE,
-                model:null,
-                timeout:10,
-                logPath:join(base, 'test.log'),
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE,
+                model: null,
+                timeout: 10,
+                logPath: join(base, 'test.log'),
             })
 
             t.equal(result.exitCode, 0, 'agent exits successfully')
@@ -2683,24 +2839,24 @@ test('spawnAgent ignores checklist text from subagent messages',
         const base = tmp()
         const streamFile = writeStreamFile(base, [
             {
-                type:'assistant',
-                parent_tool_use_id:'toolu_1',
-                message:{ content:[{ type:'text', text:'[x] first item' }] },
+                type: 'assistant',
+                parent_tool_use_id: 'toolu_1',
+                message: { content: [{ type: 'text', text: '[x] first item' }] },
             },
             {
-                type:'assistant',
-                parent_tool_use_id:null,
-                message:{ content:[{ type:'text', text:'[x] second item' }] },
+                type: 'assistant',
+                parent_tool_use_id: null,
+                message: { content: [{ type: 'text', text: '[x] second item' }] },
             },
         ])
 
-        await withFakeEnv({ FAKE_CLAUDE_STREAM:streamFile }, async () => {
+        await withFakeEnv({ FAKE_CLAUDE_STREAM: streamFile }, async () => {
             const result = await spawnAgent({
-                prompt:'test',
-                agentCmd:FAKE_CLAUDE,
-                model:null,
-                timeout:10,
-                logPath:join(base, 'test.log'),
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE,
+                model: null,
+                timeout: 10,
+                logPath: join(base, 'test.log'),
             })
 
             t.deepEqual(
@@ -2722,11 +2878,11 @@ test('spawnAgent omits subagent stats for non-claude agents',
         )
 
         const result = await spawnAgent({
-            prompt:'test',
-            agentCmd:MOCK_CHECKLIST,
-            model:null,
-            timeout:10,
-            logPath:join(base, 'test.log'),
+            prompt: 'test',
+            agentCmd: MOCK_CHECKLIST,
+            model: null,
+            timeout: 10,
+            logPath: join(base, 'test.log'),
         })
 
         t.equal('subagents' in result, false, 'no subagent count')
@@ -2751,13 +2907,13 @@ test('runWaves completes unblocked tickets', async t => {
     writeFileSync(
         join(issuesDir, '01-first.md'),
         makeTicketBody({
-            status:'ready-for-agent',
+            status: 'ready-for-agent',
         })
     )
     writeFileSync(
         join(issuesDir, '02-second.md'),
         makeTicketBody({
-            status:'ready-for-agent',
+            status: 'ready-for-agent',
         })
     )
 
@@ -2802,21 +2958,21 @@ test('runWaves respects dependency order', async t => {
     writeFileSync(
         join(issuesDir, '01-base.md'),
         makeTicketBody({
-            status:'ready-for-agent',
+            status: 'ready-for-agent',
         })
     )
     writeFileSync(
         join(issuesDir, '02-depends-on-1.md'),
         makeTicketBody({
-            status:'ready-for-agent',
-            blockers:[1],
+            status: 'ready-for-agent',
+            blockers: [1],
         })
     )
     writeFileSync(
         join(issuesDir, '03-depends-on-2.md'),
         makeTicketBody({
-            status:'ready-for-agent',
-            blockers:[2],
+            status: 'ready-for-agent',
+            blockers: [2],
         })
     )
 
@@ -2852,14 +3008,14 @@ test('runWaves stops dependents when agent fails', async t => {
     writeFileSync(
         join(issuesDir, '01-will-fail.md'),
         makeTicketBody({
-            status:'ready-for-agent',
+            status: 'ready-for-agent',
         })
     )
     writeFileSync(
         join(issuesDir, '02-blocked.md'),
         makeTicketBody({
-            status:'ready-for-agent',
-            blockers:[1],
+            status: 'ready-for-agent',
+            blockers: [1],
         })
     )
 
@@ -2898,7 +3054,7 @@ test('runWaves writes log files', async t => {
     writeFileSync(
         join(issuesDir, '01-task.md'),
         makeTicketBody({
-            status:'ready-for-agent',
+            status: 'ready-for-agent',
         })
     )
 
@@ -2930,13 +3086,13 @@ test('runWaves skips already-done tickets', async t => {
 
     writeFileSync(
         join(issuesDir, '01-done.md'),
-        makeTicketBody({ status:'done' })
+        makeTicketBody({ status: 'done' })
     )
     writeFileSync(
         join(issuesDir, '02-ready.md'),
         makeTicketBody({
-            status:'ready-for-agent',
-            blockers:[1],
+            status: 'ready-for-agent',
+            blockers: [1],
         })
     )
 
@@ -2978,21 +3134,21 @@ test('runWaves handles parallel independent tickets', async t => {
 
     writeFileSync(
         join(issuesDir, '01-a.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
     writeFileSync(
         join(issuesDir, '02-b.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
     writeFileSync(
         join(issuesDir, '03-c.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
     writeFileSync(
         join(issuesDir, '04-final.md'),
         makeTicketBody({
-            status:'ready-for-agent',
-            blockers:[1, 2, 3],
+            status: 'ready-for-agent',
+            blockers: [1, 2, 3],
         })
     )
 
@@ -3033,7 +3189,7 @@ test('runWaves returns allDone:true when all tickets ' +
 
     writeFileSync(
         join(issuesDir, '01-pass.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
 
     const tickets = scanTickets(issuesDir)
@@ -3064,7 +3220,7 @@ test('runWaves returns allDone:false when agent fails',
 
         writeFileSync(
             join(issuesDir, '01-fail.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -3099,17 +3255,17 @@ test('runWaves - a failed ticket is not re-run in a later wave',
 
         writeFileSync(
             join(issuesDir, '01-fail.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-pass.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '03-dependent.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[2],
+                status: 'ready-for-agent',
+                blockers: [2],
             })
         )
 
@@ -3163,10 +3319,10 @@ test('runWaves - a failed ticket is not re-run in a later wave',
 test('dryRunIsolated basic test', t => {
     const tickets:Array<Ticket> = [
         makeTicket({
-            num:1,
-            filename:'01-test.md',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-test.md',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
     ]
 
@@ -3179,10 +3335,10 @@ test('dryRunIsolated basic test', t => {
     try {
         dryRunIsolated({
             tickets,
-            specBody:'test spec body',
-            repoName:'myapp',
-            conflictStrategy:'respawn',
-            progressPath:'.scratch/feature/progress.md',
+            specBody: 'test spec body',
+            repoName: 'myapp',
+            conflictStrategy: 'respawn',
+            progressPath: '.scratch/feature/progress.md',
         })
         t.ok(true, 'function executed without error')
     } finally {
@@ -3208,21 +3364,21 @@ test('dryRunIsolated prints (none) for an empty test command',
     t => {
         const tickets:Array<Ticket> = [
             makeTicket({
-                num:1,
-                filename:'01-test.md',
-                status:'ready-for-agent',
-                blockers:[],
+                num: 1,
+                filename: '01-test.md',
+                status: 'ready-for-agent',
+                blockers: [],
             }),
         ]
 
         const out = captureLog(() => {
             dryRunIsolated({
                 tickets,
-                specBody:'test spec body',
-                repoName:'myapp',
-                conflictStrategy:'respawn',
-                progressPath:'.scratch/feature/progress.md',
-                testCmd:'',
+                specBody: 'test spec body',
+                repoName: 'myapp',
+                conflictStrategy: 'respawn',
+                progressPath: '.scratch/feature/progress.md',
+                testCmd: '',
             })
         })
 
@@ -3233,21 +3389,21 @@ test('dryRunIsolated prints (none) for an empty test command',
 test('dryRunIsolated prints the test command when set', t => {
     const tickets:Array<Ticket> = [
         makeTicket({
-            num:1,
-            filename:'01-test.md',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-test.md',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
     ]
 
     const out = captureLog(() => {
         dryRunIsolated({
             tickets,
-            specBody:'test spec body',
-            repoName:'myapp',
-            conflictStrategy:'respawn',
-            progressPath:'.scratch/feature/progress.md',
-            testCmd:'npm test',
+            specBody: 'test spec body',
+            repoName: 'myapp',
+            conflictStrategy: 'respawn',
+            progressPath: '.scratch/feature/progress.md',
+            testCmd: 'npm test',
         })
     })
 
@@ -3260,10 +3416,10 @@ test('dryRunIsolated prints the test command when set', t => {
 test('dryRun prints (none) for an empty test command', t => {
     const tickets:Array<Ticket> = [
         makeTicket({
-            num:1,
-            filename:'01-test.md',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-test.md',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
     ]
 
@@ -3279,16 +3435,16 @@ test('dryRunIsolated shows worktree paths and branches',
     t => {
         const tickets:Array<Ticket> = [
             makeTicket({
-                num:1,
-                filename:'01-add-auth.md',
-                status:'ready-for-agent',
-                blockers:[],
+                num: 1,
+                filename: '01-add-auth.md',
+                status: 'ready-for-agent',
+                blockers: [],
             }),
             makeTicket({
-                num:2,
-                filename:'02-add-api.md',
-                status:'ready-for-agent',
-                blockers:[1],
+                num: 2,
+                filename: '02-add-api.md',
+                status: 'ready-for-agent',
+                blockers: [1],
             }),
         ]
 
@@ -3301,10 +3457,10 @@ test('dryRunIsolated shows worktree paths and branches',
         try {
             dryRunIsolated({
                 tickets,
-                specBody:'test spec body',
-                repoName:'myapp',
-                conflictStrategy:'respawn',
-                progressPath:'.scratch/my-feature/progress.md',
+                specBody: 'test spec body',
+                repoName: 'myapp',
+                conflictStrategy: 'respawn',
+                progressPath: '.scratch/my-feature/progress.md',
             })
 
             const fullOutput = output.join('\n')
@@ -3346,22 +3502,22 @@ test('dryRunIsolated shows worktree paths and branches',
 test('dryRunIsolated respects wave dependencies', t => {
     const tickets:Array<Ticket> = [
         makeTicket({
-            num:1,
-            filename:'01-base.md',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-base.md',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-depends-on-1.md',
-            status:'ready-for-agent',
-            blockers:[1],
+            num: 2,
+            filename: '02-depends-on-1.md',
+            status: 'ready-for-agent',
+            blockers: [1],
         }),
         makeTicket({
-            num:3,
-            filename:'03-depends-on-2.md',
-            status:'ready-for-agent',
-            blockers:[2],
+            num: 3,
+            filename: '03-depends-on-2.md',
+            status: 'ready-for-agent',
+            blockers: [2],
         }),
     ]
 
@@ -3374,10 +3530,10 @@ test('dryRunIsolated respects wave dependencies', t => {
     try {
         dryRunIsolated({
             tickets,
-            specBody:'test spec body',
-            repoName:'myapp',
-            conflictStrategy:'stop',
-            progressPath:'.scratch/feature/progress.md',
+            specBody: 'test spec body',
+            repoName: 'myapp',
+            conflictStrategy: 'stop',
+            progressPath: '.scratch/feature/progress.md',
         })
 
         const fullOutput = output.join('\n')
@@ -3408,22 +3564,22 @@ test('dryRunIsolated respects wave dependencies', t => {
 test('dryRunIsolated handles multiple tickets per wave', t => {
     const tickets:Array<Ticket> = [
         makeTicket({
-            num:1,
-            filename:'01-a.md',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-a.md',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:2,
-            filename:'02-b.md',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 2,
+            filename: '02-b.md',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
         makeTicket({
-            num:3,
-            filename:'03-c.md',
-            status:'ready-for-agent',
-            blockers:[1, 2],
+            num: 3,
+            filename: '03-c.md',
+            status: 'ready-for-agent',
+            blockers: [1, 2],
         }),
     ]
 
@@ -3436,10 +3592,10 @@ test('dryRunIsolated handles multiple tickets per wave', t => {
     try {
         dryRunIsolated({
             tickets,
-            specBody:'test spec body',
-            repoName:'myapp',
-            conflictStrategy:'respawn',
-            progressPath:'.scratch/f/progress.md',
+            specBody: 'test spec body',
+            repoName: 'myapp',
+            conflictStrategy: 'respawn',
+            progressPath: '.scratch/f/progress.md',
         })
 
         const fullOutput = output.join('\n')
@@ -3469,10 +3625,10 @@ test('dryRunIsolated prints 0s retry delay when omitted',
     t => {
         const tickets:Array<Ticket> = [
             makeTicket({
-                num:1,
-                filename:'01-test.md',
-                status:'ready-for-agent',
-                blockers:[],
+                num: 1,
+                filename: '01-test.md',
+                status: 'ready-for-agent',
+                blockers: [],
             }),
         ]
 
@@ -3485,10 +3641,10 @@ test('dryRunIsolated prints 0s retry delay when omitted',
         try {
             dryRunIsolated({
                 tickets,
-                specBody:'test spec body',
-                repoName:'myapp',
-                conflictStrategy:'respawn',
-                progressPath:'.scratch/f/progress.md',
+                specBody: 'test spec body',
+                repoName: 'myapp',
+                conflictStrategy: 'respawn',
+                progressPath: '.scratch/f/progress.md',
             })
         } finally {
             console.log = originalLog
@@ -3504,10 +3660,10 @@ test('dryRunIsolated prints 0s retry delay when omitted',
 test('dryRunIsolated prints the concurrency cap', t => {
     const tickets:Array<Ticket> = [
         makeTicket({
-            num:1,
-            filename:'01-test.md',
-            status:'ready-for-agent',
-            blockers:[],
+            num: 1,
+            filename: '01-test.md',
+            status: 'ready-for-agent',
+            blockers: [],
         }),
     ]
 
@@ -3522,22 +3678,22 @@ test('dryRunIsolated prints the concurrency cap', t => {
     try {
         dryRunIsolated({
             tickets,
-            specBody:'test spec body',
-            repoName:'myapp',
-            conflictStrategy:'respawn',
-            progressPath:'.scratch/f/progress.md',
-            testCmd:'npm test',
+            specBody: 'test spec body',
+            repoName: 'myapp',
+            conflictStrategy: 'respawn',
+            progressPath: '.scratch/f/progress.md',
+            testCmd: 'npm test',
         })
         withDefault = output.join('\n')
         output.length = 0
         dryRunIsolated({
             tickets,
-            specBody:'test spec body',
-            repoName:'myapp',
-            conflictStrategy:'respawn',
-            progressPath:'.scratch/f/progress.md',
-            testCmd:'npm test',
-            concurrency:2,
+            specBody: 'test spec body',
+            repoName: 'myapp',
+            conflictStrategy: 'respawn',
+            progressPath: '.scratch/f/progress.md',
+            testCmd: 'npm test',
+            concurrency: 2,
         })
         withValue = output.join('\n')
     } finally {
@@ -3562,16 +3718,16 @@ test(
     t => {
         const tickets:Array<Ticket> = [
             makeTicket({
-                num:1,
-                filename:'01-login.md',
-                status:'ready-for-agent',
-                feature:'auth',
+                num: 1,
+                filename: '01-login.md',
+                status: 'ready-for-agent',
+                feature: 'auth',
             }),
             makeTicket({
-                num:1,
-                filename:'01-stripe.md',
-                status:'ready-for-agent',
-                feature:'payments',
+                num: 1,
+                filename: '01-stripe.md',
+                status: 'ready-for-agent',
+                feature: 'payments',
             }),
         ]
 
@@ -3584,11 +3740,11 @@ test(
         try {
             dryRunIsolated({
                 tickets,
-                specBody:'test spec body',
-                repoName:'myapp',
-                conflictStrategy:'respawn',
-                progressPath:'.scratch/f/progress.md',
-                testCmd:'npm test',
+                specBody: 'test spec body',
+                repoName: 'myapp',
+                conflictStrategy: 'respawn',
+                progressPath: '.scratch/f/progress.md',
+                testCmd: 'npm test',
             })
         } finally {
             console.log = originalLog
@@ -3678,9 +3834,9 @@ test('getProviderArgs - full path with codex basename',
 
 test('formatStreamLine - parses assistant text', t => {
     const line = JSON.stringify({
-        type:'assistant',
-        message:{
-            content:[{ type:'text', text:'Hello world' }],
+        type: 'assistant',
+        message: {
+            content: [{ type: 'text', text: 'Hello world' }],
         },
     })
     t.equal(
@@ -3692,12 +3848,12 @@ test('formatStreamLine - parses assistant text', t => {
 
 test('formatStreamLine - skips tool_use blocks', t => {
     const line = JSON.stringify({
-        type:'assistant',
-        message:{
-            content:[{
-                type:'tool_use',
-                name:'Read',
-                input:{},
+        type: 'assistant',
+        message: {
+            content: [{
+                type: 'tool_use',
+                name: 'Read',
+                input: {},
             }],
         },
     })
@@ -3710,9 +3866,9 @@ test('formatStreamLine - skips tool_use blocks', t => {
 
 test('formatStreamLine - parses result with cost', t => {
     const line = JSON.stringify({
-        type:'result',
-        subtype:'done',
-        total_cost_usd:0.42,
+        type: 'result',
+        subtype: 'done',
+        total_cost_usd: 0.42,
     })
     t.equal(
         formatStreamLine(line),
@@ -3723,8 +3879,8 @@ test('formatStreamLine - parses result with cost', t => {
 
 test('formatStreamLine - parses result without cost', t => {
     const line = JSON.stringify({
-        type:'result',
-        subtype:'end_turn',
+        type: 'result',
+        subtype: 'end_turn',
     })
     t.equal(
         formatStreamLine(line),
@@ -3735,9 +3891,9 @@ test('formatStreamLine - parses result without cost', t => {
 
 test('formatStreamLine - returns null for thinking', t => {
     const line = JSON.stringify({
-        type:'system',
-        subtype:'thinking_tokens',
-        input_tokens:100,
+        type: 'system',
+        subtype: 'thinking_tokens',
+        input_tokens: 100,
     })
     t.equal(
         formatStreamLine(line),
@@ -3748,9 +3904,9 @@ test('formatStreamLine - returns null for thinking', t => {
 
 test('formatStreamLine - shows api retries', t => {
     const line = JSON.stringify({
-        type:'system',
-        subtype:'api_retry',
-        error:'rate limited',
+        type: 'system',
+        subtype: 'api_retry',
+        error: 'rate limited',
     })
     t.equal(
         formatStreamLine(line),
@@ -3772,12 +3928,12 @@ test('formatStreamLine - ignores wrong-typed JSON values', t => {
     const lines = [
         'null',
         '42',
-        JSON.stringify({ type:'assistant', message:{ content:5 } }),
+        JSON.stringify({ type: 'assistant', message: { content: 5 } }),
         JSON.stringify({
-            type:'assistant',
-            message:{ content:[null] },
+            type: 'assistant',
+            message: { content: [null] },
         }),
-        JSON.stringify({ type:'result', total_cost_usd:'1' }),
+        JSON.stringify({ type: 'result', total_cost_usd: '1' }),
     ]
     for (const line of lines) {
         const out = formatStreamLine(line)
@@ -3786,8 +3942,8 @@ test('formatStreamLine - ignores wrong-typed JSON values', t => {
     }
     t.equal(
         formatStreamLine(JSON.stringify({
-            type:'result',
-            total_cost_usd:'1',
+            type: 'result',
+            total_cost_usd: '1',
         })),
         'done',
         'should not add a cost for a non-numeric total'
@@ -3797,12 +3953,12 @@ test('formatStreamLine - ignores wrong-typed JSON values', t => {
 test('formatStreamLine - does not throw on crafted text fields', t => {
     const assistantLines = [
         JSON.stringify({
-            type:'assistant',
-            message:{ content:[{ type:'text', text:{ toString:1 } }] },
+            type: 'assistant',
+            message: { content: [{ type: 'text', text: { toString: 1 } }] },
         }),
         JSON.stringify({
-            type:'assistant',
-            message:{ content:[{ type:'text', text:['a'] }] },
+            type: 'assistant',
+            message: { content: [{ type: 'text', text: ['a'] }] },
         }),
     ]
     for (const line of assistantLines) {
@@ -3811,9 +3967,9 @@ test('formatStreamLine - does not throw on crafted text fields', t => {
     }
 
     const retry = JSON.stringify({
-        type:'system',
-        subtype:'api_retry',
-        error:{ toString:1 },
+        type: 'system',
+        subtype: 'api_retry',
+        error: { toString: 1 },
     })
     const out = formatStreamLine(retry)
     t.equal(typeof out, 'string', 'should still report the retry')
@@ -3823,17 +3979,17 @@ test('formatStreamLine - does not throw on crafted text fields', t => {
 
 test('formatStreamLine - skips subagent assistant text', t => {
     const sub = JSON.stringify({
-        type:'assistant',
-        parent_tool_use_id:'toolu_1',
-        message:{ content:[{ type:'text', text:'inner' }] },
+        type: 'assistant',
+        parent_tool_use_id: 'toolu_1',
+        message: { content: [{ type: 'text', text: 'inner' }] },
     })
     t.equal(formatStreamLine(sub), null,
         'should not show text from a subagent')
 
     const main = JSON.stringify({
-        type:'assistant',
-        parent_tool_use_id:null,
-        message:{ content:[{ type:'text', text:'outer' }] },
+        type: 'assistant',
+        parent_tool_use_id: null,
+        message: { content: [{ type: 'text', text: 'outer' }] },
     })
     t.equal(formatStreamLine(main), 'outer',
         'should show text from the main loop')
@@ -3843,9 +3999,9 @@ test('formatStreamLine - skips subagent assistant text', t => {
 
 function piTextDelta (text:string):string {
     return JSON.stringify({
-        assistantMessageEvent:{
-            type:'text_delta',
-            delta:text,
+        assistantMessageEvent: {
+            type: 'text_delta',
+            delta: text,
         },
     })
 }
@@ -3854,10 +4010,10 @@ function piToolCallStart (
     index:number, name:string
 ):string {
     return JSON.stringify({
-        assistantMessageEvent:{
-            type:'toolcall_start',
-            contentIndex:index,
-            toolName:name,
+        assistantMessageEvent: {
+            type: 'toolcall_start',
+            contentIndex: index,
+            toolName: name,
         },
     })
 }
@@ -3866,9 +4022,9 @@ function piToolCallDelta (
     index:number, delta:string
 ):string {
     return JSON.stringify({
-        assistantMessageEvent:{
-            type:'toolcall_delta',
-            contentIndex:index,
+        assistantMessageEvent: {
+            type: 'toolcall_delta',
+            contentIndex: index,
             delta,
         },
     })
@@ -3876,9 +4032,9 @@ function piToolCallDelta (
 
 function piToolCallEnd (index:number):string {
     return JSON.stringify({
-        assistantMessageEvent:{
-            type:'toolcall_end',
-            contentIndex:index,
+        assistantMessageEvent: {
+            type: 'toolcall_end',
+            contentIndex: index,
         },
     })
 }
@@ -4198,7 +4354,7 @@ test('runWaves retries a failed agent with escalated effort',
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-flaky.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
 
@@ -4225,7 +4381,7 @@ test('runWaves retries a failed agent with escalated effort',
             )
         } finally {
             process.chdir(originalCwd)
-            rmSync(binDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
         }
     })
 
@@ -4239,7 +4395,7 @@ test('runWaves waits retryDelay seconds before a retry', async t => {
     mkdirSync(issuesDir)
     writeFileSync(
         join(issuesDir, '01-flaky.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
     const tickets = scanTickets(issuesDir)
 
@@ -4267,7 +4423,7 @@ test('runWaves waits retryDelay seconds before a retry', async t => {
         )
     } finally {
         process.chdir(originalCwd)
-        rmSync(binDir, { recursive:true, force:true })
+        rmSync(binDir, { recursive: true, force: true })
     }
 })
 
@@ -4291,12 +4447,12 @@ test(
             const logPath = join(logsDir, 'test.log')
 
             await spawnAgent({
-                prompt:'test prompt',
-                agentCmd:join(binDir, 'claude'),
-                model:null,
-                timeout:10,
+                prompt: 'test prompt',
+                agentCmd: join(binDir, 'claude'),
+                model: null,
+                timeout: 10,
                 logPath,
-                effort:'high',
+                effort: 'high',
             })
 
             const logContent = readFileSync(logPath, 'utf8')
@@ -4328,8 +4484,8 @@ test(
                 '--effort value is "high"'
             )
         } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logsDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
+            rmSync(logsDir, { recursive: true, force: true })
         }
     }
 )
@@ -4352,12 +4508,12 @@ test(
             const logPath = join(logsDir, 'test.log')
 
             await spawnAgent({
-                prompt:'test prompt',
-                agentCmd:join(binDir, 'pi'),
-                model:null,
-                timeout:10,
+                prompt: 'test prompt',
+                agentCmd: join(binDir, 'pi'),
+                model: null,
+                timeout: 10,
                 logPath,
-                effort:'high',
+                effort: 'high',
             })
 
             const logContent = readFileSync(logPath, 'utf8')
@@ -4389,8 +4545,8 @@ test(
                 '--thinking value is "high"'
             )
         } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logsDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
+            rmSync(logsDir, { recursive: true, force: true })
         }
     }
 )
@@ -4414,12 +4570,12 @@ test(
             const logPath = join(logsDir, 'test.log')
 
             await spawnAgent({
-                prompt:'test prompt',
-                agentCmd:join(binDir, 'codex'),
-                model:null,
-                timeout:10,
+                prompt: 'test prompt',
+                agentCmd: join(binDir, 'codex'),
+                model: null,
+                timeout: 10,
                 logPath,
-                effort:'high',
+                effort: 'high',
             })
 
             const logContent = readFileSync(logPath, 'utf8')
@@ -4452,8 +4608,8 @@ test(
                 '-c value is "model_reasoning_effort=high"'
             )
         } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logsDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
+            rmSync(logsDir, { recursive: true, force: true })
         }
     }
 )
@@ -4476,10 +4632,10 @@ test(
             const logPath = join(logsDir, 'test.log')
 
             await spawnAgent({
-                prompt:'test prompt',
-                agentCmd:join(binDir, 'claude'),
-                model:null,
-                timeout:10,
+                prompt: 'test prompt',
+                agentCmd: join(binDir, 'claude'),
+                model: null,
+                timeout: 10,
                 logPath,
                 // effort intentionally omitted
             })
@@ -4510,8 +4666,8 @@ test(
             t.ok(!hasThinking, 'no --thinking flag')
             t.ok(!hasE, 'no -e flag')
         } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logsDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
+            rmSync(logsDir, { recursive: true, force: true })
         }
     }
 )
@@ -4537,13 +4693,13 @@ test(
             const logPath = join(logsDir, 'test.log')
 
             await spawnAgent({
-                prompt:'test prompt',
-                agentCmd:join(binDir, 'claude'),
-                model:null,
-                timeout:10,
+                prompt: 'test prompt',
+                agentCmd: join(binDir, 'claude'),
+                model: null,
+                timeout: 10,
                 logPath,
-                effort:'off' as EffortLevel, // invalid for claude
-                onLine:(line:string) => {
+                effort: 'off' as EffortLevel, // invalid for claude
+                onLine: (line:string) => {
                     if (line.includes('Warning')) {
                         warnings.push(line)
                     }
@@ -4580,8 +4736,8 @@ test(
                 '--effort not passed when invalid'
             )
         } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logsDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
+            rmSync(logsDir, { recursive: true, force: true })
         }
     }
 )
@@ -4613,16 +4769,16 @@ test('AC2.3 - Effort resets to starting level for each ' +
     const issuesDir = join(base, '.scratch', 'feature')
     const logsDir = join(base, 'logs')
     const argsLogPath = join(base, 'args.log')
-    mkdirSync(issuesDir, { recursive:true })
+    mkdirSync(issuesDir, { recursive: true })
 
     // Create two independent tickets (both ready, no blockers)
     writeFileSync(
         join(issuesDir, '01-ticket1.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
     writeFileSync(
         join(issuesDir, '02-ticket2.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
 
     // Commit the tickets so working tree is clean
@@ -4630,13 +4786,13 @@ test('AC2.3 - Effort resets to starting level for each ' +
     execSync(
         'git add .scratch && git commit -m "add tickets" --no-verify',
         {
-            stdio:'pipe',
-            env:{
+            stdio: 'pipe',
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         }
     )
@@ -4648,7 +4804,7 @@ test('AC2.3 - Effort resets to starting level for each ' +
         originalCwd,
         'test', 'mock-agent-fail-capture-args.js'
     )
-    mkdirSync(binDir, { recursive:true })
+    mkdirSync(binDir, { recursive: true })
     const piPath = join(binDir, 'pi')
     copyFileSync(MOCK_FAIL_CAPTURE, piPath)
     chmodSync(piPath, 0o755)
@@ -4667,19 +4823,19 @@ test('AC2.3 - Effort resets to starting level for each ' +
         // should still be 'medium', not 'high'.
         await runWavesIsolated({
             tickets,
-            specBody:'test spec',
-            agentCmd:join(binDir, 'pi'),
-            model:null,
-            timeout:10,
+            specBody: 'test spec',
+            agentCmd: join(binDir, 'pi'),
+            model: null,
+            timeout: 10,
             logsDir,
-            featureName:'feature',
+            featureName: 'feature',
             repoName,
-            conflictStrategy:'respawn',
-            progressPath:'.scratch/feature/progress.md',
-            testCmd:'true',
-            effort:'medium' as EffortLevel,
-            retries:1,
-            retryDelay:0,
+            conflictStrategy: 'respawn',
+            progressPath: '.scratch/feature/progress.md',
+            testCmd: 'true',
+            effort: 'medium' as EffortLevel,
+            retries: 1,
+            retryDelay: 0,
         })
 
         t.equal(
@@ -4791,7 +4947,7 @@ test('AC2.3 - Effort resets to starting level for each ' +
         } else {
             process.env.ARGS_LOG_PATH = originalEnv
         }
-        rmSync(binDir, { recursive:true, force:true })
+        rmSync(binDir, { recursive: true, force: true })
     }
 })
 
@@ -4829,12 +4985,12 @@ test(
         try {
             const logPath = join(logsDir, 'test.log')
             await spawnAgent({
-                prompt:'test',
-                agentCmd:join(binDir, 'claude'),
-                model:null,
-                timeout:10,
+                prompt: 'test',
+                agentCmd: join(binDir, 'claude'),
+                model: null,
+                timeout: 10,
                 logPath,
-                maxTurns:25,
+                maxTurns: 25,
             })
 
             const args = parseArgsFromLog(logPath)
@@ -4848,8 +5004,8 @@ test(
                 '--max-turns value is "25"'
             )
         } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logsDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
+            rmSync(logsDir, { recursive: true, force: true })
         }
     }
 )
@@ -4874,13 +5030,13 @@ test(
         try {
             const logPath = join(logsDir, 'test.log')
             await spawnAgent({
-                prompt:'test',
-                agentCmd:join(binDir, 'codex'),
-                model:null,
-                timeout:10,
+                prompt: 'test',
+                agentCmd: join(binDir, 'codex'),
+                model: null,
+                timeout: 10,
                 logPath,
-                maxTurns:25,
-                onLine:(line) => {
+                maxTurns: 25,
+                onLine: (line) => {
                     if (line.includes('Warning')) {
                         warnings.push(line)
                     }
@@ -4902,8 +5058,8 @@ test(
                 'warning names the provider'
             )
         } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logsDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
+            rmSync(logsDir, { recursive: true, force: true })
         }
     }
 )
@@ -4928,13 +5084,13 @@ test(
         try {
             const logPath = join(logsDir, 'test.log')
             await spawnAgent({
-                prompt:'test',
-                agentCmd:join(binDir, 'pi'),
-                model:null,
-                timeout:10,
+                prompt: 'test',
+                agentCmd: join(binDir, 'pi'),
+                model: null,
+                timeout: 10,
                 logPath,
-                maxTurns:25,
-                onLine:(line) => {
+                maxTurns: 25,
+                onLine: (line) => {
                     if (line.includes('Warning')) {
                         warnings.push(line)
                     }
@@ -4952,8 +5108,8 @@ test(
                     '--max-turns'
             )
         } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logsDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
+            rmSync(logsDir, { recursive: true, force: true })
         }
     }
 )
@@ -4982,7 +5138,7 @@ test('runWaves never runs more agents than concurrency ' +
     for (let i = 1; i <= 5; i++) {
         writeFileSync(
             join(issuesDir, `0${i}-t${i}.md`),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
     }
 
@@ -5024,9 +5180,9 @@ test('runWaves never runs more agents than concurrency ' +
 
 test('renderFinishSummary is one line with no human tickets', t => {
     const tickets = [
-        makeTicket({ num:1, filename:'01-a.md', status:'done' }),
+        makeTicket({ num: 1, filename: '01-a.md', status: 'done' }),
         makeTicket({
-            num:2, filename:'02-b.md', status:'ready-for-agent',
+            num: 2, filename: '02-b.md', status: 'ready-for-agent',
         }),
     ]
     const out = renderFinishSummary(
@@ -5042,10 +5198,10 @@ test('renderFinishSummary is one line with no human tickets', t => {
 test('renderFinishSummary AC2.2: names a blocker outside the run',
     t => {
         const ref:BlockerRef = {
-            feature:'b', num:1, where:'pending', status:'ready-for-agent',
+            feature: 'b', num: 1, where: 'pending', status: 'ready-for-agent',
         }
         const ticket = makeTicket({
-            num:2, filename:'02-x.md', feature:'a', blockers:[ref],
+            num: 2, filename: '02-x.md', feature: 'a', blockers: [ref],
         })
         const out = renderFinishSummary([ticket], 0, new Set())
         t.ok(out.includes(ticketLabel(ticket)), 'names the ticket')
@@ -5054,9 +5210,9 @@ test('renderFinishSummary AC2.2: names a blocker outside the run',
 
 test('renderFinishSummary AC2.4: lists a blocker that matches no ticket',
     t => {
-        const ref:BlockerRef = { feature:'a', num:9, where:'missing' }
+        const ref:BlockerRef = { feature: 'a', num: 9, where: 'missing' }
         const ticket = makeTicket({
-            num:3, filename:'03-x.md', feature:'a', blockers:[ref],
+            num: 3, filename: '03-x.md', feature: 'a', blockers: [ref],
         })
         const out = renderFinishSummary([ticket], 0, new Set())
         t.ok(out.includes(ticketLabel(ticket)), 'names the ticket')
@@ -5066,10 +5222,10 @@ test('renderFinishSummary AC2.4: lists a blocker that matches no ticket',
 test('renderFinishSummary leaves failed tickets out of the blocker ' +
     'paragraph', t => {
     const ref:BlockerRef = {
-        feature:'b', num:1, where:'pending', status:'ready-for-agent',
+        feature: 'b', num: 1, where: 'pending', status: 'ready-for-agent',
     }
     const ticket = makeTicket({
-        num:2, filename:'02-x.md', feature:'a', blockers:[ref],
+        num: 2, filename: '02-x.md', feature: 'a', blockers: [ref],
     })
     const out = renderFinishSummary(
         [ticket], 0, new Set([ticketKey('a', 2)])
@@ -5080,10 +5236,10 @@ test('renderFinishSummary leaves failed tickets out of the blocker ' +
 
 test('renderFinishSummary AC2.9: repeats typo warnings', t => {
     const ticket = makeTicket({
-        num:4, filename:'04-x.md', feature:'a', status:'done',
+        num: 4, filename: '04-x.md', feature: 'a', status: 'done',
     })
     const out = renderFinishSummary([ticket], 1, new Set(), [
-        { ticket:'a/04', kind:'typo', text:'nwsletter-audit' },
+        { ticket: 'a/04', kind: 'typo', text: 'nwsletter-audit' },
     ])
     t.ok(out.includes('nwsletter-audit'), 'names the word')
     t.ok(out.includes('a/04'), 'names the ticket')
@@ -5091,12 +5247,12 @@ test('renderFinishSummary AC2.9: repeats typo warnings', t => {
 
 test('renderFinishSummary names every ready-for-human ticket', t => {
     const tickets = [
-        makeTicket({ num:1, filename:'01-a.md', status:'done' }),
+        makeTicket({ num: 1, filename: '01-a.md', status: 'done' }),
         makeTicket({
-            num:7, filename:'07-secret.md', status:HUMAN_STATUS,
+            num: 7, filename: '07-secret.md', status: HUMAN_STATUS,
         }),
         makeTicket({
-            num:8, filename:'08-staging.md', status:HUMAN_STATUS,
+            num: 8, filename: '08-staging.md', status: HUMAN_STATUS,
         }),
     ]
     const out = renderFinishSummary(tickets, 1, new Set())
@@ -5116,18 +5272,18 @@ test(
     t => {
         const tickets = [
             makeTicket({
-                num:7, filename:'07-secret.md', status:HUMAN_STATUS,
+                num: 7, filename: '07-secret.md', status: HUMAN_STATUS,
             }),
             makeTicket({
-                num:9,
-                filename:'09-after.md',
-                status:'ready-for-agent',
-                blockers:[7],
+                num: 9,
+                filename: '09-after.md',
+                status: 'ready-for-agent',
+                blockers: [7],
             }),
             makeTicket({
-                num:10,
-                filename:'10-free.md',
-                status:'ready-for-agent',
+                num: 10,
+                filename: '10-free.md',
+                status: 'ready-for-agent',
             }),
         ]
         const out = renderFinishSummary(tickets, 0, new Set())
@@ -5149,28 +5305,28 @@ test(
     t => {
         const tickets = [
             makeTicket({
-                num:1,
-                filename:'01-a.md',
-                status:'done',
-                feature:'auth',
+                num: 1,
+                filename: '01-a.md',
+                status: 'done',
+                feature: 'auth',
             }),
             makeTicket({
-                num:2,
-                filename:'02-b.md',
-                status:'done',
-                feature:'auth',
+                num: 2,
+                filename: '02-b.md',
+                status: 'done',
+                feature: 'auth',
             }),
             makeTicket({
-                num:1,
-                filename:'01-c.md',
-                status:'done',
-                feature:'payments',
+                num: 1,
+                filename: '01-c.md',
+                status: 'done',
+                feature: 'payments',
             }),
             makeTicket({
-                num:2,
-                filename:'02-d.md',
-                status:'ready-for-agent',
-                feature:'payments',
+                num: 2,
+                filename: '02-d.md',
+                status: 'ready-for-agent',
+                feature: 'payments',
             }),
         ]
         const out = renderFinishSummary(
@@ -5197,16 +5353,16 @@ test(
     t => {
         const tickets = [
             makeTicket({
-                num:1,
-                filename:'01-a.md',
-                status:'done',
-                feature:'auth',
+                num: 1,
+                filename: '01-a.md',
+                status: 'done',
+                feature: 'auth',
             }),
             makeTicket({
-                num:2,
-                filename:'02-b.md',
-                status:'done',
-                feature:'auth',
+                num: 2,
+                filename: '02-b.md',
+                status: 'done',
+                feature: 'auth',
             }),
         ]
         const out = renderFinishSummary(
@@ -5227,22 +5383,22 @@ test(
     t => {
         const tickets = [
             makeTicket({
-                num:1,
-                filename:'01-a.md',
-                status:'done',
-                feature:'auth',
+                num: 1,
+                filename: '01-a.md',
+                status: 'done',
+                feature: 'auth',
             }),
             makeTicket({
-                num:1,
-                filename:'01-b.md',
-                status:'ready-for-agent',
-                feature:'payments',
+                num: 1,
+                filename: '01-b.md',
+                status: 'ready-for-agent',
+                feature: 'payments',
             }),
             makeTicket({
-                num:2,
-                filename:'02-c.md',
-                status:'ready-for-agent',
-                feature:'auth',
+                num: 2,
+                filename: '02-c.md',
+                status: 'ready-for-agent',
+                feature: 'auth',
             }),
         ]
         const failedKeys = new Set([
@@ -5282,17 +5438,17 @@ test('runWaves with nothing runnable reports no blocked tickets',
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-done.md'),
-            makeTicketBody({ status:'done' })
+            makeTicketBody({ status: 'done' })
         )
         writeFileSync(
             join(issuesDir, '02-human.md'),
-            makeTicketBody({ status:HUMAN_STATUS })
+            makeTicketBody({ status: HUMAN_STATUS })
         )
         writeFileSync(
             join(issuesDir, '03-waiting.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[2],
+                status: 'ready-for-agent',
+                blockers: [2],
             })
         )
         const tickets = scanTickets(issuesDir)
@@ -5325,7 +5481,7 @@ test('runWaves with nothing runnable reports no blocked tickets',
                 'ticket 3 is still waiting, so not allDone')
         } finally {
             process.chdir(originalCwd)
-            rmSync(base, { recursive:true, force:true })
+            rmSync(base, { recursive: true, force: true })
         }
         const all = logs.join('\n')
         t.ok(all.includes('02-human.md'),
@@ -5341,11 +5497,11 @@ test('runWaves with only human tickets logs them and is allDone',
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-done.md'),
-            makeTicketBody({ status:'done' })
+            makeTicketBody({ status: 'done' })
         )
         writeFileSync(
             join(issuesDir, '02-human.md'),
-            makeTicketBody({ status:HUMAN_STATUS })
+            makeTicketBody({ status: HUMAN_STATUS })
         )
         const tickets = scanTickets(issuesDir)
         const logs:string[] = []
@@ -5396,13 +5552,13 @@ function appendDone (
     marker:string
 ):void {
     appendEntry(path, renderEntry({
-        key:ticketKey(feature, num),
-        label:`${feature}/${String(num).padStart(2, '0')}`,
-        attempt:1,
-        now:new Date('2026-10-09T00:00:00Z'),
-        outcome:'done',
-        run:{
-            exitCode:0, completedItems:[], timedOut:false, notes:marker,
+        key: ticketKey(feature, num),
+        label: `${feature}/${String(num).padStart(2, '0')}`,
+        attempt: 1,
+        now: new Date('2026-10-09T00:00:00Z'),
+        outcome: 'done',
+        run: {
+            exitCode: 0, completedItems: [], timedOut: false, notes: marker,
         },
     }))
 }
@@ -5414,24 +5570,24 @@ function historyTicket (
     blockers:BlockerRef[]
 ):Ticket {
     const issues = join(scratch, feature, 'issues')
-    mkdirSync(issues, { recursive:true })
+    mkdirSync(issues, { recursive: true })
     const filepath = join(issues, '02-x.md')
     writeFileSync(filepath, '**Status:** ready-for-agent\n')
     return makeTicket({
-        num:2, filename:'02-x.md', feature, filepath, blockers,
+        num: 2, filename: '02-x.md', feature, filepath, blockers,
     })
 }
 
 test('historyFor AC2.7: reads a cross-feature blocker\'s done entry',
     t => {
         const scratch = join(tmp(), '.scratch')
-        mkdirSync(join(scratch, 'b'), { recursive:true })
+        mkdirSync(join(scratch, 'b'), { recursive: true })
         appendDone(
             join(scratch, 'b', 'learnings.md'), 'b', 1,
             'marker-b-01-notes'
         )
         const ticket = historyTicket(scratch, 'a', [
-            { feature:'b', num:1, where:'done', status:'done' },
+            { feature: 'b', num: 1, where: 'done', status: 'done' },
         ])
         const out = historyFor(join(scratch, 'a', 'learnings.md'), ticket)
         t.ok(out.includes('marker-b-01-notes'), 'b/01 notes are included')
@@ -5440,7 +5596,7 @@ test('historyFor AC2.7: reads a cross-feature blocker\'s done entry',
 test('historyFor still reads a same-feature blocker', t => {
     const scratch = join(tmp(), '.scratch')
     const ticket = historyTicket(scratch, 'a', [
-        { feature:'a', num:1, where:'run' },
+        { feature: 'a', num: 1, where: 'run' },
     ])
     const learnings = join(scratch, 'a', 'learnings.md')
     appendDone(learnings, 'a', 1, 'marker-a-01-notes')
@@ -5453,7 +5609,7 @@ test('historyFor still reads a same-feature blocker', t => {
 test('historyFor: a feature with no learnings.md is no error', t => {
     const scratch = join(tmp(), '.scratch')
     const ticket = historyTicket(scratch, 'a', [
-        { feature:'b', num:1, where:'done', status:'done' },
+        { feature: 'b', num: 1, where: 'done', status: 'done' },
     ])
     t.equal(
         historyFor(join(scratch, 'a', 'learnings.md'), ticket),
@@ -5465,13 +5621,13 @@ test('historyFor: a feature with no learnings.md is no error', t => {
 test('historyFor: a nested feature reads blockers beside .scratch',
     t => {
         const scratch = join(tmp(), '.scratch')
-        mkdirSync(join(scratch, 'b'), { recursive:true })
+        mkdirSync(join(scratch, 'b'), { recursive: true })
         appendDone(
             join(scratch, 'b', 'learnings.md'), 'b', 1,
             'marker-nested-notes'
         )
         const ticket = historyTicket(scratch, 'x/y', [
-            { feature:'b', num:1, where:'done', status:'done' },
+            { feature: 'b', num: 1, where: 'done', status: 'done' },
         ])
         const out = historyFor(
             join(scratch, 'x', 'y', 'learnings.md'), ticket
@@ -5482,26 +5638,26 @@ test('historyFor: a nested feature reads blockers beside .scratch',
 // -- nothingReady / renderNothingReady --
 
 const OUTSIDE:BlockerRef = {
-    feature:'b', num:1, where:'pending', status:'ready-for-agent',
+    feature: 'b', num: 1, where: 'pending', status: 'ready-for-agent',
 }
 
 test('nothingReady stops only when a ready-for-agent ticket waits',
     t => {
         t.equal(nothingReady([]), false, 'no tickets')
         t.equal(nothingReady([
-            makeTicket({ num:1, filename:'01-a.md', status:'done' }),
+            makeTicket({ num: 1, filename: '01-a.md', status: 'done' }),
         ]), false, 'all done')
         t.equal(nothingReady([
             makeTicket({
-                num:1, filename:'01-a.md', status:HUMAN_STATUS,
+                num: 1, filename: '01-a.md', status: HUMAN_STATUS,
             }),
         ]), false, 'only human work')
         const blocked = makeTicket({
-            num:1, filename:'01-a.md', feature:'a', blockers:[OUTSIDE],
+            num: 1, filename: '01-a.md', feature: 'a', blockers: [OUTSIDE],
         })
         t.equal(nothingReady([blocked]), true, 'one blocked ticket')
         const free = makeTicket({
-            num:2, filename:'02-b.md', feature:'a',
+            num: 2, filename: '02-b.md', feature: 'a',
         })
         t.equal(
             nothingReady([blocked, free]), false,
@@ -5512,7 +5668,7 @@ test('nothingReady stops only when a ready-for-agent ticket waits',
 test('renderNothingReady names a blocker outside the run', t => {
     const out = renderNothingReady([
         makeTicket({
-            num:1, filename:'01-a.md', feature:'a', blockers:[OUTSIDE],
+            num: 1, filename: '01-a.md', feature: 'a', blockers: [OUTSIDE],
         }),
     ], [])
     t.ok(out.includes(blockerLabel(OUTSIDE)), 'names the blocker')
@@ -5521,10 +5677,10 @@ test('renderNothingReady names a blocker outside the run', t => {
 test('renderNothingReady reports a cycle', t => {
     const tickets = [
         makeTicket({
-            num:1, filename:'01-a.md', feature:'a', blockers:[2],
+            num: 1, filename: '01-a.md', feature: 'a', blockers: [2],
         }),
         makeTicket({
-            num:2, filename:'02-b.md', feature:'a', blockers:[1],
+            num: 2, filename: '02-b.md', feature: 'a', blockers: [1],
         }),
     ]
     const out = renderNothingReady(tickets, [])
@@ -5535,15 +5691,15 @@ test('renderNothingReady reports a cycle', t => {
 
 test('renderNothingReady reports human work, not a cycle', t => {
     const human = makeTicket({
-        num:1,
-        filename:'01-human.md',
-        feature:'a',
-        status:HUMAN_STATUS,
+        num: 1,
+        filename: '01-human.md',
+        feature: 'a',
+        status: HUMAN_STATUS,
     })
     const out = renderNothingReady([
         human,
         makeTicket({
-            num:2, filename:'02-waits.md', feature:'a', blockers:[1],
+            num: 2, filename: '02-waits.md', feature: 'a', blockers: [1],
         }),
     ], [])
     t.ok(out.includes('01-human.md'), 'names the human ticket')
@@ -5558,16 +5714,16 @@ test('renderNothingReady lists a ticket that waits on human work ' +
     'through another ticket', t => {
     const out = renderNothingReady([
         makeTicket({
-            num:1,
-            filename:'01-human.md',
-            feature:'a',
-            status:HUMAN_STATUS,
+            num: 1,
+            filename: '01-human.md',
+            feature: 'a',
+            status: HUMAN_STATUS,
         }),
         makeTicket({
-            num:2, filename:'02-direct.md', feature:'a', blockers:[1],
+            num: 2, filename: '02-direct.md', feature: 'a', blockers: [1],
         }),
         makeTicket({
-            num:3, filename:'03-chained.md', feature:'a', blockers:[2],
+            num: 3, filename: '03-chained.md', feature: 'a', blockers: [2],
         }),
     ], [])
     t.ok(out.includes('02-direct.md'), 'names the direct waiter')
@@ -5577,14 +5733,14 @@ test('renderNothingReady lists a ticket that waits on human work ' +
 test('renderNothingReady lists a ticket that waits on a blocker ' +
     'outside the run through another ticket', t => {
     const chained = makeTicket({
-        num:3, filename:'03-chained.md', feature:'a', blockers:[2],
+        num: 3, filename: '03-chained.md', feature: 'a', blockers: [2],
     })
     const out = renderNothingReady([
         makeTicket({
-            num:2,
-            filename:'02-direct.md',
-            feature:'a',
-            blockers:[OUTSIDE],
+            num: 2,
+            filename: '02-direct.md',
+            feature: 'a',
+            blockers: [OUTSIDE],
         }),
         chained,
     ], [])
@@ -5597,15 +5753,15 @@ test('renderNothingReady lists a ticket that waits on a blocker ' +
 
 test('renderNothingReady names a blocker in another status', t => {
     const triage = makeTicket({
-        num:1,
-        filename:'01-triage.md',
-        feature:'a',
-        status:'needs-triage',
+        num: 1,
+        filename: '01-triage.md',
+        feature: 'a',
+        status: 'needs-triage',
     })
     const out = renderNothingReady([
         triage,
         makeTicket({
-            num:2, filename:'02-waits.md', feature:'a', blockers:[1],
+            num: 2, filename: '02-waits.md', feature: 'a', blockers: [1],
         }),
     ], [])
     t.ok(out.includes(ticketLabel(triage)), 'names the blocker')
@@ -5626,10 +5782,10 @@ const MOCK_NOOP = join(process.cwd(), 'test', 'mock-agent-noop.js')
 const ONE_SUBAGENT_STREAM = [
     agentLine('toolu_1'),
     {
-        type:'result',
-        subtype:'success',
-        total_cost_usd:0.25,
-        subagent_stats:{ spawned:1 },
+        type: 'result',
+        subtype: 'success',
+        total_cost_usd: 0.25,
+        subagent_stats: { spawned: 1 },
     },
 ]
 
@@ -5649,7 +5805,7 @@ async function runOneInPlace (
     mkdirSync(issuesDir)
     writeFileSync(
         join(issuesDir, '01-only.md'),
-        makeTicketBody({ status:'ready-for-agent' })
+        makeTicketBody({ status: 'ready-for-agent' })
     )
     const tickets = scanTickets(issuesDir, 'feat')
     const logs:string[] = []
@@ -5679,7 +5835,7 @@ async function runOneInPlace (
         })
     } finally {
         process.chdir(originalCwd)
-        rmSync(base, { recursive:true, force:true })
+        rmSync(base, { recursive: true, force: true })
     }
     return { tickets, allDone, logs, stats }
 }
@@ -5690,7 +5846,7 @@ test('runWaves logs the stats line after the finish summary',
         try {
             const streamFile = writeStreamFile(dir, ONE_SUBAGENT_STREAM)
             const run = await runOneInPlace(FAKE_CLAUDE, {
-                FAKE_CLAUDE_STREAM:streamFile,
+                FAKE_CLAUDE_STREAM: streamFile,
             })
 
             t.equal(run.tickets[0].status, 'done', 'ticket is done')
@@ -5699,7 +5855,7 @@ test('runWaves logs the stats line after the finish summary',
                 '\n' + renderFinishSummary(run.tickets, 1, new Set())
             )
             const expected = renderRunStats({
-                agentRuns:1, withCost:1, subagents:1, costUsd:0.25,
+                agentRuns: 1, withCost: 1, subagents: 1, costUsd: 0.25,
             })
             t.ok(expected !== null, 'a stats line is expected')
             const statsAt = run.logs.indexOf(expected as string)
@@ -5707,11 +5863,11 @@ test('runWaves logs the stats line after the finish summary',
             t.ok(statsAt > summaryAt, 'stats line follows it')
             t.deepEqual(
                 run.stats[run.stats.length - 1],
-                { subagents:1, costUsd:0.25 },
+                { subagents: 1, costUsd: 0.25 },
                 'the row shows the run total'
             )
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     }
 )
@@ -5724,14 +5880,14 @@ test('runWaves outcome ignores an error result and bad lines',
                 agentLine('toolu_1'),
                 'not json at all',
                 {
-                    type:'result',
-                    subtype:'error_max_turns',
-                    is_error:true,
-                    total_cost_usd:0.25,
+                    type: 'result',
+                    subtype: 'error_max_turns',
+                    is_error: true,
+                    total_cost_usd: 0.25,
                 },
             ])
             const run = await runOneInPlace(FAKE_CLAUDE, {
-                FAKE_CLAUDE_STREAM:streamFile,
+                FAKE_CLAUDE_STREAM: streamFile,
             })
 
             t.equal(run.tickets[0].status, 'done', 'ticket is done')
@@ -5743,7 +5899,7 @@ test('runWaves outcome ignores an error result and bad lines',
                 'finish summary is unchanged'
             )
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     }
 )

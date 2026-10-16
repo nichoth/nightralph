@@ -473,7 +473,7 @@ export function readEntries (path:string):LearningEntry[] {
 // Synchronous on purpose: tickets in a wave run concurrently in one
 // Node thread, so sync appends can never interleave.
 export function appendEntry (path:string, text:string):void {
-    mkdirSync(dirname(path), { recursive:true })
+    mkdirSync(dirname(path), { recursive: true })
     appendFileSync(path, text)
 }
 
@@ -490,7 +490,7 @@ export function collectNotes (
     const text = existsSync(path) ?
         readFileSync(path, 'utf8').trim() :
         ''
-    rmSync(dir, { recursive:true, force:true })
+    rmSync(dir, { recursive: true, force: true })
     return text || null
 }
 
@@ -500,6 +500,6 @@ export function collectNotes (
 // the machine (e.g. via init.templateDir).
 export function ensureNotesIgnored (worktreePath:string):void {
     const dir = join(worktreePath, dirname(NOTES_PATH))
-    mkdirSync(dir, { recursive:true })
+    mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, '.gitignore'), '*\n')
 }

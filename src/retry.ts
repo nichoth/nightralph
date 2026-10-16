@@ -2,11 +2,11 @@ import { basename } from 'node:path'
 
 // Per-provider effort ladders.
 export const EFFORT_LADDERS = {
-    pi:['off', 'minimal', 'low', 'medium',
+    pi: ['off', 'minimal', 'low', 'medium',
         'high', 'xhigh', 'max'],
-    claude:['low', 'medium', 'high',
+    claude: ['low', 'medium', 'high',
         'xhigh', 'max'],
-    codex:['low', 'medium', 'high'],
+    codex: ['low', 'medium', 'high'],
 } as const
 
 export type ProviderName =

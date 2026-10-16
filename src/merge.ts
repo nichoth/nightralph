@@ -38,9 +38,9 @@ export async function mergeBranch (
         await execFileAsync(
             'git',
             ['merge', branch, '--no-edit'],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
-        return { success:true }
+        return { success: true }
     } catch (err) {
         const execErr = err as {
             stdout?:string; stderr?:string
@@ -51,12 +51,12 @@ export async function mergeBranch (
             await execFileAsync(
                 'git',
                 ['merge', '--abort'],
-                { cwd:repoRoot }
+                { cwd: repoRoot }
             )
         } catch {
             // no merge in progress to abort
         }
-        return { success:false, stderr }
+        return { success: false, stderr }
     }
 }
 
@@ -84,9 +84,9 @@ export async function rebaseBranch (
             await execFileAsync(
                 'git',
                 ['rebase', onto],
-                { cwd:worktreePath }
+                { cwd: worktreePath }
             )
-            return { success:true }
+            return { success: true }
         } catch (err) {
             const execErr = err as {
                 stdout?:string; stderr?:string
@@ -97,12 +97,12 @@ export async function rebaseBranch (
                 await execFileAsync(
                     'git',
                     ['rebase', '--abort'],
-                    { cwd:worktreePath }
+                    { cwd: worktreePath }
                 )
             } catch {
                 // ignore abort errors
             }
-            return { success:false, stderr }
+            return { success: false, stderr }
         }
     }
 
@@ -110,22 +110,22 @@ export async function rebaseBranch (
         await execFileAsync(
             'git',
             ['checkout', branch],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
 
         await execFileAsync(
             'git',
             ['rebase', onto],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
 
         await execFileAsync(
             'git',
             ['checkout', onto],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
 
-        return { success:true }
+        return { success: true }
     } catch (err) {
         const stderr =
             (err as { stderr?:string }).stderr
@@ -133,7 +133,7 @@ export async function rebaseBranch (
             await execFileAsync(
                 'git',
                 ['rebase', '--abort'],
-                { cwd:repoRoot }
+                { cwd: repoRoot }
             )
         } catch {
             // ignore abort errors
@@ -142,12 +142,12 @@ export async function rebaseBranch (
             await execFileAsync(
                 'git',
                 ['checkout', onto],
-                { cwd:repoRoot }
+                { cwd: repoRoot }
             )
         } catch {
             // ignore checkout errors
         }
-        return { success:false, stderr }
+        return { success: false, stderr }
     }
 }
 
@@ -163,7 +163,7 @@ export async function updateWorktreeFromBase (
         await execFileAsync(
             'git',
             ['merge', baseBranch, '--no-edit'],
-            { cwd:worktreePath }
+            { cwd: worktreePath }
         )
     } catch {
         // conflict markers intentionally left for the
@@ -200,8 +200,8 @@ export async function mergeWave (
         const mergingResult:MergeResult = {
             branch,
             ticketNum,
-            merged:false,
-            conflicted:false,
+            merged: false,
+            conflicted: false,
         }
 
         if (i === 0) {

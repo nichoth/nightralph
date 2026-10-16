@@ -51,9 +51,9 @@ export function runTestCmd (opts:{
     return new Promise(resolve => {
         let settled = false
         const child = spawn('sh', ['-c', opts.cmd], {
-            cwd:opts.cwd,
-            stdio:['ignore', 'pipe', 'pipe'],
-            detached:true,
+            cwd: opts.cwd,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: true,
         })
 
         if (child.pid !== undefined && opts.registry) {
@@ -85,8 +85,8 @@ export function runTestCmd (opts:{
             }
             chunks.push(String(err))
             resolve({
-                exitCode:1,
-                output:chunks.join(''),
+                exitCode: 1,
+                output: chunks.join(''),
             })
         })
 
@@ -98,8 +98,8 @@ export function runTestCmd (opts:{
                 opts.registry.delete(child.pid)
             }
             resolve({
-                exitCode:code ?? 1,
-                output:chunks.join(''),
+                exitCode: code ?? 1,
+                output: chunks.join(''),
             })
         })
     })

@@ -44,84 +44,84 @@ test('AC1.1: entries round-trip through render and parse', t => {
 
     const entries:EntryInput[] = [
         {
-            key:'my feature:1',
-            label:'my feature/01',
-            attempt:1,
-            now:new Date('2026-10-06T14:30:45'),
-            outcome:'done',
-            run:{
-                exitCode:0,
-                completedItems:['item a', 'item b'],
-                timedOut:false,
-                notes:'All good',
+            key: 'my feature:1',
+            label: 'my feature/01',
+            attempt: 1,
+            now: new Date('2026-10-06T14:30:45'),
+            outcome: 'done',
+            run: {
+                exitCode: 0,
+                completedItems: ['item a', 'item b'],
+                timedOut: false,
+                notes: 'All good',
             },
-            effort:'high',
+            effort: 'high',
         },
         {
-            key:'my-feature:2',
-            label:'my-feature/02',
-            attempt:2,
-            now:new Date('2026-10-06T15:00:00'),
-            outcome:'exit',
-            run:{
-                exitCode:42,
-                completedItems:[],
-                timedOut:true,
-                notes:null,
-            },
-        },
-        {
-            key:'my-feature:3',
-            label:'my-feature/03',
-            attempt:1,
-            now:new Date('2026-10-06T15:30:00'),
-            outcome:'tests',
-            run:{
-                exitCode:1,
-                completedItems:[itemToken],
-                timedOut:false,
-                notes:notesToken,
-            },
-            logName:'npm-test.log',
-            logTail:'line 1\nline 2\nline 3',
-        },
-        {
-            key:'my-feature:4',
-            label:'my-feature/04',
-            attempt:1,
-            now:new Date('2026-10-06T16:00:00'),
-            outcome:'install',
-            logName:'npm-install.log',
-            logTail:'install failed',
-        },
-        {
-            key:'my-feature:5',
-            label:'my-feature/05',
-            attempt:1,
-            now:new Date('2026-10-06T16:30:00'),
-            outcome:'no-commits',
-            run:{
-                exitCode:0,
-                completedItems:[],
-                timedOut:false,
-                notes:'No commits made',
+            key: 'my-feature:2',
+            label: 'my-feature/02',
+            attempt: 2,
+            now: new Date('2026-10-06T15:00:00'),
+            outcome: 'exit',
+            run: {
+                exitCode: 42,
+                completedItems: [],
+                timedOut: true,
+                notes: null,
             },
         },
         {
-            key:'my-feature:6',
-            label:'my-feature/06',
-            attempt:1,
-            now:new Date('2026-10-06T17:00:00'),
-            outcome:'error',
-            error:'Something went wrong: ' + token,
+            key: 'my-feature:3',
+            label: 'my-feature/03',
+            attempt: 1,
+            now: new Date('2026-10-06T15:30:00'),
+            outcome: 'tests',
+            run: {
+                exitCode: 1,
+                completedItems: [itemToken],
+                timedOut: false,
+                notes: notesToken,
+            },
+            logName: 'npm-test.log',
+            logTail: 'line 1\nline 2\nline 3',
         },
         {
-            key:'my-feature:7',
-            label:'my-feature/07',
-            attempt:0,
-            now:new Date('2026-10-06T17:30:00'),
-            outcome:'merge',
-            stderr:'CONFLICT (content): Merge conflict in file.txt',
+            key: 'my-feature:4',
+            label: 'my-feature/04',
+            attempt: 1,
+            now: new Date('2026-10-06T16:00:00'),
+            outcome: 'install',
+            logName: 'npm-install.log',
+            logTail: 'install failed',
+        },
+        {
+            key: 'my-feature:5',
+            label: 'my-feature/05',
+            attempt: 1,
+            now: new Date('2026-10-06T16:30:00'),
+            outcome: 'no-commits',
+            run: {
+                exitCode: 0,
+                completedItems: [],
+                timedOut: false,
+                notes: 'No commits made',
+            },
+        },
+        {
+            key: 'my-feature:6',
+            label: 'my-feature/06',
+            attempt: 1,
+            now: new Date('2026-10-06T17:00:00'),
+            outcome: 'error',
+            error: 'Something went wrong: ' + token,
+        },
+        {
+            key: 'my-feature:7',
+            label: 'my-feature/07',
+            attempt: 0,
+            now: new Date('2026-10-06T17:30:00'),
+            outcome: 'merge',
+            stderr: 'CONFLICT (content): Merge conflict in file.txt',
         },
     ]
 
@@ -182,16 +182,16 @@ test('AC1.2: notes containing sentinel prefix parse as one entry', t => {
     const tokenInNotes = randomUUID()
     const entries:EntryInput[] = [
         {
-            key:'test:1',
-            label:'test/01',
-            attempt:1,
-            now:new Date(),
-            outcome:'done',
-            run:{
-                exitCode:0,
-                completedItems:[],
-                timedOut:false,
-                notes:(
+            key: 'test:1',
+            label: 'test/01',
+            attempt: 1,
+            now: new Date(),
+            outcome: 'done',
+            run: {
+                exitCode: 0,
+                completedItems: [],
+                timedOut: false,
+                notes: (
                     'Some text\n' +
                     '<!-- nightralph:entry ' +
                     'ticket=x:1 attempt=1 outcome=done -->\n' +
@@ -223,16 +223,16 @@ test('AC1.2: notes containing sentinel prefix parse as one entry', t => {
 test('AC1.1/I1: key with space and = encodes and decodes correctly', t => {
     const entries:EntryInput[] = [
         {
-            key:'my feature:1=test',
-            label:'my-feature/01',
-            attempt:1,
-            now:new Date(),
-            outcome:'done',
-            run:{
-                exitCode:0,
-                completedItems:[],
-                timedOut:false,
-                notes:null,
+            key: 'my feature:1=test',
+            label: 'my-feature/01',
+            attempt: 1,
+            now: new Date(),
+            outcome: 'done',
+            run: {
+                exitCode: 0,
+                completedItems: [],
+                timedOut: false,
+                notes: null,
             },
         },
     ]
@@ -252,18 +252,18 @@ test('AC1.2: completedItems and notes with sentinel are sanitized', t => {
     const token = randomUUID()
     const entries:EntryInput[] = [
         {
-            key:'test:2',
-            label:'test/02',
-            attempt:1,
-            now:new Date(),
-            outcome:'done',
-            run:{
-                exitCode:0,
-                completedItems:[
+            key: 'test:2',
+            label: 'test/02',
+            attempt: 1,
+            now: new Date(),
+            outcome: 'done',
+            run: {
+                exitCode: 0,
+                completedItems: [
                     'item with sentinel <!-- nightralph:entry',
                 ],
-                timedOut:false,
-                notes:`notes with sentinel <!-- nightralph:entry ${token}`,
+                timedOut: false,
+                notes: `notes with sentinel <!-- nightralph:entry ${token}`,
             },
         },
     ]
@@ -316,16 +316,16 @@ unknown outcome
 test('Parsing robustness: CRLF line endings are handled', t => {
     const token = randomUUID()
     const entry:EntryInput = {
-        key:'test:crlf',
-        label:'test/crlf',
-        attempt:1,
-        now:new Date(),
-        outcome:'done',
-        run:{
-            exitCode:0,
-            completedItems:[],
-            timedOut:false,
-            notes:`Note with CRLF and token: ${token}`,
+        key: 'test:crlf',
+        label: 'test/crlf',
+        attempt: 1,
+        now: new Date(),
+        outcome: 'done',
+        run: {
+            exitCode: 0,
+            completedItems: [],
+            timedOut: false,
+            notes: `Note with CRLF and token: ${token}`,
         },
     }
 
@@ -350,19 +350,19 @@ test('AC1.2+: logTail with sentinel is sanitized', t => {
         '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
         'outcome=done -->'
     const entry:EntryInput = {
-        key:'test:1',
-        label:'test/01',
-        attempt:1,
-        now:new Date(),
-        outcome:'tests',
-        run:{
-            exitCode:1,
-            completedItems:[],
-            timedOut:false,
-            notes:null,
+        key: 'test:1',
+        label: 'test/01',
+        attempt: 1,
+        now: new Date(),
+        outcome: 'tests',
+        run: {
+            exitCode: 1,
+            completedItems: [],
+            timedOut: false,
+            notes: null,
         },
-        logName:'test.log',
-        logTail:`some output\n${sentinel}\n${token}`,
+        logName: 'test.log',
+        logTail: `some output\n${sentinel}\n${token}`,
     }
 
     const rendered = renderEntry(entry)
@@ -385,13 +385,13 @@ test('AC1.2+: install logTail with sentinel is sanitized', t => {
         '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
         'outcome=done -->'
     const entry:EntryInput = {
-        key:'test:2',
-        label:'test/02',
-        attempt:1,
-        now:new Date(),
-        outcome:'install',
-        logName:'install.log',
-        logTail:`some output\n${sentinel}\n${token}`,
+        key: 'test:2',
+        label: 'test/02',
+        attempt: 1,
+        now: new Date(),
+        outcome: 'install',
+        logName: 'install.log',
+        logTail: `some output\n${sentinel}\n${token}`,
     }
 
     const parsed = parseEntries(renderEntry(entry))
@@ -410,12 +410,12 @@ test('AC1.2+: error field with sentinel is sanitized', t => {
         '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
         'outcome=done -->'
     const entry:EntryInput = {
-        key:'test:2',
-        label:'test/02',
-        attempt:1,
-        now:new Date(),
-        outcome:'error',
-        error:`error occurred\n${sentinel}\n${token}`,
+        key: 'test:2',
+        label: 'test/02',
+        attempt: 1,
+        now: new Date(),
+        outcome: 'error',
+        error: `error occurred\n${sentinel}\n${token}`,
     }
 
     const rendered = renderEntry(entry)
@@ -438,12 +438,12 @@ test('AC1.2+: stderr field with sentinel is sanitized', t => {
         '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
         'outcome=done -->'
     const entry:EntryInput = {
-        key:'test:3',
-        label:'test/03',
-        attempt:0,
-        now:new Date(),
-        outcome:'merge',
-        stderr:`conflict here\n${sentinel}\n${token}`,
+        key: 'test:3',
+        label: 'test/03',
+        attempt: 0,
+        now: new Date(),
+        outcome: 'merge',
+        stderr: `conflict here\n${sentinel}\n${token}`,
     }
 
     const rendered = renderEntry(entry)
@@ -466,16 +466,16 @@ test('AC1.2+: completedItems with sentinel are sanitized', t => {
         '<!-- nightralph:entry ticket=x:1 attempt=1 ' +
         'outcome=done -->'
     const entry:EntryInput = {
-        key:'test:4',
-        label:'test/04',
-        attempt:1,
-        now:new Date(),
-        outcome:'done',
-        run:{
-            exitCode:0,
-            completedItems:[`item\n${sentinel}\n${token}`],
-            timedOut:false,
-            notes:null,
+        key: 'test:4',
+        label: 'test/04',
+        attempt: 1,
+        now: new Date(),
+        outcome: 'done',
+        run: {
+            exitCode: 0,
+            completedItems: [`item\n${sentinel}\n${token}`],
+            timedOut: false,
+            notes: null,
         },
     }
 
@@ -503,18 +503,18 @@ test('AC1.2+: variable-length code fence preserved', t => {
         `${token}`
     )
     const entry:EntryInput = {
-        key:'test:5',
-        label:'test/05',
-        attempt:1,
-        now:new Date(),
-        outcome:'tests',
-        run:{
-            exitCode:1,
-            completedItems:[],
-            timedOut:false,
-            notes:null,
+        key: 'test:5',
+        label: 'test/05',
+        attempt: 1,
+        now: new Date(),
+        outcome: 'tests',
+        run: {
+            exitCode: 1,
+            completedItems: [],
+            timedOut: false,
+            notes: null,
         },
-        logName:'test.log',
+        logName: 'test.log',
         logTail,
     }
 
@@ -611,52 +611,52 @@ test('AC1.3: tailLines handles trailing newline correctly', t => {
 test('AC2.1: selectHistory keeps most recent own entries', t => {
     const entries:LearningEntry[] = [
         {
-            key:'feat:1',
-            attempt:1,
-            outcome:'exit',
-            timedOut:false,
-            body:'first',
+            key: 'feat:1',
+            attempt: 1,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'first',
         },
         {
-            key:'feat:1',
-            attempt:2,
-            outcome:'exit',
-            timedOut:false,
-            body:'second',
+            key: 'feat:1',
+            attempt: 2,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'second',
         },
         {
-            key:'feat:1',
-            attempt:3,
-            outcome:'done',
-            timedOut:false,
-            body:'third',
+            key: 'feat:1',
+            attempt: 3,
+            outcome: 'done',
+            timedOut: false,
+            body: 'third',
         },
         {
-            key:'feat:1',
-            attempt:4,
-            outcome:'exit',
-            timedOut:false,
-            body:'fourth',
+            key: 'feat:1',
+            attempt: 4,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'fourth',
         },
         {
-            key:'feat:1',
-            attempt:5,
-            outcome:'exit',
-            timedOut:false,
-            body:'fifth',
+            key: 'feat:1',
+            attempt: 5,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'fifth',
         },
         {
-            key:'feat:1',
-            attempt:6,
-            outcome:'exit',
-            timedOut:false,
-            body:'sixth',
+            key: 'feat:1',
+            attempt: 6,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'sixth',
         },
     ]
 
     const selection = selectHistory(entries, {
-        key:'feat:1',
-        blockerKeys:[],
+        key: 'feat:1',
+        blockerKeys: [],
     })
 
     t.equal(
@@ -679,38 +679,38 @@ test('AC2.1: selectHistory keeps most recent own entries', t => {
 test('AC2.2: selectHistory includes most recent done entry from blocker', t => {
     const entries:LearningEntry[] = [
         {
-            key:'blocker:1',
-            attempt:1,
-            outcome:'exit',
-            timedOut:false,
-            body:'blocker failed',
+            key: 'blocker:1',
+            attempt: 1,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'blocker failed',
         },
         {
-            key:'blocker:1',
-            attempt:2,
-            outcome:'done',
-            timedOut:false,
-            body:'blocker first success',
+            key: 'blocker:1',
+            attempt: 2,
+            outcome: 'done',
+            timedOut: false,
+            body: 'blocker first success',
         },
         {
-            key:'blocker:1',
-            attempt:3,
-            outcome:'exit',
-            timedOut:false,
-            body:'blocker failed again',
+            key: 'blocker:1',
+            attempt: 3,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'blocker failed again',
         },
         {
-            key:'blocker:1',
-            attempt:4,
-            outcome:'done',
-            timedOut:false,
-            body:'blocker second success',
+            key: 'blocker:1',
+            attempt: 4,
+            outcome: 'done',
+            timedOut: false,
+            body: 'blocker second success',
         },
     ]
 
     const selection = selectHistory(entries, {
-        key:'feat:1',
-        blockerKeys:['blocker:1'],
+        key: 'feat:1',
+        blockerKeys: ['blocker:1'],
     })
 
     t.equal(
@@ -731,78 +731,78 @@ test('AC2.3: excludes unrelated entries and transitive blockers', t => {
     const entries:LearningEntry[] = [
         // Own entry for feat:4 (the ticket we're looking at)
         {
-            key:'feat:4',
-            attempt:1,
-            outcome:'done',
-            timedOut:false,
-            body:'own entry for feat:4',
+            key: 'feat:4',
+            attempt: 1,
+            outcome: 'done',
+            timedOut: false,
+            body: 'own entry for feat:4',
         },
         // Same number in different feature (should exclude)
         {
-            key:'other:4',
-            attempt:1,
-            outcome:'done',
-            timedOut:false,
-            body:'other:4 should not appear',
+            key: 'other:4',
+            attempt: 1,
+            outcome: 'done',
+            timedOut: false,
+            body: 'other:4 should not appear',
         },
         // Unrelated feature (should exclude)
         {
-            key:'unrelated:1',
-            attempt:1,
-            outcome:'done',
-            timedOut:false,
-            body:'unrelated should not appear',
+            key: 'unrelated:1',
+            attempt: 1,
+            outcome: 'done',
+            timedOut: false,
+            body: 'unrelated should not appear',
         },
         // Direct blocker with failures only (should exclude)
         {
-            key:'blocker:1',
-            attempt:1,
-            outcome:'exit',
-            timedOut:false,
-            body:'blocker failed first',
+            key: 'blocker:1',
+            attempt: 1,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'blocker failed first',
         },
         {
-            key:'blocker:1',
-            attempt:2,
-            outcome:'exit',
-            timedOut:false,
-            body:'blocker still failing',
+            key: 'blocker:1',
+            attempt: 2,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'blocker still failing',
         },
         // Blocker-of-blocker (should exclude - not in blockerKeys)
         {
-            key:'blocker-of-blocker:1',
-            attempt:1,
-            outcome:'done',
-            timedOut:false,
-            body:'transitive blocker',
+            key: 'blocker-of-blocker:1',
+            attempt: 1,
+            outcome: 'done',
+            timedOut: false,
+            body: 'transitive blocker',
         },
         // Valid direct blocker's done entry (should include)
         {
-            key:'direct-blocker:1',
-            attempt:1,
-            outcome:'exit',
-            timedOut:false,
-            body:'direct blocker first failed',
+            key: 'direct-blocker:1',
+            attempt: 1,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'direct blocker first failed',
         },
         {
-            key:'direct-blocker:1',
-            attempt:2,
-            outcome:'done',
-            timedOut:false,
-            body:'direct blocker succeeded',
+            key: 'direct-blocker:1',
+            attempt: 2,
+            outcome: 'done',
+            timedOut: false,
+            body: 'direct blocker succeeded',
         },
         {
-            key:'direct-blocker:1',
-            attempt:3,
-            outcome:'exit',
-            timedOut:false,
-            body:'direct blocker failed again',
+            key: 'direct-blocker:1',
+            attempt: 3,
+            outcome: 'exit',
+            timedOut: false,
+            body: 'direct blocker failed again',
         },
     ]
 
     const selection = selectHistory(entries, {
-        key:'feat:4',
-        blockerKeys:['blocker:1', 'direct-blocker:1'],
+        key: 'feat:4',
+        blockerKeys: ['blocker:1', 'direct-blocker:1'],
     })
 
     t.equal(
@@ -841,8 +841,8 @@ test('AC2.3: excludes unrelated entries and transitive blockers', t => {
 
 test('AC2.4: renderHistory of empty selection returns empty string', t => {
     const result = renderHistory({
-        own:[],
-        blockers:[],
+        own: [],
+        blockers: [],
     })
 
     t.equal(result, '', 'should be empty string')
@@ -850,13 +850,13 @@ test('AC2.4: renderHistory of empty selection returns empty string', t => {
 
 test('renderHistory with only blockers has no double blank line', t => {
     const blocker:LearningEntry = {
-        key:'feat:1',
-        attempt:1,
-        outcome:'done',
-        timedOut:false,
-        body:randomUUID(),
+        key: 'feat:1',
+        attempt: 1,
+        outcome: 'done',
+        timedOut: false,
+        body: randomUUID(),
     }
-    const result = renderHistory({ own:[], blockers:[blocker] })
+    const result = renderHistory({ own: [], blockers: [blocker] })
 
     t.ok(result.includes(blocker.body), 'should include blocker body')
     t.ok(!result.includes('\n\n\n'), 'should not have a double blank line')
@@ -870,29 +870,29 @@ test('AC2.5: renderHistory truncates long entries', t => {
 
     const entries:LearningEntry[] = [
         {
-            key:'feat:1',
-            attempt:1,
-            outcome:'done',
-            timedOut:false,
-            body:longBody,
+            key: 'feat:1',
+            attempt: 1,
+            outcome: 'done',
+            timedOut: false,
+            body: longBody,
         },
         {
-            key:'feat:2',
-            attempt:1,
-            outcome:'done',
-            timedOut:false,
-            body:emptyBody,
+            key: 'feat:2',
+            attempt: 1,
+            outcome: 'done',
+            timedOut: false,
+            body: emptyBody,
         },
     ]
 
     const selectionA = selectHistory(entries, {
-        key:'feat:1',
-        blockerKeys:[],
+        key: 'feat:1',
+        blockerKeys: [],
     })
 
     const selectionB = selectHistory(entries, {
-        key:'feat:2',
-        blockerKeys:[],
+        key: 'feat:2',
+        blockerKeys: [],
     })
 
     const resultA = renderHistory(selectionA)
@@ -943,8 +943,8 @@ function initTempRepo ():{
     )
 
     const result = spawnSync('git', ['init', '--template=' + templateDir], {
-        cwd:repoRoot,
-        encoding:'utf8',
+        cwd: repoRoot,
+        encoding: 'utf8',
     })
     if (result.status !== 0) {
         throw new Error(`git init failed: ${result.stderr}`)
@@ -953,7 +953,7 @@ function initTempRepo ():{
     const hookResult = spawnSync(
         'git',
         ['config', 'core.hooksPath', '/dev/null'],
-        { cwd:repoRoot, encoding:'utf8' }
+        { cwd: repoRoot, encoding: 'utf8' }
     )
     if (hookResult.status !== 0) {
         throw new Error(
@@ -964,7 +964,7 @@ function initTempRepo ():{
     const excludeResult = spawnSync(
         'git',
         ['config', 'core.excludesFile', '/dev/null'],
-        { cwd:repoRoot, encoding:'utf8' }
+        { cwd: repoRoot, encoding: 'utf8' }
     )
     if (excludeResult.status !== 0) {
         throw new Error(
@@ -976,14 +976,14 @@ function initTempRepo ():{
         'git',
         ['commit', '--allow-empty', '-m', 'init', '--no-verify'],
         {
-            cwd:repoRoot,
-            encoding:'utf8',
-            env:{
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         }
     )
@@ -1006,7 +1006,7 @@ test('AC3.1: collectNotes returns notes file contents', t => {
         const content = `random token: ${randomUUID()}`
 
         // Create notes file
-        mkdirSync(notesDir, { recursive:true })
+        mkdirSync(notesDir, { recursive: true })
         writeFileSync(notesPath, content)
 
         const result = collectNotes(dir)
@@ -1032,7 +1032,7 @@ test('AC3.1: collectNotes returns notes file contents', t => {
             'notes directory should be removed'
         )
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -1068,7 +1068,7 @@ test(
                 '.nightralph directory should be removed'
             )
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     }
 )
@@ -1088,7 +1088,7 @@ test('AC3.2: collectNotes returns null for missing file', t => {
             'should return null when notes file missing'
         )
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -1101,7 +1101,7 @@ test('AC3.2: collectNotes returns null for blank notes', t => {
         const notesDir = dirname(notesPath)
 
         // Create blank notes file with only whitespace
-        mkdirSync(notesDir, { recursive:true })
+        mkdirSync(notesDir, { recursive: true })
         writeFileSync(notesPath, '   ')
 
         const result = collectNotes(dir)
@@ -1112,7 +1112,7 @@ test('AC3.2: collectNotes returns null for blank notes', t => {
             'should return null for whitespace-only notes'
         )
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -1132,7 +1132,7 @@ test('AC3.4: readEntries returns empty array for missing file', t => {
             'should return empty array for missing file'
         )
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -1148,30 +1148,30 @@ test(
             const logPath = join(dir, 'subdir', 'learnings.md')
 
             const entry1:EntryInput = {
-                key:'feat:1',
-                label:'feat/01',
-                attempt:1,
-                now:new Date('2026-10-06T14:30:00'),
-                outcome:'done',
-                run:{
-                    exitCode:0,
-                    completedItems:['item 1', 'item 2'],
-                    timedOut:false,
-                    notes:'some notes',
+                key: 'feat:1',
+                label: 'feat/01',
+                attempt: 1,
+                now: new Date('2026-10-06T14:30:00'),
+                outcome: 'done',
+                run: {
+                    exitCode: 0,
+                    completedItems: ['item 1', 'item 2'],
+                    timedOut: false,
+                    notes: 'some notes',
                 },
             }
 
             const entry2:EntryInput = {
-                key:'feat:2',
-                label:'feat/02',
-                attempt:1,
-                now:new Date('2026-10-06T15:00:00'),
-                outcome:'done',
-                run:{
-                    exitCode:0,
-                    completedItems:[],
-                    timedOut:false,
-                    notes:null,
+                key: 'feat:2',
+                label: 'feat/02',
+                attempt: 1,
+                now: new Date('2026-10-06T15:00:00'),
+                outcome: 'done',
+                run: {
+                    exitCode: 0,
+                    completedItems: [],
+                    timedOut: false,
+                    notes: null,
                 },
             }
 
@@ -1199,7 +1199,7 @@ test(
                 'second entry key correct'
             )
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     }
 )
@@ -1223,7 +1223,7 @@ test('AC3.3: ensureNotesIgnored creates .gitignore', t => {
             '.gitignore should contain "*\\n"'
         )
     } finally {
-        rmSync(repoRoot, { recursive:true, force:true })
+        rmSync(repoRoot, { recursive: true, force: true })
     }
 })
 
@@ -1245,14 +1245,14 @@ test(
 
             // Write notes file
             const notesPath = join(repoRoot, NOTES_PATH)
-            mkdirSync(dirname(notesPath), { recursive:true })
+            mkdirSync(dirname(notesPath), { recursive: true })
             writeFileSync(notesPath, 'test notes')
 
             // git check-ignore should exit 0
             const checkIgnore = spawnSync(
                 'git',
                 ['check-ignore', '-q', '.nightralph/notes.md'],
-                { cwd:repoRoot, encoding:'utf8' }
+                { cwd: repoRoot, encoding: 'utf8' }
             )
             t.equal(
                 checkIgnore.status,
@@ -1264,7 +1264,7 @@ test(
             const status = spawnSync(
                 'git',
                 ['status', '--porcelain'],
-                { cwd:repoRoot, encoding:'utf8' }
+                { cwd: repoRoot, encoding: 'utf8' }
             )
             t.equal(
                 status.stdout,
@@ -1284,7 +1284,7 @@ test(
 
             // Verify it's not a symlink
             // lstat, not existsSync: a dangling link must still count
-            const isLink = lstatSync(excludePath, { throwIfNoEntry:false })
+            const isLink = lstatSync(excludePath, { throwIfNoEntry: false })
                 ?.isSymbolicLink() ?? false
             t.equal(
                 isLink,
@@ -1293,8 +1293,8 @@ test(
                 '(should be regular file or not exist)'
             )
         } finally {
-            rmSync(repoRoot, { recursive:true, force:true })
-            rmSync(templateDir, { recursive:true, force:true })
+            rmSync(repoRoot, { recursive: true, force: true })
+            rmSync(templateDir, { recursive: true, force: true })
         }
     }
 )
@@ -1315,7 +1315,7 @@ test(
             const addWorktree = spawnSync(
                 'git',
                 ['worktree', 'add', worktreePath, '-b', 'test-branch'],
-                { cwd:repoRoot, encoding:'utf8' }
+                { cwd: repoRoot, encoding: 'utf8' }
             )
             if (addWorktree.status !== 0) {
                 throw new Error(
@@ -1328,14 +1328,14 @@ test(
 
             // Write notes file in worktree
             const notesPath = join(worktreePath, NOTES_PATH)
-            mkdirSync(dirname(notesPath), { recursive:true })
+            mkdirSync(dirname(notesPath), { recursive: true })
             writeFileSync(notesPath, 'worktree notes')
 
             // git check-ignore should exit 0 in worktree
             const checkIgnore = spawnSync(
                 'git',
                 ['check-ignore', '-q', '.nightralph/notes.md'],
-                { cwd:worktreePath, encoding:'utf8' }
+                { cwd: worktreePath, encoding: 'utf8' }
             )
             t.equal(
                 checkIgnore.status,
@@ -1347,7 +1347,7 @@ test(
             const status = spawnSync(
                 'git',
                 ['status', '--porcelain'],
-                { cwd:worktreePath, encoding:'utf8' }
+                { cwd: worktreePath, encoding: 'utf8' }
             )
             t.equal(
                 status.stdout,
@@ -1359,14 +1359,14 @@ test(
                 const removeWorktree = spawnSync(
                     'git',
                     ['worktree', 'remove', '--force', worktreePath],
-                    { cwd:repoRoot, encoding:'utf8' }
+                    { cwd: repoRoot, encoding: 'utf8' }
                 )
                 if (removeWorktree.status !== 0) {
-                    rmSync(worktreePath, { recursive:true, force:true })
+                    rmSync(worktreePath, { recursive: true, force: true })
                 }
             }
-            rmSync(repoRoot, { recursive:true, force:true })
-            rmSync(templateDir, { recursive:true, force:true })
+            rmSync(repoRoot, { recursive: true, force: true })
+            rmSync(templateDir, { recursive: true, force: true })
         }
     }
 )
@@ -1384,7 +1384,7 @@ test('collectNotes - reads a named file and removes the dir', t => {
         t.ok(!existsSync(join(dir, '.nightralph')),
             'removes the whole directory')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -1397,20 +1397,20 @@ function statsEntry (
     stats:StatsRun
 ):EntryInput {
     const base = {
-        key:'f:1',
-        label:'f/01',
-        attempt:1,
-        now:new Date('2026-10-09T10:00:00'),
-        run:{
-            exitCode:0,
-            completedItems:[],
-            timedOut:false,
-            notes:null,
+        key: 'f:1',
+        label: 'f/01',
+        attempt: 1,
+        now: new Date('2026-10-09T10:00:00'),
+        run: {
+            exitCode: 0,
+            completedItems: [],
+            timedOut: false,
+            notes: null,
             ...stats,
         },
     }
     return outcome === 'tests' ?
-        { ...base, outcome, logName:'f-01.test.log', logTail:'fail' } :
+        { ...base, outcome, logName: 'f-01.test.log', logTail: 'fail' } :
         { ...base, outcome }
 }
 
@@ -1419,7 +1419,7 @@ const AGENT_OUTCOMES = ['done', 'exit', 'no-commits', 'tests'] as const
 test('AC4.1: agent entries show subagent count and cost', t => {
     for (const outcome of AGENT_OUTCOMES) {
         const text = renderEntry(
-            statsEntry(outcome, { subagents:3, costUsd:0.42 })
+            statsEntry(outcome, { subagents: 3, costUsd: 0.42 })
         )
         t.ok(text.includes('Subagents: 3.'),
             `${outcome}: includes the subagent count`)
@@ -1430,7 +1430,7 @@ test('AC4.1: agent entries show subagent count and cost', t => {
 
 test('AC4.2: each stats line is omitted when absent', t => {
     for (const outcome of AGENT_OUTCOMES) {
-        const zero = renderEntry(statsEntry(outcome, { subagents:0 }))
+        const zero = renderEntry(statsEntry(outcome, { subagents: 0 }))
         t.ok(zero.includes('Subagents: 0.'),
             `${outcome}: a zero count is still shown`)
         t.ok(!zero.includes('Cost:'),
@@ -1446,15 +1446,15 @@ test('AC4.2: each stats line is omitted when absent', t => {
 
 test('AC4.3: install, error and merge entries carry no stats', t => {
     const base = {
-        key:'f:1',
-        label:'f/01',
-        attempt:1,
-        now:new Date('2026-10-09T10:00:00'),
+        key: 'f:1',
+        label: 'f/01',
+        attempt: 1,
+        now: new Date('2026-10-09T10:00:00'),
     }
     const entries:EntryInput[] = [
-        { ...base, outcome:'install', logName:'i.log', logTail:'x' },
-        { ...base, outcome:'error', error:'boom' },
-        { ...base, attempt:0, outcome:'merge', stderr:'CONFLICT' },
+        { ...base, outcome: 'install', logName: 'i.log', logTail: 'x' },
+        { ...base, outcome: 'error', error: 'boom' },
+        { ...base, attempt: 0, outcome: 'merge', stderr: 'CONFLICT' },
     ]
     for (const entry of entries) {
         const text = renderEntry(entry)
@@ -1466,7 +1466,7 @@ test('AC4.3: install, error and merge entries carry no stats', t => {
 
 test('AC4.4: entries with stats round-trip through parseEntries', t => {
     const parsed = parseEntries(renderEntry(
-        statsEntry('done', { subagents:2, costUsd:1.5 })
+        statsEntry('done', { subagents: 2, costUsd: 1.5 })
     ))
     t.equal(parsed.length, 1, 'parses one entry')
     t.equal(parsed[0].key, 'f:1', 'key matches')

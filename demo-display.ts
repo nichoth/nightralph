@@ -9,14 +9,14 @@ function sleep (ms:number):Promise<void> {
 }
 
 const tickets = [
-    { num:1, filename:'001-add-login-page.md' },
-    { num:2, filename:'002-fix-header-alignment.md' },
-    { num:3, filename:'003-refactor-auth-module.md' },
-    { num:4, filename:'004-update-dependencies.md' },
-    { num:5, filename:'005-add-dark-mode.md' },
-    { num:6, filename:'006-improve-error-messages.md' },
-    { num:7, filename:'007-add-search-feature.md' },
-    { num:8, filename:'008-optimize-queries.md' },
+    { num: 1, filename: '001-add-login-page.md' },
+    { num: 2, filename: '002-fix-header-alignment.md' },
+    { num: 3, filename: '003-refactor-auth-module.md' },
+    { num: 4, filename: '004-update-dependencies.md' },
+    { num: 5, filename: '005-add-dark-mode.md' },
+    { num: 6, filename: '006-improve-error-messages.md' },
+    { num: 7, filename: '007-add-search-feature.md' },
+    { num: 8, filename: '008-optimize-queries.md' },
 ]
 
 async function main () {

@@ -13,7 +13,7 @@ import { execSync } from 'node:child_process'
 export const SKILL_DIRS = [
     'grill', 'grilling', 'domain-modeling',
     'to-spec', 'to-tickets', 'tdd',
-    'codebase-design',
+    'codebase-design', 'improve-codebase-architecture'
 ] as const
 
 export const DOC_TEMPLATES = [
@@ -71,7 +71,7 @@ function ensureGitAttribute (
 
 export function checkGhAuth ():boolean {
     try {
-        execSync('gh auth status', { stdio:'ignore' })
+        execSync('gh auth status', { stdio: 'ignore' })
         return true
     } catch {
         return false
@@ -88,8 +88,8 @@ export type SetupOpts = {
 }
 
 const TRACKER_TEMPLATES:Record<TrackerKind, string> = {
-    local:'issue-tracker.md',
-    github:'issue-tracker-github.md',
+    local: 'issue-tracker.md',
+    github: 'issue-tracker-github.md',
 }
 
 export function setup (opts:SetupOpts):void {
@@ -104,10 +104,7 @@ export function setup (opts:SetupOpts):void {
     )
 
     const upstream = JSON.parse(
-        readFileSync(
-            join(bundledSkillsDir, 'upstream.json'),
-            'utf8'
-        )
+        readFileSync(join(bundledSkillsDir, 'upstream.json'), 'utf8')
     ) as { repo:string; commit:string }
 
     console.log('Installing skills to .agents/skills/\n')
@@ -115,36 +112,26 @@ export function setup (opts:SetupOpts):void {
     for (const skill of SKILL_DIRS) {
         const src = join(bundledSkillsDir, skill)
         const dest = join(agentsSkillsDir, skill)
-        mkdirSync(dest, { recursive:true })
-        cpSync(src, dest, { recursive:true })
+        mkdirSync(dest, { recursive: true })
+        cpSync(src, dest, { recursive: true })
         const files = readdirSync(src)
-        console.log(
-            `  ${skill}/ (${files.join(', ')})`
-        )
+        console.log(`  ${skill}/ (${files.join(', ')})`)
     }
 
-    const claudeSkillsDir = join(
-        projectDir, '.claude', 'skills'
-    )
-    mkdirSync(claudeSkillsDir, { recursive:true })
+    const claudeSkillsDir = join(projectDir, '.claude', 'skills')
+    mkdirSync(claudeSkillsDir, { recursive: true })
 
     for (const skill of SKILL_DIRS) {
         const linkPath = join(claudeSkillsDir, skill)
-        const target = join(
-            '..', '..', '.agents', 'skills', skill
-        )
+        const target = join('..', '..', '.agents', 'skills', skill)
         if (existsSync(linkPath)) continue
         symlinkSync(target, linkPath)
     }
 
-    console.log(
-        '\nCreated symlinks in .claude/skills/'
-    )
+    console.log('\nCreated symlinks in .claude/skills/')
 
-    const docsAgentsDir = join(
-        projectDir, 'docs', 'agents'
-    )
-    mkdirSync(docsAgentsDir, { recursive:true })
+    const docsAgentsDir = join(projectDir, 'docs', 'agents')
+    mkdirSync(docsAgentsDir, { recursive: true })
 
     console.log('')
     for (const tmpl of DOC_TEMPLATES) {

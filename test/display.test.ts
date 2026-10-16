@@ -82,9 +82,9 @@ function createMockStream ():MockStream&NodeJS.WriteStream {
 
 function createTestTickets ():Array<DisplayTicket> {
     return [
-        { num:1, filename:'task1.md', status:'pending' },
-        { num:2, filename:'task2.md', status:'pending' },
-        { num:3, filename:'task3.md', status:'pending' },
+        { num: 1, filename: 'task1.md', status: 'pending' },
+        { num: 2, filename: 'task2.md', status: 'pending' },
+        { num: 3, filename: 'task3.md', status: 'pending' },
     ]
 }
 
@@ -125,11 +125,11 @@ function headerNumbers (frame:string):{
     )
     if (!match) return null
     return {
-        waveNum:parseInt(match[1], 10),
-        totalWaves:parseInt(match[2], 10),
-        done:parseInt(match[3], 10),
-        total:parseInt(match[4], 10),
-        pct:parseInt(match[5], 10),
+        waveNum: parseInt(match[1], 10),
+        totalWaves: parseInt(match[2], 10),
+        done: parseInt(match[3], 10),
+        total: parseInt(match[4], 10),
+        pct: parseInt(match[5], 10),
     }
 }
 
@@ -170,8 +170,8 @@ test('startWave does not reset ticket list on second call', t => {
     })
 
     const allTickets = [
-        { num:1, filename:'wave1-task.md' },
-        { num:2, filename:'wave2-task.md' },
+        { num: 1, filename: 'wave1-task.md' },
+        { num: 2, filename: 'wave2-task.md' },
     ]
 
     display.startRun(allTickets)
@@ -240,7 +240,7 @@ test('pending ticket shows empty/dim dot (AC1.2)', t => {
     })
 
     const tickets = [
-        { num:1, filename:'pending.md' },
+        { num: 1, filename: 'pending.md' },
     ]
     display.startWave(1, 1, tickets)
 
@@ -263,7 +263,7 @@ test('in-progress ticket shows yellow filled dot (AC1.3)', t => {
     })
 
     const tickets = [
-        { num:1, filename:'work.md' },
+        { num: 1, filename: 'work.md' },
     ]
     display.startWave(1, 1, tickets)
     stream.clear()
@@ -288,7 +288,7 @@ test('done ticket shows green filled dot (AC1.4)', t => {
     })
 
     const tickets = [
-        { num:1, filename:'done.md' },
+        { num: 1, filename: 'done.md' },
     ]
     display.startWave(1, 1, tickets)
     stream.clear()
@@ -313,7 +313,7 @@ test('failed ticket shows red filled dot (AC1.5)', t => {
     })
 
     const tickets = [
-        { num:1, filename:'failed.md' },
+        { num: 1, filename: 'failed.md' },
     ]
     display.startWave(1, 1, tickets)
     stream.clear()
@@ -440,17 +440,17 @@ test('percentage comes from fixed list, not progress arg', t => {
 
     // startRun with 3 tickets (the fixed list)
     display.startRun([
-        { num:1, filename:'task1.md' },
-        { num:2, filename:'task2.md' },
-        { num:3, filename:'task3.md' },
+        { num: 1, filename: 'task1.md' },
+        { num: 2, filename: 'task2.md' },
+        { num: 3, filename: 'task3.md' },
     ])
 
     // startWave with progress arg (which is ignored)
     display.startWave(1, 2, [
-        { num:1, filename:'task1.md' },
-        { num:2, filename:'task2.md' },
-        { num:3, filename:'task3.md' },
-    ], { completed:10, total:100 })
+        { num: 1, filename: 'task1.md' },
+        { num: 2, filename: 'task2.md' },
+        { num: 3, filename: 'task3.md' },
+    ], { completed: 10, total: 100 })
 
     const first = headerNumbers(lastFrame(stream.getOutput()))
     t.ok(first, 'header present after first wave')
@@ -471,12 +471,12 @@ test('percentage comes from fixed list, not progress arg', t => {
 
     // next wave -- fixed list stays the same
     display.startWave(2, 2, [
-        { num:1, filename:'task1.md' },
-        { num:2, filename:'task2.md' },
-        { num:3, filename:'task3.md' },
+        { num: 1, filename: 'task1.md' },
+        { num: 2, filename: 'task2.md' },
+        { num: 3, filename: 'task3.md' },
     ], {
-        completed:100,
-        total:1000,
+        completed: 100,
+        total: 1000,
     })
     const third = headerNumbers(lastFrame(stream.getOutput()))
     t.ok(third, 'header present after second wave')
@@ -497,9 +497,9 @@ test('rendered lines never exceed terminal width', t => {
 
     const tickets:Array<DisplayTicket> = [
         {
-            num:1,
-            filename:'a-very-long-ticket-filename-that-wraps.md',
-            status:'pending',
+            num: 1,
+            filename: 'a-very-long-ticket-filename-that-wraps.md',
+            status: 'pending',
         },
     ]
     display.startWave(1, 1, tickets)
@@ -781,7 +781,7 @@ test('setTicketStatus updates ticket status and triggers render', t => {
 
 test('log before any wave writes straight to the stream', t => {
     const stream = new MockStream()
-    const display = new StatusDisplay({ stream:stream as any })
+    const display = new StatusDisplay({ stream: stream as any })
     display.log('nothing to run')
     t.ok(
         stream.getOutput().includes('nothing to run'),
@@ -823,8 +823,8 @@ test('non-wave tickets render with pending dot', t => {
     })
 
     const allTickets = [
-        { num:1, filename:'01-active.md' },
-        { num:2, filename:'02-pending.md' },
+        { num: 1, filename: '01-active.md' },
+        { num: 2, filename: '02-pending.md' },
     ]
 
     display.startRun(allTickets)
@@ -849,8 +849,8 @@ test('non-wave tickets show pending empty dot', t => {
     })
 
     const allTickets = [
-        { num:1, filename:'active.md' },
-        { num:2, filename:'pending.md' },
+        { num: 1, filename: 'active.md' },
+        { num: 2, filename: 'pending.md' },
     ]
 
     display.startRun(allTickets)
@@ -876,8 +876,8 @@ test('setTicketStatus does not affect non-wave tickets', t => {
     })
 
     const allTickets = [
-        { num:1, filename:'active.md' },
-        { num:2, filename:'pending.md' },
+        { num: 1, filename: 'active.md' },
+        { num: 2, filename: 'pending.md' },
     ]
 
     display.startRun(allTickets)
@@ -906,14 +906,14 @@ test('non-wave tickets are included in pagination', t => {
     })
 
     const waveTickets = [
-        { num:1, filename:'wave-1.md' },
-        { num:2, filename:'wave-2.md' },
+        { num: 1, filename: 'wave-1.md' },
+        { num: 2, filename: 'wave-2.md' },
     ]
     const allTickets = [
         ...waveTickets,
-        ...Array.from({ length:10 }, (_, i) => ({
-            num:i + 3,
-            filename:`pending-${i + 3}.md`,
+        ...Array.from({ length: 10 }, (_, i) => ({
+            num: i + 3,
+            filename: `pending-${i + 3}.md`,
         })),
     ]
 
@@ -957,10 +957,10 @@ test('AC1.1: all session tickets rendered after startRun', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'task1.md' },
-        { num:2, filename:'task2.md' },
-        { num:3, filename:'task3.md' },
-        { num:4, filename:'task4.md' },
+        { num: 1, filename: 'task1.md' },
+        { num: 2, filename: 'task2.md' },
+        { num: 3, filename: 'task3.md' },
+        { num: 4, filename: 'task4.md' },
     ]
     display.startRun(tickets)
     display.startWave(1, 2, [tickets[0]])
@@ -989,8 +989,8 @@ test('AC1.2/AC1.5: done status persists, failed persists', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'task1.md' },
-        { num:2, filename:'task2.md' },
+        { num: 1, filename: 'task1.md' },
+        { num: 2, filename: 'task2.md' },
     ]
 
     display.startRun(tickets)
@@ -1030,9 +1030,9 @@ test('AC1.3: ticket order is stable across waves', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'first.md' },
-        { num:2, filename:'second.md' },
-        { num:3, filename:'third.md' },
+        { num: 1, filename: 'first.md' },
+        { num: 2, filename: 'second.md' },
+        { num: 3, filename: 'third.md' },
     ]
 
     display.startRun(tickets)
@@ -1064,12 +1064,12 @@ test('AC1.7: without startRun, wave seeds list once', t => {
     const display = new StatusDisplay({ stream })
 
     display.startWave(1, 2, [
-        { num:1, filename:'a.md' },
-        { num:2, filename:'b.md' },
+        { num: 1, filename: 'a.md' },
+        { num: 2, filename: 'b.md' },
     ])
 
     display.startWave(2, 2, [
-        { num:3, filename:'c.md' },
+        { num: 3, filename: 'c.md' },
     ])
 
     const frame = lastFrame(stream.getOutput())
@@ -1088,7 +1088,7 @@ test('AC1.8: setTicketStatus for unknown ticket ignored', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'task1.md' },
+        { num: 1, filename: 'task1.md' },
     ]
     display.startRun(tickets)
     display.startWave(1, 1, tickets)
@@ -1113,9 +1113,9 @@ test('AC1.9: pagination and auto-scroll with fixed list', t => {
     stream.rows = 12
     const display = new StatusDisplay({ stream })
 
-    const tickets = Array.from({ length:20 }, (_, i) => ({
-        num:i + 1,
-        filename:`task${String(i + 1).padStart(2, '0')}.md`,
+    const tickets = Array.from({ length: 20 }, (_, i) => ({
+        num: i + 1,
+        filename: `task${String(i + 1).padStart(2, '0')}.md`,
     }))
 
     display.startRun(tickets)
@@ -1137,10 +1137,10 @@ test('AC2.8: blocked row fits terminal width', t => {
     const display = new StatusDisplay({ stream })
 
     // Create enough tickets to make long header
-    const tickets = Array.from({ length:100 }, (_, i) => ({
-        num:i + 1,
-        filename:`t${i + 1}.md`,
-        feature:'f',
+    const tickets = Array.from({ length: 100 }, (_, i) => ({
+        num: i + 1,
+        filename: `t${i + 1}.md`,
+        feature: 'f',
     }))
 
     display.startRun(tickets)
@@ -1184,8 +1184,8 @@ test('AC2.8: blocked row shows blocked dot', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'task1.md' },
-        { num:2, filename:'task2.md' },
+        { num: 1, filename: 'task1.md' },
+        { num: 2, filename: 'task2.md' },
     ]
 
     display.startRun(tickets)
@@ -1217,8 +1217,8 @@ test('blocked suffix contains blocker label', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'01.md', feature:'f' },
-        { num:2, filename:'02.md', feature:'f' },
+        { num: 1, filename: '01.md', feature: 'f' },
+        { num: 2, filename: '02.md', feature: 'f' },
     ]
 
     display.startRun(tickets)
@@ -1240,9 +1240,9 @@ test('blocked suffix with multiple blockers', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'01.md', feature:'f' },
-        { num:2, filename:'02.md', feature:'f' },
-        { num:3, filename:'03.md', feature:'f' },
+        { num: 1, filename: '01.md', feature: 'f' },
+        { num: 2, filename: '02.md', feature: 'f' },
+        { num: 3, filename: '03.md', feature: 'f' },
     ]
 
     display.startRun(tickets)
@@ -1268,9 +1268,9 @@ test('setBlocked before the first startWave is kept (AC2.9)', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'01.md', feature:'f' },
-        { num:2, filename:'02.md', feature:'f' },
-        { num:3, filename:'03.md', feature:'f' },
+        { num: 1, filename: '01.md', feature: 'f' },
+        { num: 2, filename: '02.md', feature: 'f' },
+        { num: 3, filename: '03.md', feature: 'f' },
     ]
 
     // Same order both orchestrator loops use:
@@ -1299,9 +1299,9 @@ test('setTicketStatus before the first startWave is kept', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'01.md', feature:'f' },
-        { num:2, filename:'02.md', feature:'f' },
-        { num:3, filename:'03.md', feature:'f' },
+        { num: 1, filename: '01.md', feature: 'f' },
+        { num: 2, filename: '02.md', feature: 'f' },
+        { num: 3, filename: '03.md', feature: 'f' },
     ]
 
     display.startRun(tickets)
@@ -1324,11 +1324,11 @@ test('AC3.2/AC3.3: header shows done/total and 0% initially', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'task1.md' },
-        { num:2, filename:'task2.md' },
-        { num:3, filename:'task3.md' },
-        { num:4, filename:'task4.md' },
-        { num:5, filename:'task5.md' },
+        { num: 1, filename: 'task1.md' },
+        { num: 2, filename: 'task2.md' },
+        { num: 3, filename: 'task3.md' },
+        { num: 4, filename: 'task4.md' },
+        { num: 5, filename: 'task5.md' },
     ]
 
     display.startRun(tickets)
@@ -1349,11 +1349,11 @@ test('AC3.4: header shows 100% when all done', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'task1.md' },
-        { num:2, filename:'task2.md' },
-        { num:3, filename:'task3.md' },
-        { num:4, filename:'task4.md' },
-        { num:5, filename:'task5.md' },
+        { num: 1, filename: 'task1.md' },
+        { num: 2, filename: 'task2.md' },
+        { num: 3, filename: 'task3.md' },
+        { num: 4, filename: 'task4.md' },
+        { num: 5, filename: 'task5.md' },
     ]
 
     display.startRun(tickets)
@@ -1378,11 +1378,11 @@ test('AC3.5: failed and blocked do not count as done', t => {
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'task1.md' },
-        { num:2, filename:'task2.md' },
-        { num:3, filename:'task3.md' },
-        { num:4, filename:'task4.md' },
-        { num:5, filename:'task5.md' },
+        { num: 1, filename: 'task1.md' },
+        { num: 2, filename: 'task2.md' },
+        { num: 3, filename: 'task3.md' },
+        { num: 4, filename: 'task4.md' },
+        { num: 5, filename: 'task5.md' },
     ]
 
     display.startRun(tickets)
@@ -1416,9 +1416,9 @@ test('viewport limits rendering when tickets exceed available rows', t => {
     })
 
     // Create 10 tickets, only 6 should fit
-    const tickets = Array.from({ length:10 }, (_, i) => ({
-        num:i + 1,
-        filename:`task${i + 1}.md`,
+    const tickets = Array.from({ length: 10 }, (_, i) => ({
+        num: i + 1,
+        filename: `task${i + 1}.md`,
     }))
     display.startWave(1, 1, tickets)
 
@@ -1445,9 +1445,9 @@ test('viewport shows "more above" indicator when scrolled down', t => {
         stream,
     })
 
-    const tickets = Array.from({ length:10 }, (_, i) => ({
-        num:i + 1,
-        filename:`item${i + 1}.md`,
+    const tickets = Array.from({ length: 10 }, (_, i) => ({
+        num: i + 1,
+        filename: `item${i + 1}.md`,
     }))
     display.startWave(1, 1, tickets)
 
@@ -1472,9 +1472,9 @@ test('no pagination when all tickets fit in available rows', t => {
         stream,
     })
 
-    const tickets = Array.from({ length:4 }, (_, i) => ({
-        num:i + 1,
-        filename:`task${i + 1}.md`,
+    const tickets = Array.from({ length: 4 }, (_, i) => ({
+        num: i + 1,
+        filename: `task${i + 1}.md`,
     }))
     display.startWave(1, 1, tickets)
 
@@ -1501,9 +1501,9 @@ test('auto-scroll on in-progress status change when below viewport', t => {
         stream,
     })
 
-    const tickets = Array.from({ length:10 }, (_, i) => ({
-        num:i + 1,
-        filename:`task${i + 1}.md`,
+    const tickets = Array.from({ length: 10 }, (_, i) => ({
+        num: i + 1,
+        filename: `task${i + 1}.md`,
     }))
     display.startWave(1, 1, tickets)
 
@@ -1532,9 +1532,9 @@ test('auto-scroll on in-progress status change when above viewport', t => {
         stream,
     })
 
-    const tickets = Array.from({ length:10 }, (_, i) => ({
-        num:i + 1,
-        filename:`task${i + 1}.md`,
+    const tickets = Array.from({ length: 10 }, (_, i) => ({
+        num: i + 1,
+        filename: `task${i + 1}.md`,
     }))
     display.startWave(1, 1, tickets)
 
@@ -1561,9 +1561,9 @@ test('resize event triggers re-render', t => {
         stream,
     })
 
-    const tickets = Array.from({ length:10 }, (_, i) => ({
-        num:i + 1,
-        filename:`task${i + 1}.md`,
+    const tickets = Array.from({ length: 10 }, (_, i) => ({
+        num: i + 1,
+        filename: `task${i + 1}.md`,
     }))
     display.startWave(1, 1, tickets)
 
@@ -1592,9 +1592,9 @@ test('cleanup removes resize listener', t => {
         stream,
     })
 
-    const tickets = Array.from({ length:10 }, (_, i) => ({
-        num:i + 1,
-        filename:`task${i + 1}.md`,
+    const tickets = Array.from({ length: 10 }, (_, i) => ({
+        num: i + 1,
+        filename: `task${i + 1}.md`,
     }))
     display.startWave(1, 1, tickets)
 
@@ -1647,9 +1647,9 @@ test('createDisplay uses process.stdout by default', t => {
     try {
         // Mock process.stdout.isTTY
         Object.defineProperty(process.stdout, 'isTTY', {
-            value:false,
-            writable:true,
-            configurable:true,
+            value: false,
+            writable: true,
+            configurable: true,
         })
 
         const display = createDisplay()
@@ -1661,9 +1661,9 @@ test('createDisplay uses process.stdout by default', t => {
     } finally {
         // Restore original value
         Object.defineProperty(process.stdout, 'isTTY', {
-            value:originalIsTTY,
-            writable:true,
-            configurable:true,
+            value: originalIsTTY,
+            writable: true,
+            configurable: true,
         })
     }
 })
@@ -1712,13 +1712,13 @@ test('spawnAgent onLine callback receives agent output lines', t => {
         const lines:string[] = []
 
         spawnAgent({
-            prompt:'hello',
-            agentCmd:'node',
-            model:null,
-            timeout:5,
-            logPath:'/tmp/test-online.log',
-            cwd:__dirname,
-            onLine:(line:string) => {
+            prompt: 'hello',
+            agentCmd: 'node',
+            model: null,
+            timeout: 5,
+            logPath: '/tmp/test-online.log',
+            cwd: __dirname,
+            onLine: (line:string) => {
                 lines.push(line)
             },
         }).then(() => {
@@ -1754,8 +1754,8 @@ class RecordingDisplay implements Display {
 
     startRun (tickets:ReadonlyArray<TicketRef>):void {
         this.calls.push({
-            method:'startRun',
-            args:[tickets],
+            method: 'startRun',
+            args: [tickets],
         })
     }
 
@@ -1766,8 +1766,8 @@ class RecordingDisplay implements Display {
         progress?:RunProgress,
     ):void {
         this.calls.push({
-            method:'startWave',
-            args:[
+            method: 'startWave',
+            args: [
                 waveNum, totalWaves, tickets,
                 progress,
             ],
@@ -1780,8 +1780,8 @@ class RecordingDisplay implements Display {
         feature?:string,
     ):void {
         this.calls.push({
-            method:'setTicketStatus',
-            args:[num, status, feature],
+            method: 'setTicketStatus',
+            args: [num, status, feature],
         })
     }
 
@@ -1791,8 +1791,8 @@ class RecordingDisplay implements Display {
         blockedBy:ReadonlyArray<string>,
     ):void {
         this.calls.push({
-            method:'setBlocked',
-            args:[num, feature, blockedBy],
+            method: 'setBlocked',
+            args: [num, feature, blockedBy],
         })
     }
 
@@ -1802,22 +1802,22 @@ class RecordingDisplay implements Display {
         stats:SubagentStats,
     ):void {
         this.calls.push({
-            method:'setTicketStats',
-            args:[num, feature, stats],
+            method: 'setTicketStats',
+            args: [num, feature, stats],
         })
     }
 
     log (message:string):void {
         this.calls.push({
-            method:'log',
-            args:[message],
+            method: 'log',
+            args: [message],
         })
     }
 
     cleanup ():void {
         this.calls.push({
-            method:'cleanup',
-            args:[],
+            method: 'cleanup',
+            args: [],
         })
     }
 
@@ -1837,25 +1837,25 @@ function initTempGitRepo ():string {
     const dir = mkdtempSync(
         join(tmpdir(), 'nightralph-display-test-')
     )
-    execSync('git init', { cwd:dir })
+    execSync('git init', { cwd: dir })
     execSync(
         'git config user.email test@example.com',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync(
         'git config user.name "Test User"',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync(
         'git commit --allow-empty -m "init" --no-verify',
         {
-            cwd:dir,
-            env:{
+            cwd: dir,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         }
     )
@@ -1977,11 +1977,11 @@ test(
             const firstStartWave = calls[firstStartWaveIndex]
             t.deepEqual(
                 firstStartWave?.args[3],
-                { completed:0, total:3 },
+                { completed: 0, total: 3 },
                 'wave progress counts only the session set'
             )
         } finally {
-            rmSync(base, { recursive:true, force:true })
+            rmSync(base, { recursive: true, force: true })
         }
     }
 )
@@ -2082,7 +2082,7 @@ test(
                 'ticket 2 is blocked by ticket 1'
             )
         } finally {
-            rmSync(base, { recursive:true, force:true })
+            rmSync(base, { recursive: true, force: true })
         }
     }
 )
@@ -2173,7 +2173,7 @@ test(
                 'ticket 2 is blocked by ticket 1'
             )
         } finally {
-            rmSync(base, { recursive:true, force:true })
+            rmSync(base, { recursive: true, force: true })
         }
     }
 )
@@ -2252,7 +2252,7 @@ test(
                 'ticket 3 row has the done dot'
             )
         } finally {
-            rmSync(base, { recursive:true, force:true })
+            rmSync(base, { recursive: true, force: true })
         }
     }
 )
@@ -2436,10 +2436,10 @@ test(
             makeTicketBody('ready-for-agent')
         )
         const tickets = scanTickets(issuesDir)
-        execSync('git add -A', { cwd:base })
+        execSync('git add -A', { cwd: base })
         execSync(
             'git commit -m "add tickets" --no-verify',
-            { cwd:base }
+            { cwd: base }
         )
 
         const display = new RecordingDisplay()
@@ -2448,14 +2448,14 @@ test(
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_AGENT_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_AGENT_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
                 display,
             })
         } finally {
@@ -2527,8 +2527,8 @@ test('StatusDisplay renders feature/num when ' +
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'01-login.md', feature:'auth' },
-        { num:3, filename:'03-refund.md', feature:'payments' },
+        { num: 1, filename: '01-login.md', feature: 'auth' },
+        { num: 3, filename: '03-refund.md', feature: 'payments' },
     ]
     display.startWave(1, 1, tickets)
 
@@ -2550,8 +2550,8 @@ test('StatusDisplay falls back to filename when ' +
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'01-task.md' },
-        { num:2, filename:'02-task.md' },
+        { num: 1, filename: '01-task.md' },
+        { num: 2, filename: '02-task.md' },
     ]
     display.startWave(1, 1, tickets)
 
@@ -2573,8 +2573,8 @@ test('setTicketStatus uses compound identity when ' +
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'01-login.md', feature:'auth' },
-        { num:1, filename:'01-setup.md', feature:'payments' },
+        { num: 1, filename: '01-login.md', feature: 'auth' },
+        { num: 1, filename: '01-setup.md', feature: 'payments' },
     ]
     display.startWave(1, 1, tickets)
 
@@ -2606,8 +2606,8 @@ test('setTicketStatus matches by num alone when ' +
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'01-task.md' },
-        { num:2, filename:'02-task.md' },
+        { num: 1, filename: '01-task.md' },
+        { num: 2, filename: '02-task.md' },
     ]
     display.startWave(1, 1, tickets)
 
@@ -2632,14 +2632,14 @@ test('PlainDisplay includes feature/num in ' +
     const display = new PlainDisplay()
     const tickets = [
         {
-            num:1,
-            filename:'01-login.md',
-            feature:'auth',
+            num: 1,
+            filename: '01-login.md',
+            feature: 'auth',
         },
         {
-            num:3,
-            filename:'03-refund.md',
-            feature:'payments',
+            num: 3,
+            filename: '03-refund.md',
+            feature: 'payments',
         },
     ]
     display.startWave(1, 2, tickets)
@@ -2663,10 +2663,10 @@ test('Display tests verify feature/num with tickets ' +
     const display = new StatusDisplay({ stream })
 
     const tickets = [
-        { num:1, filename:'01-login.md', feature:'auth' },
-        { num:2, filename:'02-signup.md', feature:'auth' },
-        { num:1, filename:'01-setup.md', feature:'payments' },
-        { num:3, filename:'03-refund.md', feature:'payments' },
+        { num: 1, filename: '01-login.md', feature: 'auth' },
+        { num: 2, filename: '02-signup.md', feature: 'auth' },
+        { num: 1, filename: '01-setup.md', feature: 'payments' },
+        { num: 3, filename: '03-refund.md', feature: 'payments' },
     ]
     display.startWave(1, 1, tickets)
 
@@ -2727,7 +2727,7 @@ test('AC4.5: PlainDisplay startRun and setBlocked are no-ops',
             const display = new PlainDisplay()
 
             display.startRun([
-                { num:1, filename:'task1.md' },
+                { num: 1, filename: 'task1.md' },
             ])
             display.setBlocked(1, undefined, ['task2.md'])
         } finally {
@@ -2754,14 +2754,14 @@ test('AC4.5: PlainDisplay output format unchanged', t => {
 
         const display1 = new PlainDisplay()
         display1.startRun([
-            { num:1, filename:'task1.md' },
-            { num:2, filename:'task2.md' },
+            { num: 1, filename: 'task1.md' },
+            { num: 2, filename: 'task2.md' },
         ])
         display1.setBlocked(1, undefined, ['task2.md'])
         display1.startWave(1, 2, [
-            { num:1, filename:'task1.md' },
-            { num:2, filename:'task2.md' },
-        ], { completed:0, total:2 })
+            { num: 1, filename: 'task1.md' },
+            { num: 2, filename: 'task2.md' },
+        ], { completed: 0, total: 2 })
 
         // Run 2: without startRun and setBlocked
         console.log = (...args:unknown[]) => {
@@ -2770,9 +2770,9 @@ test('AC4.5: PlainDisplay output format unchanged', t => {
 
         const display2 = new PlainDisplay()
         display2.startWave(1, 2, [
-            { num:1, filename:'task1.md' },
-            { num:2, filename:'task2.md' },
-        ], { completed:0, total:2 })
+            { num: 1, filename: 'task1.md' },
+            { num: 2, filename: 'task2.md' },
+        ], { completed: 0, total: 2 })
     } finally {
         console.log = origLog
     }
@@ -2790,13 +2790,13 @@ test('AC5.1: setTicketStats adds a suffix to that ticket row', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({ stream })
     const tickets = [
-        { num:1, filename:'01-a.md', feature:'feat' },
-        { num:2, filename:'02-b.md', feature:'feat' },
+        { num: 1, filename: '01-a.md', feature: 'feat' },
+        { num: 2, filename: '02-b.md', feature: 'feat' },
     ]
     display.startRun(tickets)
     display.startWave(1, 1, tickets)
 
-    const stats = { subagents:2, costUsd:0.42 }
+    const stats = { subagents: 2, costUsd: 0.42 }
     display.setTicketStats(1, 'feat', stats)
 
     const suffix = formatStats(stats)
@@ -2812,12 +2812,12 @@ test('AC5.1: setTicketStats adds a suffix to that ticket row', t => {
 test('AC5.1: a ticket with nothing to show keeps a bare row', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({ stream })
-    const tickets = [{ num:1, filename:'01-a.md', feature:'feat' }]
+    const tickets = [{ num: 1, filename: '01-a.md', feature: 'feat' }]
     display.startRun(tickets)
     display.startWave(1, 1, tickets)
     const before = lastFrame(stream.getOutput())
 
-    display.setTicketStats(1, 'feat', { subagents:0 })
+    display.setTicketStats(1, 'feat', { subagents: 0 })
 
     t.equal(
         lastFrame(stream.getOutput()), before,
@@ -2830,19 +2830,19 @@ test('AC5.3: rows with stats never exceed columns - 1', t => {
     stream.columns = 20
     const display = new StatusDisplay({ stream })
     const tickets = [
-        { num:1, filename:'01-a.md', feature:'f' },
+        { num: 1, filename: '01-a.md', feature: 'f' },
         {
-            num:2,
-            filename:'02-b.md',
-            feature:'a-very-long-feature-name-for-this-row',
+            num: 2,
+            filename: '02-b.md',
+            feature: 'a-very-long-feature-name-for-this-row',
         },
     ]
     display.startRun(tickets)
     display.startWave(1, 1, tickets)
-    display.setTicketStats(1, 'f', { subagents:12, costUsd:123.45 })
+    display.setTicketStats(1, 'f', { subagents: 12, costUsd: 123.45 })
     display.setTicketStats(2, tickets[1].feature, {
-        subagents:3,
-        costUsd:0.5,
+        subagents: 3,
+        costUsd: 0.5,
     })
 
     const frame = lastFrame(stream.getOutput())
@@ -2860,12 +2860,12 @@ test('AC5.3: rows with stats never exceed columns - 1', t => {
 test('AC5.4: setTicketStats for an unknown ticket is ignored', t => {
     const stream = createMockStream()
     const display = new StatusDisplay({ stream })
-    const tickets = [{ num:1, filename:'01-a.md', feature:'feat' }]
+    const tickets = [{ num: 1, filename: '01-a.md', feature: 'feat' }]
     display.startRun(tickets)
     display.startWave(1, 1, tickets)
     const before = stream.getOutput()
 
-    const stats = { subagents:2, costUsd:0.42 }
+    const stats = { subagents: 2, costUsd: 0.42 }
     display.setTicketStats(99, 'feat', stats)
     display.setTicketStats(1, 'other', stats)
 
@@ -2885,8 +2885,8 @@ test('AC5.4: PlainDisplay setTicketStats is a no-op', t => {
 
     try {
         const display = new PlainDisplay()
-        display.startRun([{ num:1, filename:'01-a.md', feature:'f' }])
-        display.setTicketStats(1, 'f', { subagents:1 })
+        display.startRun([{ num: 1, filename: '01-a.md', feature: 'f' }])
+        display.setTicketStats(1, 'f', { subagents: 1 })
     } finally {
         console.log = origLog
     }

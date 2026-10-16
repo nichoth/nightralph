@@ -128,10 +128,14 @@ export default tseslint.config(
                 before: true,
                 after: true
             }],
+            // Object keys take a space after the colon (`{ a: 1 }`).
+            // Interface, type literal and class members are type
+            // annotations, so `type-annotation-spacing` owns those.
             '@stylistic/key-spacing': ['error', {
                 beforeColon: false,
-                afterColon: false,
-                mode: 'strict'
+                afterColon: true,
+                mode: 'strict',
+                ignoredNodes: ['TSTypeLiteral', 'TSInterfaceBody', 'ClassBody']
             }],
             // Let `local/union-spacing` own union/intersection spacing.
             '@stylistic/space-infix-ops': ['error', { ignoreTypes: true }],

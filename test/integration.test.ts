@@ -31,7 +31,9 @@ import {
 } from '../src/orchestrator.js'
 import type { BlockerRef } from '../src/blockers.js'
 import { parseEntries, readEntries } from '../src/learnings.js'
-import { readProgress } from '../src/progress.js'
+import {
+    readProgress, generateProgress, checkTicket, writeProgress,
+} from '../src/progress.js'
 import { parseReviewEntries } from '../src/review.js'
 import { subagentRule } from '../src/rules.js'
 import { renderRunStats } from '../src/stats.js'
@@ -57,7 +59,7 @@ test('findFeatureDirs - no .scratch dir', t => {
         t.deepEqual(result, [],
             'returns empty array when .scratch/ missing')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -66,16 +68,16 @@ test('findFeatureDirs - dirs without issues/', t => {
     try {
         const scratch = join(dir, '.scratch')
         mkdirSync(join(scratch, 'feat-a'), {
-            recursive:true,
+            recursive: true,
         })
         mkdirSync(join(scratch, 'feat-b'), {
-            recursive:true,
+            recursive: true,
         })
         const result = findFeatureDirs(dir)
         t.deepEqual(result, [],
             'returns empty when no issues/ subdirs')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -85,7 +87,7 @@ test('findFeatureDirs - valid feature dirs', t => {
         const scratch = join(dir, '.scratch')
         mkdirSync(
             join(scratch, 'feat-x', 'issues'),
-            { recursive:true },
+            { recursive: true },
         )
         writeFileSync(
             join(scratch, 'feat-x', 'spec.md'),
@@ -103,7 +105,7 @@ test('findFeatureDirs - valid feature dirs', t => {
             join(scratch, 'feat-x', 'spec.md'),
             'correct spec path')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -112,14 +114,14 @@ test('findFeatureDirs - ignores non-directory entries',
         const dir = tmp()
         try {
             const scratch = join(dir, '.scratch')
-            mkdirSync(scratch, { recursive:true })
+            mkdirSync(scratch, { recursive: true })
             writeFileSync(
                 join(scratch, 'not-a-dir.txt'),
                 'just a file',
             )
             mkdirSync(
                 join(scratch, 'real-feat', 'issues'),
-                { recursive:true },
+                { recursive: true },
             )
 
             const result = findFeatureDirs(dir)
@@ -128,7 +130,7 @@ test('findFeatureDirs - ignores non-directory entries',
             t.equal(result[0].name, 'real-feat',
                 'returns the valid feature')
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     })
 
@@ -138,7 +140,7 @@ test('findFeatureDirs - excludes completed specs', t => {
         const scratch = join(dir, '.scratch')
         mkdirSync(
             join(scratch, 'done-feat', 'issues'),
-            { recursive:true },
+            { recursive: true },
         )
         writeFileSync(
             join(scratch, 'done-feat', 'spec.md'),
@@ -160,7 +162,7 @@ test('findFeatureDirs - excludes completed specs', t => {
 
         mkdirSync(
             join(scratch, 'open-feat', 'issues'),
-            { recursive:true },
+            { recursive: true },
         )
         writeFileSync(
             join(scratch, 'open-feat', 'spec.md'),
@@ -173,7 +175,7 @@ test('findFeatureDirs - excludes completed specs', t => {
         t.equal(result[0].name, 'open-feat',
             'returns the open feature')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -198,7 +200,7 @@ test('resolveIssuesDir - resolves name to .scratch/',
                 'spec resolves to .scratch/<name>/spec.md',
             )
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     })
 
@@ -231,13 +233,13 @@ function spawnCli (
         const child = execFile(
             process.execPath,
             [CLI, ...args],
-            { timeout:30_000, cwd:opts?.cwd, env:opts?.env },
+            { timeout: 30_000, cwd: opts?.cwd, env: opts?.env },
             (err, stdout, stderr) => {
                 const code = err && 'code' in err ?
                     (err as { code:number }).code :
                     (err ? 1 : 0)
                 resolve({
-                    code:code as number,
+                    code: code as number,
                     stdout,
                     stderr,
                 })
@@ -298,7 +300,7 @@ function scratchDirs (projectDir:string):{
     const issuesDir = join(base, 'issues')
     const specPath = join(base, 'spec.md')
     const logsDir = join(base, 'logs')
-    mkdirSync(issuesDir, { recursive:true })
+    mkdirSync(issuesDir, { recursive: true })
     writeFileSync(specPath, '# Test spec')
     return { issuesDir, specPath, logsDir }
 }
@@ -313,7 +315,7 @@ test('CLI subprocess - --model flag forwarded to agent',
             writeFileSync(
                 join(issuesDir, '01-echo.md'),
                 makeTicketBody({
-                    status:'ready-for-agent',
+                    status: 'ready-for-agent',
                 }),
             )
 
@@ -322,7 +324,7 @@ test('CLI subprocess - --model flag forwarded to agent',
                 '--spec', FEAT,
                 '--timeout', '10',
                 '-m', 'test-model',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 0, 'exit code 0')
 
@@ -345,7 +347,7 @@ test('CLI subprocess - --model flag forwarded to agent',
             )
         } finally {
             rmSync(projectDir, {
-                recursive:true, force:true,
+                recursive: true, force: true,
             })
         }
     })
@@ -357,13 +359,13 @@ test('CLI subprocess - --dry-run output', async t => {
 
         writeFileSync(
             join(issuesDir, '01-alpha.md'),
-            makeTicketBody({ status:'ready-for-agent' }),
+            makeTicketBody({ status: 'ready-for-agent' }),
         )
         writeFileSync(
             join(issuesDir, '02-beta.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[1],
+                status: 'ready-for-agent',
+                blockers: [1],
             }),
         )
 
@@ -371,7 +373,7 @@ test('CLI subprocess - --dry-run output', async t => {
             MOCK_AGENT,
             '--spec', FEAT,
             '--dry-run',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit code 0')
 
@@ -406,7 +408,7 @@ test('CLI subprocess - --dry-run output', async t => {
         )
     } finally {
         rmSync(projectDir, {
-            recursive:true, force:true,
+            recursive: true, force: true,
         })
     }
 })
@@ -420,7 +422,7 @@ test('CLI subprocess - no tickets exits gracefully',
             const { code, stdout } = await spawnCli([
                 MOCK_AGENT,
                 '--spec', FEAT,
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 0, 'exit code 0 (graceful)')
             t.ok(
@@ -429,7 +431,7 @@ test('CLI subprocess - no tickets exits gracefully',
             )
         } finally {
             rmSync(projectDir, {
-                recursive:true, force:true,
+                recursive: true, force: true,
             })
         }
     })
@@ -441,7 +443,7 @@ test('CLI subprocess - error for nonexistent feature',
             const { code, stderr } = await spawnCli([
                 MOCK_AGENT,
                 '--spec', 'nonexistent',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.ok(code !== 0, 'exit code is non-zero')
             t.ok(
@@ -450,7 +452,7 @@ test('CLI subprocess - error for nonexistent feature',
             )
         } finally {
             rmSync(projectDir, {
-                recursive:true, force:true,
+                recursive: true, force: true,
             })
         }
     })
@@ -465,8 +467,8 @@ test('CLI subprocess - unknown blocker keeps the ticket from running',
             writeFileSync(
                 join(issuesDir, '01-task.md'),
                 makeTicketBody({
-                    status:'ready-for-agent',
-                    blockers:[99],
+                    status: 'ready-for-agent',
+                    blockers: [99],
                 }),
             )
 
@@ -474,7 +476,7 @@ test('CLI subprocess - unknown blocker keeps the ticket from running',
                 MOCK_AGENT,
                 '--spec', FEAT,
                 '--timeout', '10',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             // Positive control: the run loaded the ticket and ended
             // normally, so the assertions below are not explained by
@@ -507,7 +509,7 @@ test('CLI subprocess - unknown blocker keeps the ticket from running',
             )
         } finally {
             rmSync(projectDir, {
-                recursive:true, force:true,
+                recursive: true, force: true,
             })
         }
     })
@@ -521,15 +523,15 @@ test('CLI subprocess - dry-run deadlock detection',
             writeFileSync(
                 join(issuesDir, '01-alpha.md'),
                 makeTicketBody({
-                    status:'ready-for-agent',
-                    blockers:[2],
+                    status: 'ready-for-agent',
+                    blockers: [2],
                 }),
             )
             writeFileSync(
                 join(issuesDir, '02-beta.md'),
                 makeTicketBody({
-                    status:'ready-for-agent',
-                    blockers:[1],
+                    status: 'ready-for-agent',
+                    blockers: [1],
                 }),
             )
 
@@ -537,7 +539,7 @@ test('CLI subprocess - dry-run deadlock detection',
                 MOCK_AGENT,
                 '--spec', FEAT,
                 '--dry-run',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 0, 'exit code 0')
             t.ok(
@@ -554,7 +556,7 @@ test('CLI subprocess - dry-run deadlock detection',
             )
         } finally {
             rmSync(projectDir, {
-                recursive:true, force:true,
+                recursive: true, force: true,
             })
         }
     })
@@ -567,7 +569,7 @@ test('CLI subprocess - AC2.9: the finish summary repeats a typo ' +
 
         writeFileSync(
             join(issuesDir, '01-done.md'),
-            makeTicketBody({ status:'done' }),
+            makeTicketBody({ status: 'done' }),
         )
         // The typo ref falls back to own ticket 01, which is done,
         // so 02 runs and the warning only shows in the summary.
@@ -581,7 +583,7 @@ test('CLI subprocess - AC2.9: the finish summary repeats a typo ' +
             MOCK_AGENT,
             '--spec', FEAT,
             '--timeout', '10',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit code 0')
         t.ok(
@@ -589,7 +591,7 @@ test('CLI subprocess - AC2.9: the finish summary repeats a typo ' +
             'the summary names the misspelt feature',
         )
     } finally {
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -601,13 +603,13 @@ test('CLI subprocess - execute smoke test', async t => {
 
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' }),
+            makeTicketBody({ status: 'ready-for-agent' }),
         )
         writeFileSync(
             join(issuesDir, '02-second.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[1],
+                status: 'ready-for-agent',
+                blockers: [1],
             }),
         )
 
@@ -615,7 +617,7 @@ test('CLI subprocess - execute smoke test', async t => {
             MOCK_AGENT,
             '--spec', FEAT,
             '--timeout', '10',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit code 0')
 
@@ -645,7 +647,7 @@ test('CLI subprocess - execute smoke test', async t => {
         )
     } finally {
         rmSync(projectDir, {
-            recursive:true, force:true,
+            recursive: true, force: true,
         })
     }
 })
@@ -691,17 +693,17 @@ const MOCK_NOTES = join(
 
 const GIT_ENV = {
     ...process.env,
-    GIT_COMMITTER_NAME:'Test',
-    GIT_COMMITTER_EMAIL:'test@example.com',
-    GIT_AUTHOR_NAME:'Test',
-    GIT_AUTHOR_EMAIL:'test@example.com',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@example.com',
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@example.com',
 }
 
 function commitAll (dir:string, message:string):void {
-    execSync('git add -A', { cwd:dir })
+    execSync('git add -A', { cwd: dir })
     execSync(
         `git commit -m "${message}" --no-verify`,
-        { cwd:dir, env:GIT_ENV }
+        { cwd: dir, env: GIT_ENV }
     )
 }
 
@@ -713,34 +715,34 @@ function initTempGitRepo (opts?:{ templateDir?:string }):string {
     if (opts?.templateDir) {
         execFileSync(
             'git', ['init', `--template=${opts.templateDir}`],
-            { cwd:dir, stdio:'ignore' }
+            { cwd: dir, stdio: 'ignore' }
         )
-        execSync('git config core.excludesFile /dev/null', { cwd:dir })
+        execSync('git config core.excludesFile /dev/null', { cwd: dir })
     } else {
-        execSync('git init', { cwd:dir })
+        execSync('git init', { cwd: dir })
     }
     execSync(
         'git config user.email test@example.com',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync(
         'git config user.name "Test User"',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync(
         'git config core.hooksPath /dev/null',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync(
         'git commit --allow-empty -m "init" --no-verify',
         {
-            cwd:dir,
-            env:{
+            cwd: dir,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         }
     )
@@ -757,11 +759,11 @@ test('runWavesIsolated - two independent tickets ' +
 
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-second.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -774,14 +776,14 @@ test('runWavesIsolated - two independent tickets ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -830,18 +832,18 @@ test('runWavesIsolated - two independent tickets ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -855,17 +857,17 @@ test('runWavesIsolated - a failed ticket is not re-run ' +
 
         writeFileSync(
             join(issuesDir, '01-fail.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-pass.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '03-dependent.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[2],
+                status: 'ready-for-agent',
+                blockers: [2],
             })
         )
 
@@ -883,15 +885,15 @@ test('runWavesIsolated - a failed ticket is not re-run ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_FAIL_TICKET_01,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_FAIL_TICKET_01,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-no-rerun',
-                conflictStrategy:'respawn',
-                retries:0,
-                testCmd:'true',
+                featureName: 'test-feature-no-rerun',
+                conflictStrategy: 'respawn',
+                retries: 0,
+                testCmd: 'true',
             })
 
             t.equal(
@@ -926,18 +928,18 @@ test('runWavesIsolated - a failed ticket is not re-run ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -950,7 +952,7 @@ test('runWavesIsolated - failing test command keeps the ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -960,14 +962,14 @@ test('runWavesIsolated - failing test command keeps the ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                testCmd:'echo suite failed; exit 1',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                testCmd: 'echo suite failed; exit 1',
             })
 
             t.equal(result.allDone, false, 'run not done')
@@ -991,7 +993,7 @@ test('runWavesIsolated - failing test command keeps the ' +
                 'progress does not show the ticket done'
             )
             const log = execSync(
-                'git log --oneline', { cwd:projectDir }
+                'git log --oneline', { cwd: projectDir }
             ).toString()
             t.ok(
                 !log.includes('mock agent change'),
@@ -1004,18 +1006,18 @@ test('runWavesIsolated - failing test command keeps the ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -1028,7 +1030,7 @@ test('runWavesIsolated - passing test command runs in the ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -1038,16 +1040,16 @@ test('runWavesIsolated - passing test command runs in the ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
                 // Only succeeds inside the worktree where
                 // the mock agent wrote its file.
-                testCmd:'ls mock-agent-change-*.txt',
+                testCmd: 'ls mock-agent-change-*.txt',
             })
 
             t.equal(result.allDone, true, 'run done')
@@ -1063,18 +1065,18 @@ test('runWavesIsolated - passing test command runs in the ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -1088,7 +1090,7 @@ test('runWavesIsolated - an empty test command writes no test ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -1098,14 +1100,14 @@ test('runWavesIsolated - an empty test command writes no test ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                testCmd:'',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                testCmd: '',
             })
 
             t.equal(result.allDone, true, 'run done')
@@ -1116,7 +1118,7 @@ test('runWavesIsolated - an empty test command writes no test ' +
             )
             const log = execSync(
                 'git log --oneline',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
             t.ok(
                 log.includes('mock agent change'),
@@ -1127,7 +1129,7 @@ test('runWavesIsolated - an empty test command writes no test ' +
         }
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -1140,7 +1142,7 @@ test('runWavesIsolated - install command runs in the ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -1150,17 +1152,17 @@ test('runWavesIsolated - install command runs in the ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                installCmd:'echo ok > install-marker',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                installCmd: 'echo ok > install-marker',
                 // Only succeeds where the install ran.
-                testCmd:'test -f install-marker',
-                retries:0,
+                testCmd: 'test -f install-marker',
+                retries: 0,
             })
 
             t.equal(result.allDone, true, 'run done')
@@ -1178,18 +1180,18 @@ test('runWavesIsolated - install command runs in the ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -1202,7 +1204,7 @@ test('runWavesIsolated - a failed install fails the ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -1212,16 +1214,16 @@ test('runWavesIsolated - a failed install fails the ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                installCmd:'exit 1',
-                testCmd:'true',
-                retries:0,
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                installCmd: 'exit 1',
+                testCmd: 'true',
+                retries: 0,
             })
 
             t.equal(result.allDone, false, 'run not done')
@@ -1246,18 +1248,18 @@ test('runWavesIsolated - a failed install fails the ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -1272,7 +1274,7 @@ async t => {
 
         writeFileSync(
             join(issuesDir, '01-noop.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -1284,14 +1286,14 @@ async t => {
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_NOOP,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_NOOP,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-noop',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature-noop',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -1317,18 +1319,18 @@ async t => {
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -1343,7 +1345,7 @@ async t => {
 
         writeFileSync(
             join(issuesDir, '01-dirty.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -1355,14 +1357,14 @@ async t => {
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_DIRTY,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_DIRTY,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-dirty',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature-dirty',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -1385,7 +1387,7 @@ async t => {
 
             const logOutput = execSync(
                 'git log --oneline',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
             t.ok(
                 logOutput.includes('auto-commit'),
@@ -1398,18 +1400,18 @@ async t => {
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -1423,7 +1425,7 @@ test('runWavesIsolated - agent killed at the timeout keeps ' +
 
         writeFileSync(
             join(issuesDir, '01-slow.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -1435,14 +1437,14 @@ test('runWavesIsolated - agent killed at the timeout keeps ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_COMMIT_THEN_HANG,
-                model:null,
-                timeout:2,
+                specBody: 'test spec',
+                agentCmd: MOCK_COMMIT_THEN_HANG,
+                model: null,
+                timeout: 2,
                 logsDir,
-                featureName:'test-feature-timeout',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature-timeout',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -1468,18 +1470,18 @@ test('runWavesIsolated - agent killed at the timeout keeps ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -1493,11 +1495,11 @@ test('runWavesIsolated - worktrees removed after successful merge',
 
             writeFileSync(
                 join(issuesDir, '01-first.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             writeFileSync(
                 join(issuesDir, '02-second.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
 
             const tickets = scanTickets(issuesDir)
@@ -1509,14 +1511,14 @@ test('runWavesIsolated - worktrees removed after successful merge',
             try {
                 await runWavesIsolated({
                     tickets,
-                    specBody:'test spec',
-                    agentCmd:MOCK_PASS,
-                    model:null,
-                    timeout:10,
+                    specBody: 'test spec',
+                    agentCmd: MOCK_PASS,
+                    model: null,
+                    timeout: 10,
                     logsDir,
-                    featureName:'test-feature-cleanup',
-                    conflictStrategy:'respawn',
-                    testCmd:'true',
+                    featureName: 'test-feature-cleanup',
+                    conflictStrategy: 'respawn',
+                    testCmd: 'true',
                 })
 
                 t.equal(
@@ -1554,18 +1556,18 @@ test('runWavesIsolated - worktrees removed after successful merge',
             try {
                 execSync(
                     'git worktree list --porcelain',
-                    { cwd:projectDir }
+                    { cwd: projectDir }
                 ).toString()
                     .split('\n')
                     .filter(l => l.startsWith('worktree '))
                     .map(l => l.substring('worktree '.length))
                     .filter(p => p !== projectDir)
                     .forEach(p => rmSync(p, {
-                        recursive:true, force:true
+                        recursive: true, force: true
                     }))
             } catch {
             }
-            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
         }
     })
 
@@ -1579,13 +1581,13 @@ test('runWavesIsolated - two-wave scenario with dependency',
 
             writeFileSync(
                 join(issuesDir, '01-base.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             writeFileSync(
                 join(issuesDir, '02-depends-on-1.md'),
                 makeTicketBody({
-                    status:'ready-for-agent',
-                    blockers:[1],
+                    status: 'ready-for-agent',
+                    blockers: [1],
                 })
             )
 
@@ -1598,14 +1600,14 @@ test('runWavesIsolated - two-wave scenario with dependency',
             try {
                 await runWavesIsolated({
                     tickets,
-                    specBody:'test spec',
-                    agentCmd:MOCK_PASS,
-                    model:null,
-                    timeout:10,
+                    specBody: 'test spec',
+                    agentCmd: MOCK_PASS,
+                    model: null,
+                    timeout: 10,
                     logsDir,
-                    featureName:'test-feature-waves',
-                    conflictStrategy:'respawn',
-                    testCmd:'true',
+                    featureName: 'test-feature-waves',
+                    conflictStrategy: 'respawn',
+                    testCmd: 'true',
                 })
 
                 t.equal(
@@ -1635,18 +1637,18 @@ test('runWavesIsolated - two-wave scenario with dependency',
             try {
                 execSync(
                     'git worktree list --porcelain',
-                    { cwd:projectDir }
+                    { cwd: projectDir }
                 ).toString()
                     .split('\n')
                     .filter(l => l.startsWith('worktree '))
                     .map(l => l.substring('worktree '.length))
                     .filter(p => p !== projectDir)
                     .forEach(p => rmSync(p, {
-                        recursive:true, force:true
+                        recursive: true, force: true
                     }))
             } catch {
             }
-            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
         }
     })
 
@@ -1660,11 +1662,11 @@ test('runWavesIsolated - progress.md committed after each ticket',
 
             writeFileSync(
                 join(issuesDir, '01-ticket-a.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             writeFileSync(
                 join(issuesDir, '02-ticket-b.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
 
             const tickets = scanTickets(issuesDir)
@@ -1676,20 +1678,20 @@ test('runWavesIsolated - progress.md committed after each ticket',
             try {
                 await runWavesIsolated({
                     tickets,
-                    specBody:'test spec',
-                    agentCmd:MOCK_PASS,
-                    model:null,
-                    timeout:10,
+                    specBody: 'test spec',
+                    agentCmd: MOCK_PASS,
+                    model: null,
+                    timeout: 10,
                     logsDir,
-                    featureName:'test-feature-progress',
-                    conflictStrategy:'respawn',
-                    testCmd:'true',
+                    featureName: 'test-feature-progress',
+                    conflictStrategy: 'respawn',
+                    testCmd: 'true',
                 })
 
                 // Check git log for progress commits
                 const logOutput = execSync(
                     'git log --oneline',
-                    { cwd:projectDir }
+                    { cwd: projectDir }
                 ).toString()
 
                 t.ok(
@@ -1731,18 +1733,18 @@ test('runWavesIsolated - progress.md committed after each ticket',
             try {
                 execSync(
                     'git worktree list --porcelain',
-                    { cwd:projectDir }
+                    { cwd: projectDir }
                 ).toString()
                     .split('\n')
                     .filter(l => l.startsWith('worktree '))
                     .map(l => l.substring('worktree '.length))
                     .filter(p => p !== projectDir)
                     .forEach(p => rmSync(p, {
-                        recursive:true, force:true
+                        recursive: true, force: true
                     }))
             } catch {
             }
-            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
         }
     })
 
@@ -1756,7 +1758,7 @@ test('runWavesIsolated - failed ticket worktree is cleaned up',
 
             writeFileSync(
                 join(issuesDir, '01-will-fail.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
 
             const tickets = scanTickets(issuesDir)
@@ -1768,14 +1770,14 @@ test('runWavesIsolated - failed ticket worktree is cleaned up',
             try {
                 await runWavesIsolated({
                     tickets,
-                    specBody:'test spec',
-                    agentCmd:MOCK_FAIL,
-                    model:null,
-                    timeout:10,
+                    specBody: 'test spec',
+                    agentCmd: MOCK_FAIL,
+                    model: null,
+                    timeout: 10,
                     logsDir,
-                    featureName:'test-feature-fail',
-                    conflictStrategy:'respawn',
-                    testCmd:'true',
+                    featureName: 'test-feature-fail',
+                    conflictStrategy: 'respawn',
+                    testCmd: 'true',
                 })
 
                 t.equal(
@@ -1803,18 +1805,18 @@ test('runWavesIsolated - failed ticket worktree is cleaned up',
             try {
                 execSync(
                     'git worktree list --porcelain',
-                    { cwd:projectDir }
+                    { cwd: projectDir }
                 ).toString()
                     .split('\n')
                     .filter(l => l.startsWith('worktree '))
                     .map(l => l.substring('worktree '.length))
                     .filter(p => p !== projectDir)
                     .forEach(p => rmSync(p, {
-                        recursive:true, force:true
+                        recursive: true, force: true
                     }))
             } catch {
             }
-            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
         }
     })
 
@@ -1828,12 +1830,12 @@ test('runWavesIsolated - dirty worktree from failed agent is ' +
 
         writeFileSync(
             join(issuesDir, '01-dirty-fail.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         writeFileSync(
             join(issuesDir, '02-clean-pass.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -1845,16 +1847,16 @@ test('runWavesIsolated - dirty worktree from failed agent is ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_DIRTY_THEN_FAIL,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_DIRTY_THEN_FAIL,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-dirty-fail',
-                conflictStrategy:'respawn',
-                retryDelay:0,
-                retries:0,
-                testCmd:'true',
+                featureName: 'test-dirty-fail',
+                conflictStrategy: 'respawn',
+                retryDelay: 0,
+                retries: 0,
+                testCmd: 'true',
             })
 
             t.equal(
@@ -1887,18 +1889,18 @@ test('runWavesIsolated - dirty worktree from failed agent is ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -1912,7 +1914,7 @@ test('runWavesIsolated - re-run after a prior failed run does not ' +
 
         writeFileSync(
             join(issuesDir, '01-retry.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -1923,7 +1925,7 @@ test('runWavesIsolated - re-run after a prior failed run does not ' +
         // with no worktree currently attached to it.
         execSync(
             `git branch ${repoName}--01-retry`,
-            { cwd:projectDir }
+            { cwd: projectDir }
         )
 
         const originalCwd = process.cwd()
@@ -1932,14 +1934,14 @@ test('runWavesIsolated - re-run after a prior failed run does not ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-retry',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature-retry',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -1960,18 +1962,18 @@ test('runWavesIsolated - re-run after a prior failed run does not ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -1985,7 +1987,7 @@ test('runWavesIsolated returns allDone:false when agent fails',
 
             writeFileSync(
                 join(issuesDir, '01-fail.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
 
             const tickets = scanTickets(issuesDir)
@@ -1997,14 +1999,14 @@ test('runWavesIsolated returns allDone:false when agent fails',
             try {
                 const result = await runWavesIsolated({
                     tickets,
-                    specBody:'test spec',
-                    agentCmd:MOCK_FAIL,
-                    model:null,
-                    timeout:10,
+                    specBody: 'test spec',
+                    agentCmd: MOCK_FAIL,
+                    model: null,
+                    timeout: 10,
                     logsDir,
-                    featureName:'test-fail-result',
-                    conflictStrategy:'respawn',
-                    testCmd:'true',
+                    featureName: 'test-fail-result',
+                    conflictStrategy: 'respawn',
+                    testCmd: 'true',
                 })
                 t.equal(
                     result.allDone, false,
@@ -2017,7 +2019,7 @@ test('runWavesIsolated returns allDone:false when agent fails',
             try {
                 execSync(
                     'git worktree list --porcelain',
-                    { cwd:projectDir }
+                    { cwd: projectDir }
                 ).toString()
                     .split('\n')
                     .filter(l => l.startsWith('worktree '))
@@ -2026,12 +2028,12 @@ test('runWavesIsolated returns allDone:false when agent fails',
                     ))
                     .filter(p => p !== projectDir)
                     .forEach(p => rmSync(p, {
-                        recursive:true, force:true,
+                        recursive: true, force: true,
                     }))
             } catch {
             }
             rmSync(projectDir, {
-                recursive:true, force:true,
+                recursive: true, force: true,
             })
         }
     })
@@ -2046,11 +2048,11 @@ test('runWavesIsolated - conflictStrategy stop halts on first failure',
 
             writeFileSync(
                 join(issuesDir, '01-first.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             writeFileSync(
                 join(issuesDir, '02-second.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
 
             const tickets = scanTickets(issuesDir)
@@ -2062,14 +2064,14 @@ test('runWavesIsolated - conflictStrategy stop halts on first failure',
             try {
                 await runWavesIsolated({
                     tickets,
-                    specBody:'test spec',
-                    agentCmd:MOCK_FAIL,
-                    model:null,
-                    timeout:10,
+                    specBody: 'test spec',
+                    agentCmd: MOCK_FAIL,
+                    model: null,
+                    timeout: 10,
                     logsDir,
-                    featureName:'test-feature-stop',
-                    conflictStrategy:'stop',
-                    testCmd:'true',
+                    featureName: 'test-feature-stop',
+                    conflictStrategy: 'stop',
+                    testCmd: 'true',
                 })
 
                 t.equal(
@@ -2089,18 +2091,18 @@ test('runWavesIsolated - conflictStrategy stop halts on first failure',
             try {
                 execSync(
                     'git worktree list --porcelain',
-                    { cwd:projectDir }
+                    { cwd: projectDir }
                 ).toString()
                     .split('\n')
                     .filter(l => l.startsWith('worktree '))
                     .map(l => l.substring('worktree '.length))
                     .filter(p => p !== projectDir)
                     .forEach(p => rmSync(p, {
-                        recursive:true, force:true
+                        recursive: true, force: true
                     }))
             } catch {
             }
-            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
         }
     })
 
@@ -2117,11 +2119,11 @@ test('runWavesIsolated - conflictStrategy stop cleans up ' +
 
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-second.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -2133,14 +2135,14 @@ test('runWavesIsolated - conflictStrategy stop cleans up ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-stop-cleanup',
-                conflictStrategy:'stop',
-                testCmd:'true',
+                featureName: 'test-feature-stop-cleanup',
+                conflictStrategy: 'stop',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -2180,18 +2182,18 @@ test('runWavesIsolated - conflictStrategy stop cleans up ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -2218,7 +2220,7 @@ function installMergeFailingGit (failBranch:string):{
     process.env.PATH = binDir + ':' + originalPath
 
     return {
-        restore:() => {
+        restore: () => {
             process.env.PATH = originalPath
         },
     }
@@ -2237,7 +2239,7 @@ test('runWavesIsolated - agent succeeds but merge conflicts, ' +
 
         writeFileSync(
             join(issuesDir, '01-conflict.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -2249,14 +2251,14 @@ test('runWavesIsolated - agent succeeds but merge conflicts, ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-conflict',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature-conflict',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -2282,18 +2284,18 @@ test('runWavesIsolated - agent succeeds but merge conflicts, ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -2313,14 +2315,14 @@ function recordingDisplay ():{
     }
     return {
         calls,
-        display:{
-            startRun:record('startRun'),
-            startWave:record('startWave'),
-            setTicketStatus:record('setTicketStatus'),
-            setBlocked:record('setBlocked'),
-            setTicketStats:record('setTicketStats'),
-            log:record('log'),
-            cleanup:record('cleanup'),
+        display: {
+            startRun: record('startRun'),
+            startWave: record('startWave'),
+            setTicketStatus: record('setTicketStatus'),
+            setBlocked: record('setBlocked'),
+            setTicketStats: record('setTicketStats'),
+            log: record('log'),
+            cleanup: record('cleanup'),
         },
     }
 }
@@ -2346,18 +2348,18 @@ function removeWorktreesAndRepo (projectDir:string):void {
     try {
         execSync(
             'git worktree list --porcelain',
-            { cwd:projectDir }
+            { cwd: projectDir }
         ).toString()
             .split('\n')
             .filter(l => l.startsWith('worktree '))
             .map(l => l.substring('worktree '.length))
             .filter(p => p !== projectDir)
             .forEach(p => rmSync(p, {
-                recursive:true, force:true
+                recursive: true, force: true
             }))
     } catch {
     }
-    rmSync(projectDir, { recursive:true, force:true })
+    rmSync(projectDir, { recursive: true, force: true })
 }
 
 test('runWavesIsolated - AC4.2 AC4.3: startRun once with the ' +
@@ -2371,25 +2373,25 @@ test('runWavesIsolated - AC4.2 AC4.3: startRun once with the ' +
 
         writeFileSync(
             join(issuesDir, '01-fail.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-after-fail.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[1],
+                status: 'ready-for-agent',
+                blockers: [1],
             })
         )
         writeFileSync(
             join(issuesDir, '03-after-human.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[4],
+                status: 'ready-for-agent',
+                blockers: [4],
             })
         )
         writeFileSync(
             join(issuesDir, '04-human.md'),
-            makeTicketBody({ status:'ready-for-human' })
+            makeTicketBody({ status: 'ready-for-human' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -2401,15 +2403,15 @@ test('runWavesIsolated - AC4.2 AC4.3: startRun once with the ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_FAIL_TICKET_01,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_FAIL_TICKET_01,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-blocked',
-                conflictStrategy:'respawn',
-                retries:0,
-                testCmd:'true',
+                featureName: 'test-feature-blocked',
+                conflictStrategy: 'respawn',
+                retries: 0,
+                testCmd: 'true',
                 display,
             })
         } finally {
@@ -2437,7 +2439,7 @@ test('runWavesIsolated - AC4.2 AC4.3: startRun once with the ' +
         // toward neither the completed nor the total figure.
         t.deepEqual(
             calls[firstWave]?.args[3],
-            { completed:0, total:3 },
+            { completed: 0, total: 3 },
             'wave progress counts only the session set'
         )
 
@@ -2488,30 +2490,30 @@ test('runWavesIsolated - AC2.2 AC2.4 AC2.5: blocked rows name ' +
         ]) {
             writeFileSync(
                 join(issuesDir, name),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
         }
 
         const tickets = scanTickets(issuesDir)
         const pendingRef:BlockerRef = {
-            feature:'other',
-            num:7,
-            where:'pending',
-            status:'ready-for-agent',
+            feature: 'other',
+            num: 7,
+            where: 'pending',
+            status: 'ready-for-agent',
         }
         const missingRef:BlockerRef = {
-            feature:'other', num:9, where:'missing',
+            feature: 'other', num: 9, where: 'missing',
         }
         const chainRef:BlockerRef = {
-            feature:'other',
-            num:8,
-            where:'pending',
-            status:'ready-for-human',
+            feature: 'other',
+            num: 8,
+            where: 'pending',
+            status: 'ready-for-human',
         }
         mustFind(tickets, 2).blockers = [pendingRef]
         mustFind(tickets, 3).blockers = [missingRef]
         mustFind(tickets, 4).blockers = [
-            { feature:'', num:5, where:'run' },
+            { feature: '', num: 5, where: 'run' },
         ]
         mustFind(tickets, 5).blockers = [chainRef]
         commitAll(projectDir, 'add tickets')
@@ -2522,15 +2524,15 @@ test('runWavesIsolated - AC2.2 AC2.4 AC2.5: blocked rows name ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-outside',
-                conflictStrategy:'respawn',
-                retries:0,
-                testCmd:'true',
+                featureName: 'test-feature-outside',
+                conflictStrategy: 'respawn',
+                retries: 0,
+                testCmd: 'true',
                 display,
             })
         } finally {
@@ -2570,24 +2572,24 @@ test('runWavesIsolated - AC4.3: a dependent of a failed ' +
         // reported blocked between the two waves.
         writeFileSync(
             join(issuesDir, '01-fail.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-after-fail.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[1],
+                status: 'ready-for-agent',
+                blockers: [1],
             })
         )
         writeFileSync(
             join(issuesDir, '03-pass.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '04-after-pass.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[3],
+                status: 'ready-for-agent',
+                blockers: [3],
             })
         )
 
@@ -2600,15 +2602,15 @@ test('runWavesIsolated - AC4.3: a dependent of a failed ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_FAIL_TICKET_01,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_FAIL_TICKET_01,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-blocked-between',
-                conflictStrategy:'respawn',
-                retries:0,
-                testCmd:'true',
+                featureName: 'test-feature-blocked-between',
+                conflictStrategy: 'respawn',
+                retries: 0,
+                testCmd: 'true',
                 display,
             })
         } finally {
@@ -2658,11 +2660,11 @@ test('runWavesIsolated - AC4.4: no runnable tickets never ' +
 
         writeFileSync(
             join(issuesDir, '01-done.md'),
-            makeTicketBody({ status:'done' })
+            makeTicketBody({ status: 'done' })
         )
         writeFileSync(
             join(issuesDir, '02-human.md'),
-            makeTicketBody({ status:'ready-for-human' })
+            makeTicketBody({ status: 'ready-for-human' })
         )
         // Ready-for-agent but blocked by the human ticket: nothing
         // is ready, yet any blocked report outside a wave would
@@ -2670,8 +2672,8 @@ test('runWavesIsolated - AC4.4: no runnable tickets never ' +
         writeFileSync(
             join(issuesDir, '03-waiting.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[2],
+                status: 'ready-for-agent',
+                blockers: [2],
             })
         )
 
@@ -2684,14 +2686,14 @@ test('runWavesIsolated - AC4.4: no runnable tickets never ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-none-runnable',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature-none-runnable',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
                 display,
             })
         } finally {
@@ -2740,13 +2742,13 @@ async function runWithFailedMerge (
 
         writeFileSync(
             join(issuesDir, '01-conflict.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-after.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[1],
+                status: 'ready-for-agent',
+                blockers: [1],
             })
         )
 
@@ -2759,14 +2761,14 @@ async function runWithFailedMerge (
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-merge-blocked',
+                featureName: 'test-feature-merge-blocked',
                 conflictStrategy,
-                testCmd:'true',
+                testCmd: 'true',
                 display,
             })
         } finally {
@@ -2856,7 +2858,7 @@ function installMergeFailOnceGit (failBranch:string):{
     process.env.PATH = binDir + ':' + originalPath
 
     return {
-        restore:() => {
+        restore: () => {
             process.env.PATH = originalPath
         },
     }
@@ -2876,11 +2878,11 @@ async t => {
 
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-second.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -2892,14 +2894,14 @@ async t => {
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-respawn',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature-respawn',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -2931,18 +2933,18 @@ async t => {
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -2959,7 +2961,7 @@ test('runWavesIsolated - respawned agent fails, ' +
 
         writeFileSync(
             join(issuesDir, '01-conflict.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -2971,14 +2973,14 @@ test('runWavesIsolated - respawned agent fails, ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_ONCE,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_ONCE,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-respawn-fail',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature-respawn-fail',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -3005,18 +3007,18 @@ test('runWavesIsolated - respawned agent fails, ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -3038,7 +3040,7 @@ test('runWavesIsolated - test gate runs again after a ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -3053,14 +3055,14 @@ test('runWavesIsolated - test gate runs again after a ' +
             // only the post-respawn gate can reject this.
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature-respawn-gate',
-                conflictStrategy:'respawn',
-                testCmd:`n=$(cat ${counter} ` +
+                featureName: 'test-feature-respawn-gate',
+                conflictStrategy: 'respawn',
+                testCmd: `n=$(cat ${counter} ` +
                     '2>/dev/null || echo 0); ' +
                     `echo $((n + 1)) > ${counter}; ` +
                     'test "$n" -lt 1',
@@ -3080,7 +3082,7 @@ test('runWavesIsolated - test gate runs again after a ' +
             )
 
             const log = execSync(
-                'git log --oneline', { cwd:projectDir }
+                'git log --oneline', { cwd: projectDir }
             ).toString()
             t.ok(
                 !log.includes('mock agent change'),
@@ -3094,18 +3096,18 @@ test('runWavesIsolated - test gate runs again after a ' +
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -3117,12 +3119,12 @@ test('setup-then-execute composition', async t => {
     const projectDir = tmp()
     try {
         setup({
-            bundledSkillsDir:join(DIST_DIR, 'skills'),
-            docsTemplatesDir:join(
+            bundledSkillsDir: join(DIST_DIR, 'skills'),
+            docsTemplatesDir: join(
                 DIST_DIR, 'docs-templates'
             ),
             projectDir,
-            tracker:'local',
+            tracker: 'local',
         })
 
         const feature = 'my-feature'
@@ -3132,18 +3134,18 @@ test('setup-then-execute composition', async t => {
         const specPath = join(
             projectDir, '.scratch', feature, 'spec.md'
         )
-        mkdirSync(issuesDir, { recursive:true })
+        mkdirSync(issuesDir, { recursive: true })
         writeFileSync(specPath, '# Feature spec\nDo things.')
 
         writeFileSync(
             join(issuesDir, '01-alpha.md'),
-            makeTicketBody({ status:'ready-for-agent' }),
+            makeTicketBody({ status: 'ready-for-agent' }),
         )
         writeFileSync(
             join(issuesDir, '02-beta.md'),
             makeTicketBody({
-                status:'ready-for-agent',
-                blockers:[1],
+                status: 'ready-for-agent',
+                blockers: [1],
             }),
         )
 
@@ -3151,7 +3153,7 @@ test('setup-then-execute composition', async t => {
             MOCK_AGENT,
             '--spec', feature,
             '--timeout', '10',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit code 0')
 
@@ -3201,7 +3203,7 @@ test('setup-then-execute composition', async t => {
             )
         }
     } finally {
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -3221,10 +3223,10 @@ test('spawnAgent - claude provider prepends --print ' +
 
         const logPath = join(logDir, 'claude.log')
         const result = await spawnAgent({
-            prompt:'test prompt',
-            agentCmd:join(binDir, 'claude'),
-            model:'test-model',
-            timeout:10,
+            prompt: 'test prompt',
+            agentCmd: join(binDir, 'claude'),
+            model: 'test-model',
+            timeout: 10,
             logPath,
         })
 
@@ -3242,8 +3244,8 @@ test('spawnAgent - claude provider prepends --print ' +
             '--model still forwarded after --print'
         )
     } finally {
-        rmSync(binDir, { recursive:true, force:true })
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(binDir, { recursive: true, force: true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -3261,10 +3263,10 @@ test('spawnAgent - codex provider prepends exec ' +
 
         const logPath = join(logDir, 'codex.log')
         const result = await spawnAgent({
-            prompt:'test prompt',
-            agentCmd:join(binDir, 'codex'),
-            model:null,
-            timeout:10,
+            prompt: 'test prompt',
+            agentCmd: join(binDir, 'codex'),
+            model: null,
+            timeout: 10,
             logPath,
         })
 
@@ -3277,8 +3279,8 @@ test('spawnAgent - codex provider prepends exec ' +
             'spawned process received exec'
         )
     } finally {
-        rmSync(binDir, { recursive:true, force:true })
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(binDir, { recursive: true, force: true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -3291,12 +3293,12 @@ test('spawnAgent - agent that never exits is killed at ' +
         const logPath = join(logDir, 'hang.log')
         const lines:string[] = []
         const result = await spawnAgent({
-            prompt:'test prompt',
-            agentCmd:MOCK_HANG,
-            model:null,
-            timeout:1,
+            prompt: 'test prompt',
+            agentCmd: MOCK_HANG,
+            model: null,
+            timeout: 1,
             logPath,
-            onLine:line => lines.push(line),
+            onLine: line => lines.push(line),
         })
 
         t.equal(
@@ -3318,7 +3320,7 @@ test('spawnAgent - agent that never exits is killed at ' +
             'timeout is recorded in the agent log'
         )
     } finally {
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -3339,10 +3341,10 @@ test('spawnAgent - an agent that exits before reading ' +
         // end of the pipe.
         const bigPrompt = 'x'.repeat(2 * 1024 * 1024)
         const result = await spawnAgent({
-            prompt:bigPrompt,
-            agentCmd:MOCK_EXIT_BEFORE_READING,
-            model:null,
-            timeout:10,
+            prompt: bigPrompt,
+            agentCmd: MOCK_EXIT_BEFORE_READING,
+            model: null,
+            timeout: 10,
             logPath,
         })
 
@@ -3355,7 +3357,7 @@ test('spawnAgent - an agent that exits before reading ' +
             'this is not a timeout'
         )
     } finally {
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -3370,12 +3372,12 @@ test('spawnAgent - timeout kills the process group, ' +
         const pidFile = join(logDir, 'grandchild.pid')
         const start = Date.now()
         const result = await spawnAgent({
-            prompt:'test prompt',
-            agentCmd:MOCK_GRANDCHILD_HANG,
-            model:null,
-            timeout:1,
+            prompt: 'test prompt',
+            agentCmd: MOCK_GRANDCHILD_HANG,
+            model: null,
+            timeout: 1,
             logPath,
-            cwd:logDir,
+            cwd: logDir,
         })
         const elapsedMs = Date.now() - start
 
@@ -3399,7 +3401,7 @@ test('spawnAgent - timeout kills the process group, ' +
             'the agent'
         )
     } finally {
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -3411,10 +3413,10 @@ test('killRunningAgents - kills a tracked agent\'s ' +
     try {
         const logPath = join(logDir, 'hang.log')
         const resultPromise = spawnAgent({
-            prompt:'test prompt',
-            agentCmd:MOCK_HANG,
-            model:null,
-            timeout:30,
+            prompt: 'test prompt',
+            agentCmd: MOCK_HANG,
+            model: null,
+            timeout: 30,
             logPath,
         })
 
@@ -3442,7 +3444,7 @@ test('killRunningAgents - kills a tracked agent\'s ' +
             `spawnAgent resolved promptly (${elapsedMs}ms)`
         )
     } finally {
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -3489,10 +3491,10 @@ test('spawnAgent - unknown provider passes through ' +
     try {
         const logPath = join(logDir, 'unknown.log')
         const result = await spawnAgent({
-            prompt:'test prompt',
-            agentCmd:MOCK_ECHO,
-            model:'m1',
-            timeout:10,
+            prompt: 'test prompt',
+            agentCmd: MOCK_ECHO,
+            model: 'm1',
+            timeout: 10,
             logPath,
         })
 
@@ -3511,7 +3513,7 @@ test('spawnAgent - unknown provider passes through ' +
             '--model still forwarded for unknown provider'
         )
     } finally {
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -3525,14 +3527,14 @@ test('CLI subprocess - SIGINT kills the running ' +
 
         writeFileSync(
             join(issuesDir, '01-hang.md'),
-            makeTicketBody({ status:'ready-for-agent' }),
+            makeTicketBody({ status: 'ready-for-agent' }),
         )
 
         const child = spawn(process.execPath, [
             CLI, MOCK_GRANDCHILD_HANG,
             '--spec', FEAT,
             '--timeout', '30',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         const pidFile = join(projectDir, 'grandchild.pid')
         const deadline = Date.now() + 15_000
@@ -3567,7 +3569,7 @@ test('CLI subprocess - SIGINT kills the running ' +
         )
     } finally {
         rmSync(projectDir, {
-            recursive:true, force:true,
+            recursive: true, force: true,
         })
     }
 })
@@ -3581,7 +3583,7 @@ test('CLI subprocess exits 1 when agent fails',
             writeFileSync(
                 join(issuesDir, '01-fail.md'),
                 makeTicketBody({
-                    status:'ready-for-agent',
+                    status: 'ready-for-agent',
                 }),
             )
 
@@ -3590,7 +3592,7 @@ test('CLI subprocess exits 1 when agent fails',
                 '--spec', FEAT,
                 '--timeout', '10',
                 '--retry-delay', '0',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.ok(
                 code !== 0,
@@ -3598,7 +3600,7 @@ test('CLI subprocess exits 1 when agent fails',
             )
         } finally {
             rmSync(projectDir, {
-                recursive:true, force:true,
+                recursive: true, force: true,
             })
         }
     })
@@ -3612,7 +3614,7 @@ test('CLI subprocess exits 0 when all tickets complete',
             writeFileSync(
                 join(issuesDir, '01-pass.md'),
                 makeTicketBody({
-                    status:'ready-for-agent',
+                    status: 'ready-for-agent',
                 }),
             )
 
@@ -3620,13 +3622,13 @@ test('CLI subprocess exits 0 when all tickets complete',
                 MOCK_AGENT,
                 '--spec', FEAT,
                 '--timeout', '10',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 0,
                 'exit code 0 when all tickets done')
         } finally {
             rmSync(projectDir, {
-                recursive:true, force:true,
+                recursive: true, force: true,
             })
         }
     })
@@ -3647,12 +3649,12 @@ test('spawnAgent - effort maps to --thinking for pi provider',
 
             const logPath = join(logDir, 'pi.log')
             const result = await spawnAgent({
-                prompt:'test prompt',
-                agentCmd:join(binDir, 'pi'),
-                model:null,
-                timeout:10,
+                prompt: 'test prompt',
+                agentCmd: join(binDir, 'pi'),
+                model: null,
+                timeout: 10,
                 logPath,
-                effort:'high',
+                effort: 'high',
             })
 
             t.equal(result.exitCode, 0, 'agent exits 0')
@@ -3666,8 +3668,8 @@ test('spawnAgent - effort maps to --thinking for pi provider',
                 'the level follows the flag'
             )
         } finally {
-            rmSync(binDir, { recursive:true, force:true })
-            rmSync(logDir, { recursive:true, force:true })
+            rmSync(binDir, { recursive: true, force: true })
+            rmSync(logDir, { recursive: true, force: true })
         }
     })
 
@@ -3686,12 +3688,12 @@ async t => {
 
         const logPath = join(logDir, 'codex.log')
         await spawnAgent({
-            prompt:'test prompt',
-            agentCmd:join(binDir, 'codex'),
-            model:null,
-            timeout:10,
+            prompt: 'test prompt',
+            agentCmd: join(binDir, 'codex'),
+            model: null,
+            timeout: 10,
             logPath,
-            effort:'high',
+            effort: 'high',
         })
 
         const log = readFileSync(logPath, 'utf8')
@@ -3704,8 +3706,8 @@ async t => {
             'the reasoning effort config follows -c'
         )
     } finally {
-        rmSync(binDir, { recursive:true, force:true })
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(binDir, { recursive: true, force: true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -3717,14 +3719,14 @@ function cleanupWorktrees (projectDir:string):void {
     try {
         execSync(
             'git worktree list --porcelain',
-            { cwd:projectDir }
+            { cwd: projectDir }
         ).toString()
             .split('\n')
             .filter(l => l.startsWith('worktree '))
             .map(l => l.substring('worktree '.length))
             .filter(p => p !== projectDir)
             .forEach(p => rmSync(p, {
-                recursive:true, force:true
+                recursive: true, force: true
             }))
     } catch {
     }
@@ -3745,7 +3747,7 @@ test('runWavesIsolated - a failed pi agent is retried with ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-flaky.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -3755,16 +3757,16 @@ test('runWavesIsolated - a failed pi agent is retried with ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:join(binDir, 'pi'),
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: join(binDir, 'pi'),
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                retries:2,
-                retryDelay:0,
-                testCmd:'true',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                retries: 2,
+                retryDelay: 0,
+                testCmd: 'true',
             })
 
             t.equal(result.allDone, true, 'run reports all done')
@@ -3797,8 +3799,8 @@ test('runWavesIsolated - a failed pi agent is retried with ' +
         }
     } finally {
         cleanupWorktrees(projectDir)
-        rmSync(projectDir, { recursive:true, force:true })
-        rmSync(binDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(binDir, { recursive: true, force: true })
     }
 })
 
@@ -3817,7 +3819,7 @@ test('runWavesIsolated - retries:0 disables the retry so the ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-flaky.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -3827,15 +3829,15 @@ test('runWavesIsolated - retries:0 disables the retry so the ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:join(binDir, 'pi'),
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: join(binDir, 'pi'),
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                retries:0,
-                testCmd:'true',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                retries: 0,
+                testCmd: 'true',
             })
 
             t.equal(result.allDone, false, 'run is not all done')
@@ -3853,8 +3855,8 @@ test('runWavesIsolated - retries:0 disables the retry so the ' +
         }
     } finally {
         cleanupWorktrees(projectDir)
-        rmSync(projectDir, { recursive:true, force:true })
-        rmSync(binDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(binDir, { recursive: true, force: true })
     }
 })
 
@@ -3873,7 +3875,7 @@ test('runWavesIsolated - omitting retryDelay does not ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-flaky.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -3884,15 +3886,15 @@ test('runWavesIsolated - omitting retryDelay does not ' +
             const started = Date.now()
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:join(binDir, 'pi'),
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: join(binDir, 'pi'),
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                retries:2,
-                testCmd:'true',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                retries: 2,
+                testCmd: 'true',
             })
             const elapsed = Date.now() - started
 
@@ -3907,8 +3909,8 @@ test('runWavesIsolated - omitting retryDelay does not ' +
         }
     } finally {
         cleanupWorktrees(projectDir)
-        rmSync(projectDir, { recursive:true, force:true })
-        rmSync(binDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(binDir, { recursive: true, force: true })
     }
 })
 
@@ -3925,7 +3927,7 @@ test('CLI subprocess - --effort is forwarded to a pi agent',
                 scratchDirs(projectDir)
             writeFileSync(
                 join(issuesDir, '01-echo.md'),
-                makeTicketBody({ status:'ready-for-agent' }),
+                makeTicketBody({ status: 'ready-for-agent' }),
             )
 
             const { code } = await spawnCli([
@@ -3933,7 +3935,7 @@ test('CLI subprocess - --effort is forwarded to a pi agent',
                 '--spec', FEAT,
                 '--timeout', '10',
                 '--effort', 'medium',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 0, 'exit code 0')
             const logContent = readFileSync(
@@ -3946,8 +3948,8 @@ test('CLI subprocess - --effort is forwarded to a pi agent',
             t.ok(idx >= 0, 'agent received --thinking')
             t.equal(args[idx + 1], 'medium', 'with the level')
         } finally {
-            rmSync(projectDir, { recursive:true, force:true })
-            rmSync(binDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
+            rmSync(binDir, { recursive: true, force: true })
         }
     })
 
@@ -3958,16 +3960,16 @@ test('CLI subprocess - --effort rejects an unknown level',
             const { issuesDir } = scratchDirs(projectDir)
             writeFileSync(
                 join(issuesDir, '01-echo.md'),
-                makeTicketBody({ status:'ready-for-agent' }),
+                makeTicketBody({ status: 'ready-for-agent' }),
             )
             const { code } = await spawnCli([
                 MOCK_ECHO,
                 '--spec', FEAT,
                 '--effort', 'galaxy-brain',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
             t.notEqual(code, 0, 'non-zero exit')
         } finally {
-            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
         }
     })
 
@@ -3984,7 +3986,7 @@ test('CLI subprocess - --retries 0 disables the retry',
                 scratchDirs(projectDir)
             writeFileSync(
                 join(issuesDir, '01-flaky.md'),
-                makeTicketBody({ status:'ready-for-agent' }),
+                makeTicketBody({ status: 'ready-for-agent' }),
             )
 
             const { code } = await spawnCli([
@@ -3992,7 +3994,7 @@ test('CLI subprocess - --retries 0 disables the retry',
                 '--spec', FEAT,
                 '--timeout', '10',
                 '--retries', '0',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 1, 'run fails')
             t.equal(
@@ -4001,8 +4003,8 @@ test('CLI subprocess - --retries 0 disables the retry',
                 'no retry happened'
             )
         } finally {
-            rmSync(projectDir, { recursive:true, force:true })
-            rmSync(binDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
+            rmSync(binDir, { recursive: true, force: true })
         }
     })
 
@@ -4019,7 +4021,7 @@ test('CLI subprocess - default retries recover a flaky pi agent',
                 scratchDirs(projectDir)
             writeFileSync(
                 join(issuesDir, '01-flaky.md'),
-                makeTicketBody({ status:'ready-for-agent' }),
+                makeTicketBody({ status: 'ready-for-agent' }),
             )
 
             const { code } = await spawnCli([
@@ -4027,7 +4029,7 @@ test('CLI subprocess - default retries recover a flaky pi agent',
                 '--spec', FEAT,
                 '--timeout', '10',
                 '--retry-delay', '0',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 0, 'run succeeds with default retries')
             t.ok(
@@ -4035,8 +4037,8 @@ test('CLI subprocess - default retries recover a flaky pi agent',
                 'second attempt ran'
             )
         } finally {
-            rmSync(projectDir, { recursive:true, force:true })
-            rmSync(binDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
+            rmSync(binDir, { recursive: true, force: true })
         }
     })
 
@@ -4047,7 +4049,7 @@ test('CLI subprocess - --dry-run in a git repo prints effort ' +
         const { issuesDir } = scratchDirs(projectDir)
         writeFileSync(
             join(issuesDir, '01-alpha.md'),
-            makeTicketBody({ status:'ready-for-agent' }),
+            makeTicketBody({ status: 'ready-for-agent' }),
         )
         commitAll(projectDir, 'add tickets')
 
@@ -4058,7 +4060,7 @@ test('CLI subprocess - --dry-run in a git repo prints effort ' +
             '--effort', 'low',
             '--retries', '3',
             '--retry-delay', '15',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit code 0')
         t.ok(
@@ -4074,7 +4076,7 @@ test('CLI subprocess - --dry-run in a git repo prints effort ' +
             'prints the retry delay'
         )
     } finally {
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -4090,7 +4092,7 @@ test('runWavesIsolated - a red test gate on the first attempt ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-gate.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -4105,16 +4107,16 @@ test('runWavesIsolated - a red test gate on the first attempt ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_PASS,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_PASS,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
                 testCmd,
-                retries:1,
-                retryDelay:0,
+                retries: 1,
+                retryDelay: 0,
             })
 
             t.equal(result.allDone, true, 'run reports all done')
@@ -4134,8 +4136,8 @@ test('runWavesIsolated - a red test gate on the first attempt ' +
         }
     } finally {
         cleanupWorktrees(projectDir)
-        rmSync(projectDir, { recursive:true, force:true })
-        rmSync(markerDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(markerDir, { recursive: true, force: true })
     }
 })
 
@@ -4151,11 +4153,11 @@ test('runWavesIsolated - agent that deletes its worktree ' +
 
         writeFileSync(
             join(issuesDir, '01-doomed.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-survivor.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -4167,16 +4169,16 @@ test('runWavesIsolated - agent that deletes its worktree ' +
         try {
             const result = await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_DELETE_WORKTREE_01,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_DELETE_WORKTREE_01,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                retries:0,
-                retryDelay:0,
-                testCmd:'true',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                retries: 0,
+                retryDelay: 0,
+                testCmd: 'true',
             })
 
             t.equal(
@@ -4200,7 +4202,7 @@ test('runWavesIsolated - agent that deletes its worktree ' +
         }
     } finally {
         cleanupWorktrees(projectDir)
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -4214,12 +4216,12 @@ test('spawnAgent - grace timer kills process group ' +
         const pidFile = join(logDir, 'grandchild.pid')
         const start = Date.now()
         const result = await spawnAgent({
-            prompt:'test prompt',
-            agentCmd:MOCK_GRANDCHILD_EXIT,
-            model:null,
-            timeout:30,
+            prompt: 'test prompt',
+            agentCmd: MOCK_GRANDCHILD_EXIT,
+            model: null,
+            timeout: 30,
             logPath,
-            cwd:logDir,
+            cwd: logDir,
         })
         const elapsedMs = Date.now() - start
 
@@ -4245,7 +4247,7 @@ test('spawnAgent - grace timer kills process group ' +
             'grandchild process is no longer alive'
         )
     } finally {
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -4260,7 +4262,7 @@ async t => {
 
         writeFileSync(
             join(issuesDir, '01-noop.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const tickets = scanTickets(issuesDir)
@@ -4276,14 +4278,14 @@ async t => {
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_NOOP,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_NOOP,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                testCmd:'true',
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
             })
 
             t.equal(
@@ -4310,18 +4312,18 @@ async t => {
         try {
             execSync(
                 'git worktree list --porcelain',
-                { cwd:projectDir }
+                { cwd: projectDir }
             ).toString()
                 .split('\n')
                 .filter(l => l.startsWith('worktree '))
                 .map(l => l.substring('worktree '.length))
                 .filter(p => p !== projectDir)
                 .forEach(p => rmSync(p, {
-                    recursive:true, force:true
+                    recursive: true, force: true
                 }))
         } catch {
         }
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -4341,12 +4343,12 @@ test('runWavesIsolated never runs more agents than ' +
         const logsDir = join(projectDir, '.logs')
         const markerDir = join(tmpdir(), `nr-markers-${Date.now()}`)
         mkdirSync(issuesDir)
-        mkdirSync(markerDir, { recursive:true })
+        mkdirSync(markerDir, { recursive: true })
 
         for (let i = 1; i <= 5; i++) {
             writeFileSync(
                 join(issuesDir, `0${i}-t${i}.md`),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
         }
         const tickets = scanTickets(issuesDir)
@@ -4357,16 +4359,16 @@ test('runWavesIsolated never runs more agents than ' +
         try {
             await runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_CONCURRENT,
-                model:null,
-                timeout:10,
+                specBody: 'test spec',
+                agentCmd: MOCK_CONCURRENT,
+                model: null,
+                timeout: 10,
                 logsDir,
-                featureName:'test-feature',
-                conflictStrategy:'respawn',
-                testCmd:'true',
-                retries:0,
-                concurrency:2,
+                featureName: 'test-feature',
+                conflictStrategy: 'respawn',
+                testCmd: 'true',
+                retries: 0,
+                concurrency: 2,
             })
         } finally {
             process.chdir(originalCwd)
@@ -4379,7 +4381,7 @@ test('runWavesIsolated never runs more agents than ' +
         t.ok(peak <= 2,
             `peak concurrent agents ${peak} is at most 2`)
         t.ok(peak >= 2, 'the cap was actually used, not 1')
-        rmSync(markerDir, { recursive:true, force:true })
+        rmSync(markerDir, { recursive: true, force: true })
     } finally {
         if (originalEnv === undefined) {
             delete process.env.MOCK_CONCURRENCY_DIR
@@ -4387,7 +4389,7 @@ test('runWavesIsolated never runs more agents than ' +
             process.env.MOCK_CONCURRENCY_DIR = originalEnv
         }
         cleanupWorktrees(projectDir)
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -4398,7 +4400,7 @@ test('CLI subprocess - --concurrency is accepted and shown ' +
         const { issuesDir } = scratchDirs(projectDir)
         writeFileSync(
             join(issuesDir, '01-alpha.md'),
-            makeTicketBody({ status:'ready-for-agent' }),
+            makeTicketBody({ status: 'ready-for-agent' }),
         )
         commitAll(projectDir, 'add tickets')
 
@@ -4407,7 +4409,7 @@ test('CLI subprocess - --concurrency is accepted and shown ' +
             '--spec', FEAT,
             '--dry-run',
             '--concurrency', '2',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, `exit code 0 (stderr: ${stderr})`)
         t.ok(
@@ -4415,7 +4417,7 @@ test('CLI subprocess - --concurrency is accepted and shown ' +
             'dry-run output shows the concurrency cap',
         )
     } finally {
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -4430,16 +4432,16 @@ test('runWavesIsolated - multi-feature tickets write ' +
         const payDir = join(
             projectDir, '.scratch', 'payments', 'issues'
         )
-        mkdirSync(authDir, { recursive:true })
-        mkdirSync(payDir, { recursive:true })
+        mkdirSync(authDir, { recursive: true })
+        mkdirSync(payDir, { recursive: true })
 
         writeFileSync(
             join(authDir, '01-login.md'),
-            makeTicketBody({ status:'ready-for-agent' }),
+            makeTicketBody({ status: 'ready-for-agent' }),
         )
         writeFileSync(
             join(payDir, '01-stripe.md'),
-            makeTicketBody({ status:'ready-for-agent' }),
+            makeTicketBody({ status: 'ready-for-agent' }),
         )
 
         const authTickets = scanTickets(authDir, 'auth')
@@ -4480,18 +4482,18 @@ test('runWavesIsolated - multi-feature tickets write ' +
         process.chdir(projectDir)
 
         await runWavesIsolated({
-            tickets:allTickets,
-            specBody:'# fallback',
+            tickets: allTickets,
+            specBody: '# fallback',
             specBodies,
-            agentCmd:MOCK_PASS,
-            model:null,
-            timeout:30,
+            agentCmd: MOCK_PASS,
+            model: null,
+            timeout: 30,
             logsDir,
-            featureName:'auth',
-            conflictStrategy:'respawn',
+            featureName: 'auth',
+            conflictStrategy: 'respawn',
             display,
-            testCmd:'true',
-            retries:0,
+            testCmd: 'true',
+            retries: 0,
             progressPaths,
         })
 
@@ -4521,7 +4523,7 @@ test('runWavesIsolated - multi-feature tickets write ' +
     } finally {
         process.chdir(originalCwd)
         cleanupWorktrees(projectDir)
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -4543,10 +4545,10 @@ function toNotesRecord (value:unknown):NotesRecord {
         'prompt' in value && typeof value.prompt === 'string'
     ) {
         return {
-            time:value.time,
-            cwd:value.cwd,
-            token:value.token,
-            prompt:value.prompt,
+            time: value.time,
+            cwd: value.cwd,
+            token: value.token,
+            prompt: value.prompt,
         }
     }
     throw new Error('malformed mock-agent-notes record')
@@ -4573,7 +4575,7 @@ function recordsFor (
 }
 
 function gitOut (cwd:string, args:string[]):string {
-    return execFileSync('git', args, { cwd, encoding:'utf8' })
+    return execFileSync('git', args, { cwd, encoding: 'utf8' })
 }
 
 function restoreEnv (name:string, value:string|undefined):void {
@@ -4621,29 +4623,29 @@ async function withNotesRepo (
             projectDir,
             issuesDir,
             recordDir,
-            learningsPath:join(projectDir, 'learnings.md'),
-            addTicket:(filename, blockers) => {
+            learningsPath: join(projectDir, 'learnings.md'),
+            addTicket: (filename, blockers) => {
                 writeFileSync(
                     join(issuesDir, filename),
                     makeTicketBody({
-                        status:'ready-for-agent',
+                        status: 'ready-for-agent',
                         blockers,
                     })
                 )
             },
-            run:(tickets, overrides) => runWavesIsolated({
+            run: (tickets, overrides) => runWavesIsolated({
                 tickets,
-                specBody:'test spec',
-                agentCmd:MOCK_NOTES,
-                model:null,
-                timeout:30,
+                specBody: 'test spec',
+                agentCmd: MOCK_NOTES,
+                model: null,
+                timeout: 30,
                 logsDir,
-                featureName:'test-feature-learnings',
-                conflictStrategy:'respawn',
-                display:recordingDisplay().display,
-                testCmd:'true',
-                retries:0,
-                retryDelay:0,
+                featureName: 'test-feature-learnings',
+                conflictStrategy: 'respawn',
+                display: recordingDisplay().display,
+                testCmd: 'true',
+                retries: 0,
+                retryDelay: 0,
                 ...overrides,
             }),
         })
@@ -4652,8 +4654,8 @@ async function withNotesRepo (
         restoreEnv('MOCK_RECORD_DIR', savedRecordDir)
         restoreEnv('MOCK_MODE', savedMode)
         if (projectDir) removeWorktreesAndRepo(projectDir)
-        rmSync(recordDir, { recursive:true, force:true })
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(recordDir, { recursive: true, force: true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 }
 
@@ -4697,7 +4699,7 @@ async t => {
             'the repo has no template exclude file to lean on'
         )
 
-        await repo.run(tickets, { retries:1 })
+        await repo.run(tickets, { retries: 1 })
 
         const records = readNotesRecords(repo.recordDir)
         t.equal(records.length, 2, 'the agent ran twice')
@@ -4826,7 +4828,7 @@ test('runWavesIsolated - AC6.1: notes written before a timeout ' +
         const tickets = scanTickets(repo.issuesDir)
         commitAll(repo.projectDir, 'add tickets')
 
-        await repo.run(tickets, { timeout:2 })
+        await repo.run(tickets, { timeout: 2 })
 
         const records = readNotesRecords(repo.recordDir)
         t.equal(
@@ -4855,7 +4857,7 @@ test('runWavesIsolated - AC6.2: a red test gate\'s entry has ' +
         const testToken = randomUUID()
 
         await repo.run(tickets, {
-            testCmd:`echo ${testToken}; exit 1`,
+            testCmd: `echo ${testToken}; exit 1`,
         })
 
         const key = ticketKey(tickets[0].feature, tickets[0].num)
@@ -4885,7 +4887,7 @@ test('runWavesIsolated - AC6.3: an unrecovered merge failure ' +
             const tickets = scanTickets(repo.issuesDir)
             commitAll(repo.projectDir, 'add tickets')
 
-            await repo.run(tickets, { conflictStrategy:'stop' })
+            await repo.run(tickets, { conflictStrategy: 'stop' })
 
             const key = ticketKey(
                 tickets[0].feature, tickets[0].num
@@ -4946,7 +4948,7 @@ test('runWavesIsolated - AC6: an attempt that throws appends ' +
         const tickets = scanTickets(repo.issuesDir)
         commitAll(repo.projectDir, 'add tickets')
 
-        await repo.run(tickets, { agentCmd:MOCK_DELETE_WORKTREE_01 })
+        await repo.run(tickets, { agentCmd: MOCK_DELETE_WORKTREE_01 })
 
         const key = ticketKey(tickets[0].feature, tickets[0].num)
         t.deepEqual(
@@ -4973,7 +4975,7 @@ test('runWavesIsolated - AC6: a failed install appends an ' +
         const installToken = randomUUID()
 
         await repo.run(tickets, {
-            installCmd:`echo ${installToken}; exit 1`,
+            installCmd: `echo ${installToken}; exit 1`,
         })
 
         t.deepEqual(
@@ -5033,7 +5035,7 @@ function cliGitRepo ():{
 } {
     const templateDir = mkdtempSync(join(tmpdir(), 'nightralph-tpl-'))
     const projectDir = initTempGitRepo({ templateDir })
-    execSync('git branch -M main', { cwd:projectDir })
+    execSync('git branch -M main', { cwd: projectDir })
     writeFileSync(
         join(projectDir, '.gitignore'), '.scratch/*/logs/\n'
     )
@@ -5055,11 +5057,11 @@ function twoFeatureRepo (ticket01Body:string, otherStatus:string):{
     const repo = cliGitRepo()
     writeFileSync(join(repo.issuesDir, '01-first.md'), ticket01Body)
     const otherDir = join(repo.projectDir, '.scratch', 'other-feat')
-    mkdirSync(join(otherDir, 'issues'), { recursive:true })
+    mkdirSync(join(otherDir, 'issues'), { recursive: true })
     writeFileSync(join(otherDir, 'spec.md'), '# Other spec')
     writeFileSync(
         join(otherDir, 'issues', '01-other.md'),
-        makeTicketBody({ status:otherStatus })
+        makeTicketBody({ status: otherStatus })
     )
     commitAll(repo.projectDir, 'add tickets')
     return repo
@@ -5079,7 +5081,7 @@ test('CLI subprocess - AC3.1 nothing ready stops before any branch ' +
     try {
         const { code, stdout } = await spawnCli([
             MOCK_AGENT, '--spec', FEAT,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.ok(stdout.includes('other-feat/01'), 'names the blocker')
@@ -5092,7 +5094,7 @@ test('CLI subprocess - AC3.1 nothing ready stops before any branch ' +
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5103,13 +5105,13 @@ test('CLI subprocess - AC3.2 nothing ready stops before provider ' +
     try {
         const { code } = await spawnCli([
             'nightralph-no-such-provider', '--spec', FEAT,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0 with an unknown provider')
         t.equal(integrationBranches(projectDir), '', 'no new branch')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5120,32 +5122,32 @@ test('CLI subprocess - AC3.3 a dry run with nothing ready explains ' +
     try {
         const { code, stdout } = await spawnCli([
             MOCK_AGENT, '--spec', FEAT, '--dry-run',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.ok(stdout.includes('other-feat/01'), 'names the blocker')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
 test('CLI subprocess - AC3.4 a resumed branch with nothing ready ' +
     'goes back to the launch branch', async t => {
     const { projectDir, issuesDir, templateDir } = twoFeatureRepo(
-        makeTicketBody({ status:'ready-for-agent' }), 'ready-for-agent'
+        makeTicketBody({ status: 'ready-for-agent' }), 'ready-for-agent'
     )
     try {
         execSync('git checkout -q -b nightralph--test-feat', {
-            cwd:projectDir,
+            cwd: projectDir,
         })
         writeFileSync(join(issuesDir, '01-first.md'), BLOCKED_BODY)
         commitAll(projectDir, 'block ticket 01')
-        execSync('git checkout -q main', { cwd:projectDir })
+        execSync('git checkout -q main', { cwd: projectDir })
 
         const { code, stdout } = await spawnCli([
             MOCK_AGENT, '--spec', FEAT,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.equal(headBranch(projectDir), 'main', 'back on main')
@@ -5156,7 +5158,7 @@ test('CLI subprocess - AC3.4 a resumed branch with nothing ready ' +
         t.ok(stdout.includes('other-feat/01'), 'names the blocker')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5165,11 +5167,11 @@ test('CLI subprocess - a resumed run leaves the zero-ready check to ' +
     const { projectDir, templateDir } =
         twoFeatureRepo(BLOCKED_BODY, 'ready-for-agent')
     try {
-        execSync('git branch nightralph--test-feat', { cwd:projectDir })
+        execSync('git branch nightralph--test-feat', { cwd: projectDir })
 
         const { code, stdout } = await spawnCli([
             MOCK_AGENT, '--spec', FEAT,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.equal(headBranch(projectDir), 'main', 'back on main')
@@ -5177,29 +5179,29 @@ test('CLI subprocess - a resumed run leaves the zero-ready check to ' +
         t.ok(stdout.includes('other-feat/01'), 'names the blocker')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
 test('CLI subprocess - AC3.5 a resumed branch with no open tickets ' +
     'carries on', async t => {
     const { projectDir, issuesDir, templateDir } = twoFeatureRepo(
-        makeTicketBody({ status:'ready-for-agent' }), 'ready-for-agent'
+        makeTicketBody({ status: 'ready-for-agent' }), 'ready-for-agent'
     )
     try {
         execSync('git checkout -q -b nightralph--test-feat', {
-            cwd:projectDir,
+            cwd: projectDir,
         })
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'done' })
+            makeTicketBody({ status: 'done' })
         )
         commitAll(projectDir, 'finish ticket 01')
-        execSync('git checkout -q main', { cwd:projectDir })
+        execSync('git checkout -q main', { cwd: projectDir })
 
         const { code } = await spawnCli([
             MOCK_AGENT, '--spec', FEAT,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.equal(
@@ -5208,7 +5210,7 @@ test('CLI subprocess - AC3.5 a resumed branch with no open tickets ' +
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5219,7 +5221,7 @@ test('CLI subprocess - AC3.6 a ready ticket runs as before', async t => {
         const { code } = await spawnCli([
             MOCK_AGENT, '--spec', FEAT,
             '--retry-delay', '0', '--test-cmd', 'true', '--no-review',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.equal(
@@ -5236,7 +5238,7 @@ test('CLI subprocess - AC3.6 a ready ticket runs as before', async t => {
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5246,14 +5248,14 @@ test('CLI subprocess - AC1.4 a provider not on PATH fails before ' +
     try {
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
 
         const missing = 'nightralph-no-such-provider'
         const { code, stderr } = await spawnCli([
             missing, '--spec', FEAT,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 2, 'exit 2')
         t.ok(stderr.includes(missing), 'stderr names the provider')
@@ -5271,7 +5273,7 @@ test('CLI subprocess - AC1.4 a provider not on PATH fails before ' +
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5282,12 +5284,12 @@ test('CLI subprocess - AC1.5 an absolute path to a provider runs',
             const { issuesDir, logsDir } = scratchDirs(projectDir)
             writeFileSync(
                 join(issuesDir, '01-task.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
 
             const { code } = await spawnCli([
                 MOCK_AGENT, '--spec', FEAT, '--timeout', '10',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 0, 'exit 0')
             t.ok(
@@ -5295,7 +5297,7 @@ test('CLI subprocess - AC1.5 an absolute path to a provider runs',
                 'agent ran and wrote its log'
             )
         } finally {
-            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
         }
     })
 
@@ -5306,20 +5308,20 @@ test('CLI subprocess - AC1.6 dry-run with a provider not on PATH',
             const { issuesDir } = scratchDirs(projectDir)
             writeFileSync(
                 join(issuesDir, '01-task.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
 
             const { code, stdout } = await spawnCli([
                 'nightralph-no-such-provider',
                 '--spec', FEAT,
                 '--dry-run',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 0, 'exit 0')
             t.ok(stdout.includes('Provider:'), 'prints a Provider line')
             t.ok(stdout.includes('not found'), 'says it was not found')
         } finally {
-            rmSync(projectDir, { recursive:true, force:true })
+            rmSync(projectDir, { recursive: true, force: true })
         }
     })
 
@@ -5330,7 +5332,7 @@ test('CLI subprocess - AC1.4 a path provider that is not ' +
         const { issuesDir } = scratchDirs(projectDir)
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const noexec = join(projectDir, 'noexec-agent.js')
         writeFileSync(noexec, '#!/bin/sh\nexit 0\n')
@@ -5338,13 +5340,13 @@ test('CLI subprocess - AC1.4 a path provider that is not ' +
 
         const { code, stderr } = await spawnCli([
             noexec, '--spec', FEAT,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 2, 'exit 2')
         t.ok(stderr.includes(noexec), 'stderr names the provider')
         t.ok(stderr.includes('not executable'), 'says not executable')
     } finally {
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -5360,7 +5362,7 @@ test('CLI subprocess - a relative provider path runs from the ' +
         )
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         mkdirSync(join(projectDir, 'bin'))
@@ -5370,7 +5372,7 @@ test('CLI subprocess - a relative provider path runs from the ' +
 
         const { code } = await spawnCli([
             './bin/agent.mjs', ...NO_GATE_RUN_ARGS,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.ok(
@@ -5380,7 +5382,7 @@ test('CLI subprocess - a relative provider path runs from the ' +
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5390,7 +5392,7 @@ test('CLI subprocess - AC2.1 a run from main lands on the ' +
     try {
         writeFileSync(
             join(issuesDir, '01-pass.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         const mainBefore = gitOut(projectDir, ['rev-parse', 'main'])
@@ -5402,7 +5404,7 @@ test('CLI subprocess - AC2.1 a run from main lands on the ' +
             '--retry-delay', '0',
             '--test-cmd', 'true',
             '--no-review',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.equal(
@@ -5415,7 +5417,7 @@ test('CLI subprocess - AC2.1 a run from main lands on the ' +
             'main did not move')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5426,21 +5428,21 @@ test('CLI subprocess - AC2.2 a run from main resumes the ' +
     try {
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-second.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         execSync(`git checkout -b nightralph--${FEAT}`,
-            { cwd:projectDir })
+            { cwd: projectDir })
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'done' })
+            makeTicketBody({ status: 'done' })
         )
         commitAll(projectDir, 'first is done')
-        execSync('git checkout main', { cwd:projectDir })
+        execSync('git checkout main', { cwd: projectDir })
 
         const { code } = await spawnCli([
             MOCK_NOTES,
@@ -5450,11 +5452,11 @@ test('CLI subprocess - AC2.2 a run from main resumes the ' +
             '--test-cmd', 'true',
             '--no-review',
         ], {
-            cwd:projectDir,
-            env:{
+            cwd: projectDir,
+            env: {
                 ...process.env,
-                MOCK_RECORD_DIR:recordDir,
-                MOCK_MODE:'pass',
+                MOCK_RECORD_DIR: recordDir,
+                MOCK_MODE: 'pass',
             },
         })
 
@@ -5465,8 +5467,8 @@ test('CLI subprocess - AC2.2 a run from main resumes the ' +
             'it ran the ticket that was not done')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(recordDir, { recursive:true, force:true })
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(recordDir, { recursive: true, force: true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5498,14 +5500,14 @@ test('CLI subprocess - AC2.4 --test-cmd "" completes a ticket ' +
         writePackageJson(projectDir, NO_TEST_SCRIPT)
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         const logsDir = join(projectDir, '.scratch', FEAT, 'logs')
 
         const { code } = await spawnCli([
             MOCK_AGENT, ...NO_GATE_RUN_ARGS, '--test-cmd', '',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.ok(
@@ -5519,7 +5521,7 @@ test('CLI subprocess - AC2.4 --test-cmd "" completes a ticket ' +
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5530,7 +5532,7 @@ test('CLI subprocess - AC2.9 an isolated run repeats a typo ' +
         writePackageJson(projectDir, NO_TEST_SCRIPT)
         writeFileSync(
             join(issuesDir, '01-done.md'),
-            makeTicketBody({ status:'done' })
+            makeTicketBody({ status: 'done' })
         )
         // The typo ref falls back to own ticket 01, which is done.
         writeFileSync(
@@ -5542,7 +5544,7 @@ test('CLI subprocess - AC2.9 an isolated run repeats a typo ' +
 
         const { code, stdout, stderr } = await spawnCli([
             MOCK_AGENT, ...NO_GATE_RUN_ARGS, '--test-cmd', '',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.ok(
@@ -5556,7 +5558,7 @@ test('CLI subprocess - AC2.9 an isolated run repeats a typo ' +
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5567,13 +5569,13 @@ test('CLI subprocess - AC2.5 no flag and no test script warns ' +
         writePackageJson(projectDir, NO_TEST_SCRIPT)
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
 
         const { code, stdout } = await spawnCli([
             MOCK_AGENT, ...NO_GATE_RUN_ARGS,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.ok(
@@ -5588,7 +5590,7 @@ test('CLI subprocess - AC2.5 no flag and no test script warns ' +
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5599,14 +5601,14 @@ test('CLI subprocess - AC2.6 a test script with no flag still ' +
         writePackageJson(projectDir, FAILING_TEST_SCRIPT)
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         const logsDir = join(projectDir, '.scratch', FEAT, 'logs')
 
         const { code, stdout } = await spawnCli([
             MOCK_AGENT, ...NO_GATE_RUN_ARGS,
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.ok(code !== 0, 'the failing gate fails the run')
         t.ok(
@@ -5624,7 +5626,7 @@ test('CLI subprocess - AC2.6 a test script with no flag still ' +
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5635,32 +5637,32 @@ test('CLI subprocess - AC2.7 --dry-run prints Test command: ' +
         const { issuesDir } = scratchDirs(plain)
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const { stdout } = await spawnCli([
             MOCK_AGENT, '--spec', FEAT, '--dry-run', '--test-cmd', '',
-        ], { cwd:plain })
+        ], { cwd: plain })
         t.ok(stdout.includes('Test command: (none)'),
             'in-place printer prints (none)')
     } finally {
-        rmSync(plain, { recursive:true, force:true })
+        rmSync(plain, { recursive: true, force: true })
     }
 
     const { projectDir, issuesDir, templateDir } = cliGitRepo()
     try {
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         const { stdout } = await spawnCli([
             MOCK_AGENT, '--spec', FEAT, '--dry-run', '--test-cmd', '',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
         t.ok(stdout.includes('Test command: (none)'),
             'isolated printer prints (none)')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5671,14 +5673,14 @@ test('CLI subprocess - AC2.8 --test-cmd "" on a project with a ' +
         writePackageJson(projectDir, FAILING_TEST_SCRIPT)
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         const logsDir = join(projectDir, '.scratch', FEAT, 'logs')
 
         const { code, stdout } = await spawnCli([
             MOCK_AGENT, ...NO_GATE_RUN_ARGS, '--test-cmd', '',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 0, 'exit 0')
         t.ok(
@@ -5696,7 +5698,7 @@ test('CLI subprocess - AC2.8 --test-cmd "" on a project with a ' +
         )
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5723,16 +5725,16 @@ test('CLI subprocess - a stale integration branch is reported and ' +
     try {
         writeFileSync(
             join(issuesDir, '01-pass.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         // The branch forks before the tickets exist and has a commit
         // of its own, so it is neither current nor an ancestor of main
         execSync(`git checkout -q -b nightralph--${FEAT} HEAD~1`,
-            { cwd:projectDir })
+            { cwd: projectDir })
         writeFileSync(join(projectDir, 'other.txt'), 'x')
         commitAll(projectDir, 'unrelated work')
-        execSync('git checkout -q main', { cwd:projectDir })
+        execSync('git checkout -q main', { cwd: projectDir })
 
         const { code } = await spawnCli([
             MOCK_AGENT,
@@ -5741,14 +5743,14 @@ test('CLI subprocess - a stale integration branch is reported and ' +
             '--retry-delay', '0',
             '--test-cmd', 'true',
             '--no-review',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 2, 'exit 2')
         t.equal(headBranch(projectDir), 'main',
             'the launch branch is checked out again')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5759,7 +5761,7 @@ test('CLI subprocess - a review runs once across a run and its ' +
     try {
         writeFileSync(
             join(issuesDir, '01-pass.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         const args = [
@@ -5771,13 +5773,13 @@ test('CLI subprocess - a review runs once across a run and its ' +
         ]
         const env = {
             ...process.env,
-            MOCK_RECORD_DIR:recordDir,
-            MOCK_REVIEW:'clean',
-            MOCK_FIX:'pass',
-            MOCK_TICKET:'pass',
+            MOCK_RECORD_DIR: recordDir,
+            MOCK_REVIEW: 'clean',
+            MOCK_FIX: 'pass',
+            MOCK_TICKET: 'pass',
         }
 
-        const first = await spawnCli(args, { cwd:projectDir, env })
+        const first = await spawnCli(args, { cwd: projectDir, env })
         t.equal(first.code, 0, 'first run exits 0')
         t.equal(headBranch(projectDir), `nightralph--${FEAT}`,
             'left on the integration branch')
@@ -5788,8 +5790,8 @@ test('CLI subprocess - a review runs once across a run and its ' +
             'one committed clean entry')
         t.equal(countReviewerRuns(recordDir), 1, 'reviewed once')
 
-        execSync('git checkout -q main', { cwd:projectDir })
-        const second = await spawnCli(args, { cwd:projectDir, env })
+        execSync('git checkout -q main', { cwd: projectDir })
+        const second = await spawnCli(args, { cwd: projectDir, env })
         t.equal(second.code, 0, 'second run exits 0')
         t.equal(countReviewerRuns(recordDir), 1,
             'a resume with nothing new does not review again')
@@ -5797,8 +5799,8 @@ test('CLI subprocess - a review runs once across a run and its ' +
             'working tree is clean')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(recordDir, { recursive:true, force:true })
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(recordDir, { recursive: true, force: true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5808,7 +5810,7 @@ test('CLI subprocess - a dry run from main changes no branch',
         try {
             writeFileSync(
                 join(issuesDir, '01-pass.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             commitAll(projectDir, 'add tickets')
 
@@ -5816,7 +5818,7 @@ test('CLI subprocess - a dry run from main changes no branch',
                 MOCK_AGENT,
                 '--spec', FEAT,
                 '--dry-run',
-            ], { cwd:projectDir })
+            ], { cwd: projectDir })
 
             t.equal(code, 0, 'exit 0')
             t.equal(headBranch(projectDir), 'main', 'still on main')
@@ -5827,7 +5829,7 @@ test('CLI subprocess - a dry run from main changes no branch',
             )
         } finally {
             removeWorktreesAndRepo(projectDir)
-            rmSync(templateDir, { recursive:true, force:true })
+            rmSync(templateDir, { recursive: true, force: true })
         }
     })
 
@@ -5837,11 +5839,11 @@ test('CLI subprocess - AC3.1 a dirty tree on a feature branch exits ' +
     try {
         execFileSync(
             'git', ['checkout', '-b', 'feature'],
-            { cwd:projectDir, env:GIT_ENV }
+            { cwd: projectDir, env: GIT_ENV }
         )
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         appendFileSync(
@@ -5851,7 +5853,7 @@ test('CLI subprocess - AC3.1 a dirty tree on a feature branch exits ' +
 
         const { code, stdout, stderr } = await spawnCli([
             MOCK_AGENT, '--spec', FEAT, '--no-review',
-        ], { cwd:projectDir })
+        ], { cwd: projectDir })
 
         t.equal(code, 2, 'exit 2')
         t.ok(
@@ -5863,7 +5865,7 @@ test('CLI subprocess - AC3.1 a dirty tree on a feature branch exits ' +
         t.ok(!hasStackLine(stderr), 'no stack frames on stderr')
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -5871,12 +5873,12 @@ test('CLI subprocess - AC3.2 a usage error prints help and exits 1',
     async t => {
         const dir = tmp()
         try {
-            const { code, stderr } = await spawnCli([], { cwd:dir })
+            const { code, stderr } = await spawnCli([], { cwd: dir })
 
             t.equal(code, 1, 'exit 1')
             t.ok(stderr.includes('Options:'), 'help text on stderr')
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     })
 
@@ -5887,24 +5889,24 @@ test('CLI subprocess - AC3.3 a closed feature prompt exits 2 with ' +
         const { issuesDir } = scratchDirs(projectDir)
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const otherIssues = join(
             projectDir, '.scratch', 'other', 'issues'
         )
-        mkdirSync(otherIssues, { recursive:true })
+        mkdirSync(otherIssues, { recursive: true })
         writeFileSync(
             join(projectDir, '.scratch', 'other', 'spec.md'),
             '# Other spec'
         )
         writeFileSync(
             join(otherIssues, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
 
         const { code, stdout, stderr } = await spawnCli([MOCK_AGENT], {
-            cwd:projectDir,
-            closeStdin:true,
+            cwd: projectDir,
+            closeStdin: true,
         })
 
         t.equal(code, 2, 'exit 2')
@@ -5915,7 +5917,7 @@ test('CLI subprocess - AC3.3 a closed feature prompt exits 2 with ' +
         )
         t.ok(!hasStackLine(stderr), 'no stack frames on stderr')
     } finally {
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -5974,7 +5976,7 @@ async function checkPreferSubagentDryRun (
 
     const on = await spawnCli(
         [...base, '--prefer-subagent', 'haiku'],
-        { cwd:projectDir, env }
+        { cwd: projectDir, env }
     )
     t.equal(on.code, 0, 'AC1.1 exit 0')
     t.ok(on.stdout.includes('Prefer subagent: haiku'),
@@ -5982,7 +5984,7 @@ async function checkPreferSubagentDryRun (
     t.ok(hasEveryRuleLine(on.stdout),
         'AC1.1 the printed prompt carries the subagent rule')
 
-    const off = await spawnCli(base, { cwd:projectDir, env })
+    const off = await spawnCli(base, { cwd: projectDir, env })
     t.equal(off.code, 0, 'AC1.2 exit 0')
     t.ok(off.stdout.includes('Prefer subagent: (none)'),
         'AC1.2 the dry run says none')
@@ -5991,7 +5993,7 @@ async function checkPreferSubagentDryRun (
 
     const empty = await spawnCli(
         [...base, '--prefer-subagent', ''],
-        { cwd:projectDir, env }
+        { cwd: projectDir, env }
     )
     t.equal(empty.code, 0, 'AC1.7 exit 0')
     t.equal(empty.stdout, off.stdout,
@@ -6005,11 +6007,11 @@ test('CLI subprocess - prefer-subagent AC1.1 AC1.2 AC1.7 in-place ' +
         const { issuesDir } = scratchDirs(projectDir)
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         await checkPreferSubagentDryRun(t, projectDir)
     } finally {
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -6019,13 +6021,13 @@ test('CLI subprocess - prefer-subagent AC1.1 AC1.2 AC1.7 isolated ' +
     try {
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         await checkPreferSubagentDryRun(t, projectDir)
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -6036,7 +6038,7 @@ test('CLI subprocess - prefer-subagent AC1.3 AC1.7 other providers ' +
         const { issuesDir } = scratchDirs(projectDir)
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const env = fakeClaudeEnv()
 
@@ -6044,7 +6046,7 @@ test('CLI subprocess - prefer-subagent AC1.3 AC1.7 other providers ' +
             const { code, stdout, stderr } = await spawnCli([
                 provider, '--spec', FEAT, '--dry-run',
                 '--prefer-subagent', 'haiku',
-            ], { cwd:projectDir, env })
+            ], { cwd: projectDir, env })
             t.equal(code, 0, `AC1.3 ${provider}: exit 0`)
             t.equal(stderr.split('--prefer-subagent').length, 2,
                 `AC1.3 ${provider}: one warning`)
@@ -6057,12 +6059,12 @@ test('CLI subprocess - prefer-subagent AC1.3 AC1.7 other providers ' +
         const { code, stderr } = await spawnCli([
             'codex', '--spec', FEAT, '--dry-run',
             '--prefer-subagent', '',
-        ], { cwd:projectDir, env })
+        ], { cwd: projectDir, env })
         t.equal(code, 0, 'AC1.7 codex with "": exit 0')
         t.ok(!stderr.includes('--prefer-subagent'),
             'AC1.7 codex with "": no warning')
     } finally {
-        rmSync(projectDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
     }
 })
 
@@ -6080,17 +6082,17 @@ test('CLI subprocess - prefer-subagent AC1.6 AC1.7 in-place run ' +
         ) => {
             writeFileSync(
                 ticketPath,
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             mkdirSync(promptDir)
             return spawnCli([
                 FAKE_CLAUDE, '--spec', FEAT, '--timeout', '10',
                 '--prefer-subagent', value, '--test-cmd', '',
             ], {
-                cwd:projectDir,
-                env:fakeClaudeEnv({
-                    FAKE_CLAUDE_ENV_LOG:envLog,
-                    FAKE_CLAUDE_PROMPT_DIR:promptDir,
+                cwd: projectDir,
+                env: fakeClaudeEnv({
+                    FAKE_CLAUDE_ENV_LOG: envLog,
+                    FAKE_CLAUDE_PROMPT_DIR: promptDir,
                 }),
             })
         }
@@ -6117,8 +6119,8 @@ test('CLI subprocess - prefer-subagent AC1.6 AC1.7 in-place run ' +
         t.ok(promptsEmpty.every(hasNoRuleLine),
             'AC1.7 the ticket prompt has no subagent rule')
     } finally {
-        rmSync(projectDir, { recursive:true, force:true })
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
@@ -6133,7 +6135,7 @@ async function runIsolatedPreferSubagent (value:string):Promise<{
     try {
         writeFileSync(
             join(issuesDir, '01-task.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         commitAll(projectDir, 'add tickets')
         const envLog = join(logDir, 'env.log')
@@ -6145,22 +6147,22 @@ async function runIsolatedPreferSubagent (value:string):Promise<{
             '--prefer-subagent', value, '--test-cmd', '',
             '--no-review',
         ], {
-            cwd:projectDir,
-            env:fakeClaudeEnv({
-                FAKE_CLAUDE_ENV_LOG:envLog,
-                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
-                FAKE_CLAUDE_PROMPT_DIR:promptDir,
+            cwd: projectDir,
+            env: fakeClaudeEnv({
+                FAKE_CLAUDE_ENV_LOG: envLog,
+                FAKE_CLAUDE_DELEGATE: MOCK_PASS,
+                FAKE_CLAUDE_PROMPT_DIR: promptDir,
             }),
         })
         return {
             code,
-            envValues:readEnvLog(envLog),
-            prompts:readPrompts(promptDir),
+            envValues: readEnvLog(envLog),
+            prompts: readPrompts(promptDir),
         }
     } finally {
         removeWorktreesAndRepo(projectDir)
-        rmSync(templateDir, { recursive:true, force:true })
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(templateDir, { recursive: true, force: true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 }
 
@@ -6199,11 +6201,11 @@ test('runWavesIsolated - prefer-subagent AC1.6 reaches ticket and ' +
         mkdirSync(issuesDir)
         writeFileSync(
             join(issuesDir, '01-first.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         writeFileSync(
             join(issuesDir, '02-second.md'),
-            makeTicketBody({ status:'ready-for-agent' })
+            makeTicketBody({ status: 'ready-for-agent' })
         )
         const tickets = scanTickets(issuesDir)
         commitAll(projectDir, 'add tickets')
@@ -6219,15 +6221,15 @@ test('runWavesIsolated - prefer-subagent AC1.6 reaches ticket and ' +
 
         await runWavesIsolated({
             tickets,
-            specBody:'test spec',
-            agentCmd:FAKE_CLAUDE,
-            model:null,
-            timeout:10,
+            specBody: 'test spec',
+            agentCmd: FAKE_CLAUDE,
+            model: null,
+            timeout: 10,
             logsDir,
-            featureName:'test-feature-prefer-subagent',
-            conflictStrategy:'respawn',
-            testCmd:'true',
-            preferSubagent:'haiku',
+            featureName: 'test-feature-prefer-subagent',
+            conflictStrategy: 'respawn',
+            testCmd: 'true',
+            preferSubagent: 'haiku',
         })
 
         t.equal(tickets[0].status, 'done', 'ticket 1 is done')
@@ -6247,8 +6249,8 @@ test('runWavesIsolated - prefer-subagent AC1.6 reaches ticket and ' +
         }
         fakeGit.restore()
         removeWorktreesAndRepo(projectDir)
-        rmSync(logDir, { recursive:true, force:true })
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive: true, force: true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 })
 
@@ -6260,18 +6262,18 @@ function writeOneSubagentStream (dir:string):string {
     const path = join(dir, 'stream.jsonl')
     const lines = [
         {
-            type:'assistant',
-            message:{
-                content:[{
-                    type:'tool_use', id:'toolu_1', name:'Agent', input:{},
+            type: 'assistant',
+            message: {
+                content: [{
+                    type: 'tool_use', id: 'toolu_1', name: 'Agent', input: {},
                 }],
             },
         },
         {
-            type:'result',
-            subtype:'success',
-            total_cost_usd:0.25,
-            subagent_stats:{ spawned:1 },
+            type: 'result',
+            subtype: 'success',
+            total_cost_usd: 0.25,
+            subagent_stats: { spawned: 1 },
         },
     ]
     writeFileSync(path, lines.map(l => JSON.stringify(l)).join('\n') + '\n')
@@ -6318,27 +6320,27 @@ test('runWavesIsolated - logs the stats line after the finish summary',
             mkdirSync(issuesDir)
             writeFileSync(
                 join(issuesDir, '01-only.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             const tickets = scanTickets(issuesDir)
             commitAll(projectDir, 'add tickets')
             const { display, calls } = recordingDisplay()
 
             await withFakeClaude({
-                FAKE_CLAUDE_STREAM:writeOneSubagentStream(dataDir),
-                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+                FAKE_CLAUDE_STREAM: writeOneSubagentStream(dataDir),
+                FAKE_CLAUDE_DELEGATE: MOCK_PASS,
             }, async () => {
                 process.chdir(projectDir)
                 await runWavesIsolated({
                     tickets,
-                    specBody:'test spec',
-                    agentCmd:FAKE_CLAUDE,
-                    model:null,
-                    timeout:10,
-                    logsDir:join(projectDir, '.logs'),
-                    featureName:'test-feature-stats-line',
-                    conflictStrategy:'respawn',
-                    testCmd:'true',
+                    specBody: 'test spec',
+                    agentCmd: FAKE_CLAUDE,
+                    model: null,
+                    timeout: 10,
+                    logsDir: join(projectDir, '.logs'),
+                    featureName: 'test-feature-stats-line',
+                    conflictStrategy: 'respawn',
+                    testCmd: 'true',
                     display,
                 })
             })
@@ -6352,15 +6354,15 @@ test('runWavesIsolated - logs the stats line after the finish summary',
             t.equal(
                 logs[summaryAt + 1],
                 renderRunStats({
-                    agentRuns:1, withCost:1, subagents:1, costUsd:0.25,
+                    agentRuns: 1, withCost: 1, subagents: 1, costUsd: 0.25,
                 }),
                 'the stats line follows the finish summary'
             )
         } finally {
             process.chdir(originalCwd)
             removeWorktreesAndRepo(projectDir)
-            rmSync(dataDir, { recursive:true, force:true })
-            rmSync(templateDir, { recursive:true, force:true })
+            rmSync(dataDir, { recursive: true, force: true })
+            rmSync(templateDir, { recursive: true, force: true })
         }
     }
 )
@@ -6378,31 +6380,31 @@ test('runWavesIsolated - the stats tally counts merge respawns',
             mkdirSync(issuesDir)
             writeFileSync(
                 join(issuesDir, '01-first.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             writeFileSync(
                 join(issuesDir, '02-second.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             const tickets = scanTickets(issuesDir)
             commitAll(projectDir, 'add tickets')
             const { display, calls } = recordingDisplay()
 
             await withFakeClaude({
-                FAKE_CLAUDE_STREAM:writeOneSubagentStream(dataDir),
-                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+                FAKE_CLAUDE_STREAM: writeOneSubagentStream(dataDir),
+                FAKE_CLAUDE_DELEGATE: MOCK_PASS,
             }, async () => {
                 process.chdir(projectDir)
                 await runWavesIsolated({
                     tickets,
-                    specBody:'test spec',
-                    agentCmd:FAKE_CLAUDE,
-                    model:null,
-                    timeout:10,
-                    logsDir:join(projectDir, '.logs'),
-                    featureName:'test-feature-stats-respawn',
-                    conflictStrategy:'respawn',
-                    testCmd:'true',
+                    specBody: 'test spec',
+                    agentCmd: FAKE_CLAUDE,
+                    model: null,
+                    timeout: 10,
+                    logsDir: join(projectDir, '.logs'),
+                    featureName: 'test-feature-stats-respawn',
+                    conflictStrategy: 'respawn',
+                    testCmd: 'true',
                     display,
                 })
             })
@@ -6410,7 +6412,7 @@ test('runWavesIsolated - the stats tally counts merge respawns',
             t.equal(tickets[1].status, 'done',
                 'ticket 2 is done after the respawn')
             const expected = renderRunStats({
-                agentRuns:3, withCost:3, subagents:3, costUsd:0.75,
+                agentRuns: 3, withCost: 3, subagents: 3, costUsd: 0.75,
             })
             t.ok(expected !== null, 'a stats line is expected')
             t.ok(
@@ -6421,8 +6423,8 @@ test('runWavesIsolated - the stats tally counts merge respawns',
             process.chdir(originalCwd)
             fakeGit.restore()
             removeWorktreesAndRepo(projectDir)
-            rmSync(dataDir, { recursive:true, force:true })
-            rmSync(templateDir, { recursive:true, force:true })
+            rmSync(dataDir, { recursive: true, force: true })
+            rmSync(templateDir, { recursive: true, force: true })
         }
     }
 )
@@ -6439,30 +6441,30 @@ test('runWavesIsolated - a ticket row shows the total across attempts',
             mkdirSync(issuesDir)
             writeFileSync(
                 join(issuesDir, '01-only.md'),
-                makeTicketBody({ status:'ready-for-agent' })
+                makeTicketBody({ status: 'ready-for-agent' })
             )
             const tickets = scanTickets(issuesDir)
             commitAll(projectDir, 'add tickets')
             const { display, calls } = recordingDisplay()
 
             await withFakeClaude({
-                FAKE_CLAUDE_STREAM:writeOneSubagentStream(dataDir),
-                FAKE_CLAUDE_FAIL_ONCE:join(dataDir, 'failed-once'),
-                FAKE_CLAUDE_DELEGATE:MOCK_PASS,
+                FAKE_CLAUDE_STREAM: writeOneSubagentStream(dataDir),
+                FAKE_CLAUDE_FAIL_ONCE: join(dataDir, 'failed-once'),
+                FAKE_CLAUDE_DELEGATE: MOCK_PASS,
             }, async () => {
                 process.chdir(projectDir)
                 await runWavesIsolated({
                     tickets,
-                    specBody:'test spec',
-                    agentCmd:FAKE_CLAUDE,
-                    model:null,
-                    timeout:10,
+                    specBody: 'test spec',
+                    agentCmd: FAKE_CLAUDE,
+                    model: null,
+                    timeout: 10,
                     logsDir,
-                    featureName:'test-feature-stats-retry',
-                    conflictStrategy:'respawn',
-                    testCmd:'true',
-                    retries:1,
-                    retryDelay:0,
+                    featureName: 'test-feature-stats-retry',
+                    conflictStrategy: 'respawn',
+                    testCmd: 'true',
+                    retries: 1,
+                    retryDelay: 0,
                     display,
                 })
             })
@@ -6475,13 +6477,13 @@ test('runWavesIsolated - a ticket row shows the total across attempts',
                 .map(c => c.args[2])
             t.deepEqual(
                 stats[stats.length - 1],
-                { subagents:2, costUsd:0.5 },
+                { subagents: 2, costUsd: 0.5 },
                 'the last row stats are both attempts together'
             )
             t.ok(
                 stats.some(s => {
                     return JSON.stringify(s) ===
-                        JSON.stringify({ subagents:2, costUsd:0.25 })
+                        JSON.stringify({ subagents: 2, costUsd: 0.25 })
                 }),
                 'the retry adds its live count to the first attempt'
             )
@@ -6496,8 +6498,265 @@ test('runWavesIsolated - a ticket row shows the total across attempts',
         } finally {
             process.chdir(originalCwd)
             removeWorktreesAndRepo(projectDir)
-            rmSync(dataDir, { recursive:true, force:true })
-            rmSync(templateDir, { recursive:true, force:true })
+            rmSync(dataDir, { recursive: true, force: true })
+            rmSync(templateDir, { recursive: true, force: true })
+        }
+    }
+)
+
+// -- graph command --
+
+type GraphRow = [num:number, status:string, blockedBy:string]
+
+function graphProject (
+    features:Record<string, GraphRow[]>
+):string {
+    const cwd = tmp()
+    for (const [name, rows] of Object.entries(features)) {
+        const featureDir = join(cwd, '.scratch', name)
+        const issuesDir = join(featureDir, 'issues')
+        mkdirSync(issuesDir, { recursive: true })
+        writeFileSync(join(featureDir, 'spec.md'), `# ${name}\n`)
+        for (const [num, status, blockedBy] of rows) {
+            const file = `${String(num).padStart(2, '0')}-t.md`
+            writeFileSync(
+                join(issuesDir, file),
+                `# T\n\n**Status:** ${status}\n` +
+                `**Blocked by:** ${blockedBy}\n`
+            )
+        }
+    }
+    return cwd
+}
+
+const GRAPH_BASE:Record<string, GraphRow[]> = {
+    'held-import-review': [
+        [1, 'ready-for-agent', 'newsletter-audit 16'],
+        [2, 'ready-for-agent', '01'],
+    ],
+    'newsletter-audit': [[16, 'ready-for-agent', 'None']],
+    analytics: [[1, 'ready-for-agent', 'None']],
+}
+
+// A feature whose every ticket is done, so its progress.md marks
+// the spec complete and the picker and recursive scan skip it.
+function markFinished (cwd:string, name:string):void {
+    const featureDir = join(cwd, '.scratch', name)
+    const issuesDir = join(featureDir, 'issues')
+    const data = generateProgress(
+        name, scanTickets(issuesDir, name)
+    )
+    checkTicket(data, 1, { branch: 'b', exitCode: 0, done: true })
+    writeProgress(join(featureDir, 'progress.md'), data)
+}
+
+test('graph - lists the waiting feature and its blocker',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const { code, stdout } = await spawnCli(
+                ['graph'], { cwd }
+            )
+            t.equal(code, 0, 'exits 0')
+            t.ok(stdout.includes('held-import-review/01'),
+                'names the waiting ticket')
+            t.ok(stdout.includes('newsletter-audit/16'),
+                'names the blocker')
+            const waiting = stdout.split('\n')
+                .filter(l => l.startsWith('held-import-review'))
+            t.equal(waiting.length, 1,
+                'one line starts with the waiting feature')
+            const others = stdout.split('\n').filter(l =>
+                l.startsWith('newsletter-audit') ||
+                l.startsWith('analytics'))
+            t.equal(others.length, 0,
+                'unblocked features get no column-0 line')
+        } finally {
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    }
+)
+
+test('graph --spec - shows the named feature and what it waits on',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const held = await spawnCli(
+                ['graph', '--spec', 'held-import-review'], { cwd }
+            )
+            t.equal(held.code, 0, 'exits 0 for a waiting feature')
+            t.ok(held.stdout.includes('held-import-review/01'),
+                'shows the waiting ticket')
+            t.ok(!held.stdout.includes('analytics'),
+                'omits unrelated features')
+
+            const solo = await spawnCli(
+                ['graph', '--spec', 'analytics'], { cwd }
+            )
+            t.equal(solo.code, 0, 'exits 0 for an unblocked feature')
+            t.ok(solo.stdout.includes('analytics'),
+                'shows the named feature')
+            t.ok(!solo.stdout.includes('held-import-review'),
+                'omits the feature that waits on it')
+            t.ok(!solo.stdout.includes('newsletter-audit/'),
+                'omits features it does not wait on')
+        } finally {
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    }
+)
+
+test('graph --spec - a nested feature is named by its path',
+    async t => {
+        const cwd = graphProject({
+            ...GRAPH_BASE,
+            'rollout/billing': [
+                [1, 'ready-for-agent', 'newsletter-audit 16'],
+            ],
+        })
+        try {
+            const { code, stdout } = await spawnCli(
+                ['graph', '--spec', 'rollout/billing'], { cwd }
+            )
+            t.equal(code, 0, 'exits 0')
+            t.ok(stdout.includes('rollout/billing/01'),
+                'names the nested ticket')
+            t.ok(stdout.includes('newsletter-audit/16'),
+                'names the blocker')
+        } finally {
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    }
+)
+
+test('graph - a Run together hint names a nested feature the picker lacks',
+    async t => {
+        const cwd = graphProject({
+            launch: [[1, 'ready-for-agent', 'rollout/billing 01']],
+            'newsletter-audit': [[16, 'ready-for-agent', 'None']],
+            'rollout/billing': [
+                [1, 'ready-for-agent', 'newsletter-audit 16'],
+            ],
+        })
+        try {
+            const { code, stdout } = await spawnCli(
+                ['graph'], { cwd, closeStdin: false }
+            )
+            t.equal(code, 0, 'exits 0 without opening the picker')
+            const line = stdout.split('\n')
+                .find(l => l.includes('Run together:')) ?? ''
+            t.ok(line.includes('rollout/billing'),
+                'the Run together line names the nested feature')
+            const hint = line.slice(line.lastIndexOf('(') + 1)
+            t.ok(hint.includes('rollout/billing'),
+                'the parenthetical names the feature the picker lacks')
+            t.ok(!hint.includes('launch'),
+                'the parenthetical omits features the picker lists')
+        } finally {
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    }
+)
+
+test('graph --spec - a complete feature is still named explicitly',
+    async t => {
+        const cwd = graphProject({
+            ...GRAPH_BASE,
+            finished: [[1, 'ready-for-agent', 'newsletter-audit 16']],
+        })
+        try {
+            markFinished(cwd, 'finished')
+            const listed = findFeatureDirs(cwd).map(f => f.name)
+            t.ok(!listed.includes('finished'),
+                'the complete feature is hidden from discovery')
+
+            const { code, stdout } = await spawnCli(
+                ['graph', '--spec', 'finished'], { cwd }
+            )
+            t.equal(code, 0, 'exits 0')
+            t.ok(stdout.includes('finished/01'),
+                'shows the named complete feature')
+        } finally {
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    }
+)
+
+test('graph --spec - an unknown feature exits 2 without a picker',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const { code, stderr, stdout } = await spawnCli(
+                ['graph', '--spec', 'nope'], { cwd }
+            )
+            t.equal(code, 2, 'exits 2')
+            t.ok(stderr.includes('nope'), 'names the missing feature')
+            t.equal(stdout, '', 'prints nothing to stdout')
+        } finally {
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    }
+)
+
+test('graph - a repeated --spec exits 2 with no stack trace',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const { code, stderr } = await spawnCli(
+                ['graph', '--spec', 'a', '--spec', 'b'], { cwd }
+            )
+            t.equal(code, 2, 'exits 2 for a runtime error')
+            t.ok(stderr.length > 0, 'explains on stderr')
+            t.ok(!/^\s+at /m.test(stderr), 'prints no stack frames')
+        } finally {
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    }
+)
+
+test('graph - exits 2 with no features to show',
+    async t => {
+        const bare = tmp()
+        const complete = graphProject({
+            finished: [[1, 'ready-for-agent', 'None']],
+        })
+        try {
+            const none = await spawnCli(['graph'], { cwd: bare })
+            t.equal(none.code, 2, 'no .scratch exits 2')
+            t.ok(none.stderr.length > 0, 'explains on stderr')
+            t.ok(none.stderr.includes('.scratch'),
+                'stderr mentions .scratch')
+
+            markFinished(complete, 'finished')
+            const done = await spawnCli(
+                ['graph'], { cwd: complete }
+            )
+            t.equal(done.code, 2,
+                'a project with only complete features exits 2')
+        } finally {
+            rmSync(bare, { recursive: true, force: true })
+            rmSync(complete, { recursive: true, force: true })
+        }
+    }
+)
+
+test('graph - read-only, git-free, no provider or branch output',
+    async t => {
+        const cwd = graphProject(GRAPH_BASE)
+        try {
+            const before = readdirSync(cwd, { recursive: true }).sort()
+            const { code, stdout, stderr } = await spawnCli(
+                ['graph'], { cwd }
+            )
+            const after = readdirSync(cwd, { recursive: true }).sort()
+            t.deepEqual(after, before, 'writes no files')
+            t.equal(code, 0, 'exits 0 outside a git repo')
+            const all = stdout + stderr
+            t.ok(!all.includes('Provider'), 'no provider preflight line')
+            t.ok(!all.includes('nightralph--'),
+                'no integration branch name')
+        } finally {
+            rmSync(cwd, { recursive: true, force: true })
         }
     }
 )

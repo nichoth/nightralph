@@ -40,27 +40,27 @@ function initTempRepo ():string {
     const dir = mkdtempSync(
         join(tmpdir(), 'nightralph-worktree-test-')
     )
-    execSync('git init', { cwd:dir })
+    execSync('git init', { cwd: dir })
     execSync(
         'git config user.email test@example.com',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync(
         'git config user.name "Test User"',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync(
         'git config core.hooksPath /dev/null',
-        { cwd:dir }
+        { cwd: dir }
     )
     execSync('git commit --allow-empty -m "init" --no-verify', {
-        cwd:dir,
-        env:{
+        cwd: dir,
+        env: {
             ...process.env,
-            GIT_COMMITTER_NAME:'Test',
-            GIT_COMMITTER_EMAIL:'test@example.com',
-            GIT_AUTHOR_NAME:'Test',
-            GIT_AUTHOR_EMAIL:'test@example.com',
+            GIT_COMMITTER_NAME: 'Test',
+            GIT_COMMITTER_EMAIL: 'test@example.com',
+            GIT_AUTHOR_NAME: 'Test',
+            GIT_AUTHOR_EMAIL: 'test@example.com',
         },
     })
     return dir
@@ -78,14 +78,14 @@ function getDefaultBranch (repoRoot:string):string {
 
 function makeTestTicket (overrides?:Partial<Ticket>):Ticket {
     return {
-        num:1,
-        slug:'test-feature',
-        filename:'01-test-feature.md',
-        filepath:'/fake/01-test-feature.md',
-        body:'# Test ticket',
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        num: 1,
+        slug: 'test-feature',
+        filename: '01-test-feature.md',
+        filepath: '/fake/01-test-feature.md',
+        body: '# Test ticket',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
         ...overrides,
     }
 }
@@ -116,7 +116,7 @@ test(
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
         const ticket = makeTestTicket({
-            num:99, slug:'name-check',
+            num: 99, slug: 'name-check',
         })
 
         const { worktreePath } = await createWorktree({
@@ -167,7 +167,7 @@ test(
         const repoRoot = initTempRepo()
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
-        const ticket = makeTestTicket({ num:1, slug:'add-auth' })
+        const ticket = makeTestTicket({ num: 1, slug: 'add-auth' })
 
         const result = await createWorktree({
             repoRoot,
@@ -198,7 +198,7 @@ test(
         const repoRoot = initTempRepo()
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
-        const ticket = makeTestTicket({ num:2, slug:'add-logging' })
+        const ticket = makeTestTicket({ num: 2, slug: 'add-logging' })
 
         const result = await createWorktree({
             repoRoot,
@@ -216,7 +216,7 @@ test(
 
         // Verify the branch exists
         const branches = execSync('git branch -a', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString()
         t.ok(
             branches.includes(expectedBranch),
@@ -234,42 +234,42 @@ test(
 
         // Create a secondary branch first
         execSync('git checkout -b develop', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
         execSync('git commit --allow-empty -m "on develop" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
         execSync(`git checkout ${currentBranch}`, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
 
-        const ticket = makeTestTicket({ num:3, slug:'test-branch' })
+        const ticket = makeTestTicket({ num: 3, slug: 'test-branch' })
 
         const result = await createWorktree({
             repoRoot,
             repoName,
-            baseBranch:'develop',
+            baseBranch: 'develop',
             ticket,
         })
 
         // The worktree should exist and be on the develop branch
         const worktreeBranches = execSync(
             'git branch',
-            { cwd:result.worktreePath }
+            { cwd: result.worktreePath }
         ).toString()
         t.ok(
             worktreeBranches.includes(
@@ -287,12 +287,12 @@ test(
         const repoRoot = initTempRepo()
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
-        const ticket = makeTestTicket({ num:7, slug:'retry-branch' })
+        const ticket = makeTestTicket({ num: 7, slug: 'retry-branch' })
         const branchName = `${repoName}--07-retry-branch`
 
         // Simulate a leftover branch from a previous failed run,
         // with no worktree attached to it.
-        execSync(`git branch ${branchName}`, { cwd:repoRoot })
+        execSync(`git branch ${branchName}`, { cwd: repoRoot })
 
         const result = await createWorktree({
             repoRoot,
@@ -320,7 +320,7 @@ test(
         const repoRoot = initTempRepo()
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
-        const ticket = makeTestTicket({ num:8, slug:'retry-worktree' })
+        const ticket = makeTestTicket({ num: 8, slug: 'retry-worktree' })
 
         const first = await createWorktree({
             repoRoot,
@@ -354,7 +354,7 @@ test(
     'buildBranchName uses -- separator',
     t => {
         const ticket = makeTestTicket({
-            num:1, slug:'clean-prefix',
+            num: 1, slug: 'clean-prefix',
         })
         const name = buildBranchName('myrepo', ticket)
         t.equal(
@@ -372,7 +372,7 @@ test(
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
         const ticket = makeTestTicket({
-            num:1, slug:'add-auth', feature:'auth',
+            num: 1, slug: 'add-auth', feature: 'auth',
         })
 
         const result = await createWorktree({
@@ -407,9 +407,9 @@ test(
     'buildBranchName includes feature when set',
     t => {
         const ticket = makeTestTicket({
-            num:1,
-            slug:'clean-prefix',
-            feature:'auth',
+            num: 1,
+            slug: 'clean-prefix',
+            feature: 'auth',
         })
         const name = buildBranchName('myrepo', ticket)
         t.equal(
@@ -430,11 +430,11 @@ test(
 
         execSync(
             `git branch ${repoName}`,
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
 
         const ticket = makeTestTicket({
-            num:9, slug:'ref-conflict',
+            num: 9, slug: 'ref-conflict',
         })
         const result = await createWorktree({
             repoRoot,
@@ -464,11 +464,11 @@ test(
         const baseBranch = getDefaultBranch(repoRoot)
 
         for (let round = 0; round < 5; round++) {
-            const tickets = Array.from({ length:10 }, (_, i) => {
+            const tickets = Array.from({ length: 10 }, (_, i) => {
                 const num = round * 10 + i
                 return makeTestTicket({
                     num,
-                    slug:`concurrent-${num}`,
+                    slug: `concurrent-${num}`,
                 })
             })
 
@@ -497,7 +497,7 @@ test('removeWorktree removes the worktree', async t => {
     const repoRoot = initTempRepo()
     const repoName = basename(repoRoot)
     const baseBranch = getDefaultBranch(repoRoot)
-    const ticket = makeTestTicket({ num:4, slug:'removable' })
+    const ticket = makeTestTicket({ num: 4, slug: 'removable' })
 
     const result = await createWorktree({
         repoRoot,
@@ -528,21 +528,21 @@ test('listWorktrees returns all worktree paths', async t => {
     const repoName = basename(repoRoot)
     const baseBranch = getDefaultBranch(repoRoot)
 
-    const ticket1 = makeTestTicket({ num:5, slug:'first' })
-    const ticket2 = makeTestTicket({ num:6, slug:'second' })
+    const ticket1 = makeTestTicket({ num: 5, slug: 'first' })
+    const ticket2 = makeTestTicket({ num: 6, slug: 'second' })
 
     const result1 = await createWorktree({
         repoRoot,
         repoName,
         baseBranch,
-        ticket:ticket1,
+        ticket: ticket1,
     })
 
     const result2 = await createWorktree({
         repoRoot,
         repoName,
         baseBranch,
-        ticket:ticket2,
+        ticket: ticket2,
     })
 
     const worktrees = await listWorktrees(repoRoot)
@@ -573,7 +573,7 @@ test(
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
         const ticket = makeTestTicket({
-            num:7, slug:'force-dirty',
+            num: 7, slug: 'force-dirty',
         })
 
         const result = await createWorktree({
@@ -589,7 +589,7 @@ test(
         )
 
         await removeWorktree(result.worktreePath, {
-            force:true,
+            force: true,
         })
 
         t.equal(
@@ -607,7 +607,7 @@ test(
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
         const ticket = makeTestTicket({
-            num:8, slug:'no-force-dirty',
+            num: 8, slug: 'no-force-dirty',
         })
 
         const result = await createWorktree({
@@ -643,17 +643,17 @@ test(
         const baseBranch = getDefaultBranch(repoRoot)
 
         const ticketA = makeTestTicket({
-            num:20, slug:'race-a',
+            num: 20, slug: 'race-a',
         })
         const ticketB = makeTestTicket({
-            num:21, slug:'race-b',
+            num: 21, slug: 'race-b',
         })
 
         const resultA = await createWorktree({
             repoRoot,
             repoName,
             baseBranch,
-            ticket:ticketA,
+            ticket: ticketA,
         })
 
         t.ok(
@@ -667,7 +667,7 @@ test(
                 repoRoot,
                 repoName,
                 baseBranch,
-                ticket:ticketB,
+                ticket: ticketB,
             }),
         ])
 
@@ -704,7 +704,7 @@ test(
         const repoRoot = initTempRepo()
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
-        const ticket = makeTestTicket({ num:1, slug:'no-op' })
+        const ticket = makeTestTicket({ num: 1, slug: 'no-op' })
 
         const { branchName } = await createWorktree({
             repoRoot,
@@ -727,7 +727,7 @@ test(
         const repoRoot = initTempRepo()
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
-        const ticket = makeTestTicket({ num:2, slug:'has-commit' })
+        const ticket = makeTestTicket({ num: 2, slug: 'has-commit' })
 
         const { worktreePath, branchName } = await createWorktree({
             repoRoot,
@@ -737,15 +737,15 @@ test(
         })
 
         writeFileSync(join(worktreePath, 'change.txt'), 'hi')
-        execSync('git add change.txt', { cwd:worktreePath })
+        execSync('git add change.txt', { cwd: worktreePath })
         execSync('git commit -m "change" --no-verify', {
-            cwd:worktreePath,
-            env:{
+            cwd: worktreePath,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
@@ -763,7 +763,7 @@ test('isDirty is false for a clean worktree', async t => {
     const repoRoot = initTempRepo()
     const repoName = basename(repoRoot)
     const baseBranch = getDefaultBranch(repoRoot)
-    const ticket = makeTestTicket({ num:3, slug:'clean' })
+    const ticket = makeTestTicket({ num: 3, slug: 'clean' })
 
     const { worktreePath } = await createWorktree({
         repoRoot,
@@ -783,7 +783,7 @@ test('isDirty is true when there are uncommitted changes', async t => {
     const repoRoot = initTempRepo()
     const repoName = basename(repoRoot)
     const baseBranch = getDefaultBranch(repoRoot)
-    const ticket = makeTestTicket({ num:4, slug:'dirty' })
+    const ticket = makeTestTicket({ num: 4, slug: 'dirty' })
 
     const { worktreePath } = await createWorktree({
         repoRoot,
@@ -809,7 +809,7 @@ test('commitDirty commits dirty state and returns true',
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
         const ticket = makeTestTicket({
-            num:5, slug:'auto-commit',
+            num: 5, slug: 'auto-commit',
         })
 
         const { worktreePath, branchName } =
@@ -845,7 +845,7 @@ test('commitDirty returns false on a clean worktree',
         const repoName = basename(repoRoot)
         const baseBranch = getDefaultBranch(repoRoot)
         const ticket = makeTestTicket({
-            num:6, slug:'clean-commit',
+            num: 6, slug: 'clean-commit',
         })
 
         const { worktreePath } = await createWorktree({
@@ -867,7 +867,7 @@ test('commitDirty uses custom message', async t => {
     const repoName = basename(repoRoot)
     const baseBranch = getDefaultBranch(repoRoot)
     const ticket = makeTestTicket({
-        num:7, slug:'custom-msg',
+        num: 7, slug: 'custom-msg',
     })
 
     const { worktreePath } = await createWorktree({
@@ -889,7 +889,7 @@ test('commitDirty uses custom message', async t => {
 
     const log = execSync(
         'git log -1 --format=%s',
-        { cwd:worktreePath, encoding:'utf8' }
+        { cwd: worktreePath, encoding: 'utf8' }
     ).trim()
     t.equal(
         log,
@@ -925,13 +925,13 @@ test('planIntegrationBranch - only on the default branch', t => {
 
 test('getDefaultBranch - reads origin/HEAD', t => {
     const dir = initTempRepo()
-    execSync('git branch -M main', { cwd:dir })
+    execSync('git branch -M main', { cwd: dir })
     execSync('git update-ref refs/remotes/origin/trunk HEAD',
-        { cwd:dir })
+        { cwd: dir })
     execSync(
         'git symbolic-ref refs/remotes/origin/HEAD ' +
         'refs/remotes/origin/trunk',
-        { cwd:dir }
+        { cwd: dir }
     )
     t.equal(detectDefaultBranch(dir), 'trunk',
         'origin/HEAD wins over a local main')
@@ -939,11 +939,11 @@ test('getDefaultBranch - reads origin/HEAD', t => {
 
 test('getDefaultBranch - falls back to main, master, or null', t => {
     const dir = initTempRepo()
-    execSync('git branch -M main', { cwd:dir })
+    execSync('git branch -M main', { cwd: dir })
     t.equal(detectDefaultBranch(dir), 'main', 'local main')
-    execSync('git branch -M master', { cwd:dir })
+    execSync('git branch -M master', { cwd: dir })
     t.equal(detectDefaultBranch(dir), 'master', 'local master')
-    execSync('git branch -M trunk', { cwd:dir })
+    execSync('git branch -M trunk', { cwd: dir })
     t.equal(detectDefaultBranch(dir), null, 'neither exists')
 })
 
@@ -951,20 +951,20 @@ test('getDefaultBranch - falls back to main, master, or null', t => {
 
 const GIT_ENV = {
     ...process.env,
-    GIT_COMMITTER_NAME:'Test',
-    GIT_COMMITTER_EMAIL:'test@example.com',
-    GIT_AUTHOR_NAME:'Test',
-    GIT_AUTHOR_EMAIL:'test@example.com',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@example.com',
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@example.com',
 }
 
 function git (dir:string, cmd:string):string {
     return execSync(`git ${cmd}`, {
-        cwd:dir, env:GIT_ENV, encoding:'utf8',
+        cwd: dir, env: GIT_ENV, encoding: 'utf8',
     }).trim()
 }
 
 function commitFile (dir:string, path:string, body:string):void {
-    mkdirSync(join(dir, path, '..'), { recursive:true })
+    mkdirSync(join(dir, path, '..'), { recursive: true })
     writeFileSync(join(dir, path), body)
     git(dir, `add ${path}`)
     git(dir, `commit -m "add ${path}" --no-verify`)
@@ -1115,18 +1115,18 @@ test('createNamedWorktree - creates, replaces a stale one, and ' +
     const repoName = basename(dir)
 
     const first = await createNamedWorktree({
-        repoRoot:dir, repoName, baseBranch:'main', name:'review',
+        repoRoot: dir, repoName, baseBranch: 'main', name: 'review',
     })
     t.equal(first.branchName, `${repoName}--review`, 'branch name')
     t.ok(existsSync(first.worktreePath), 'worktree exists')
 
     const second = await createNamedWorktree({
-        repoRoot:dir, repoName, baseBranch:'main', name:'review',
+        repoRoot: dir, repoName, baseBranch: 'main', name: 'review',
     })
     t.equal(second.worktreePath, first.worktreePath,
         'same path, stale one replaced')
 
-    await removeWorktree(second.worktreePath, { force:true })
+    await removeWorktree(second.worktreePath, { force: true })
     await deleteBranch(dir, second.branchName)
     t.ok(!localBranchExists(dir, second.branchName),
         'branch deleted')
