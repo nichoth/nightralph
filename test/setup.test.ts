@@ -18,22 +18,22 @@ function makeTempProject ():{
         join(tmpdir(), 'nightralph-test-')
     )
     const projectDir = join(base, 'project')
-    mkdirSync(projectDir, { recursive:true })
+    mkdirSync(projectDir, { recursive: true })
 
     const bundledSkillsDir = join(base, 'bundled')
-    mkdirSync(bundledSkillsDir, { recursive:true })
+    mkdirSync(bundledSkillsDir, { recursive: true })
 
     writeFileSync(
         join(bundledSkillsDir, 'upstream.json'),
         JSON.stringify({
-            repo:'test/repo',
-            commit:'abc123',
+            repo: 'test/repo',
+            commit: 'abc123',
         })
     )
 
     for (const skill of SKILL_DIRS) {
         const dir = join(bundledSkillsDir, skill)
-        mkdirSync(dir, { recursive:true })
+        mkdirSync(dir, { recursive: true })
         writeFileSync(
             join(dir, 'SKILL.md'),
             `# ${skill}`
@@ -41,7 +41,7 @@ function makeTempProject ():{
     }
 
     const docsTemplatesDir = join(base, 'docs-templates')
-    mkdirSync(docsTemplatesDir, { recursive:true })
+    mkdirSync(docsTemplatesDir, { recursive: true })
     for (const tmpl of DOC_TEMPLATES) {
         writeFileSync(
             join(docsTemplatesDir, tmpl),
@@ -69,7 +69,7 @@ test('setup copies skills to .agents/skills', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     for (const skill of SKILL_DIRS) {
@@ -96,7 +96,7 @@ test('setup creates symlinks in .claude/skills', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     for (const skill of SKILL_DIRS) {
@@ -148,7 +148,7 @@ test('setup creates docs/agents/ templates', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     for (const tmpl of DOC_TEMPLATES) {
@@ -170,7 +170,7 @@ test('setup does not overwrite non-tracker docs', t => {
         projectDir, 'docs', 'agents', 'triage-labels.md'
     )
     mkdirSync(join(projectDir, 'docs', 'agents'), {
-        recursive:true,
+        recursive: true,
     })
     writeFileSync(triagePath, 'custom triage content')
 
@@ -178,7 +178,7 @@ test('setup does not overwrite non-tracker docs', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     const content = readFileSync(triagePath, 'utf8')
@@ -197,7 +197,7 @@ test('setup is idempotent', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local' as const,
+        tracker: 'local' as const,
     }
 
     setup(opts)
@@ -254,7 +254,7 @@ test('setup with tracker:local copies local markdown template', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     const trackerPath = join(
@@ -277,12 +277,12 @@ test('local ticket publishing uses the runnable status convention', t => {
     } = makeTempProject()
 
     setup({
-        bundledSkillsDir:join(process.cwd(), 'src', 'skills'),
-        docsTemplatesDir:join(
+        bundledSkillsDir: join(process.cwd(), 'src', 'skills'),
+        docsTemplatesDir: join(
             process.cwd(), 'src', 'docs-templates'
         ),
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     const skill = readFileSync(
@@ -323,7 +323,7 @@ test('setup with tracker:github copies github template', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'github',
+        tracker: 'github',
     })
 
     const trackerPath = join(
@@ -349,7 +349,7 @@ test('setup creates AGENTS.md with local markdown text', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     const agentsMdPath = join(projectDir, 'AGENTS.md')
@@ -373,7 +373,7 @@ test('setup creates AGENTS.md with GitHub Issues text', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'github',
+        tracker: 'github',
     })
 
     const agentsMdPath = join(projectDir, 'AGENTS.md')
@@ -397,7 +397,7 @@ test('setup creates AGENTS.md with managed markers when no file exists', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     const content = readFileSync(
@@ -429,7 +429,7 @@ test('setup appends managed section to existing AGENTS.md without markers', t =>
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     const content = readFileSync(agentsPath, 'utf8')
@@ -478,7 +478,7 @@ test('setup replaces only managed section in existing AGENTS.md', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
 
     const content = readFileSync(agentsPath, 'utf8')
@@ -516,7 +516,7 @@ test(
             bundledSkillsDir,
             docsTemplatesDir,
             projectDir,
-            tracker:'local',
+            tracker: 'local',
         })
 
         const trackerPath = join(
@@ -535,7 +535,7 @@ test(
             bundledSkillsDir,
             docsTemplatesDir,
             projectDir,
-            tracker:'github',
+            tracker: 'github',
         })
 
         const githubContent = readFileSync(
@@ -561,7 +561,7 @@ test('setup writes AGENTS.md merge=union to .gitattributes',
             bundledSkillsDir,
             docsTemplatesDir,
             projectDir,
-            tracker:'local',
+            tracker: 'local',
         })
         const attrs = readFileSync(
             join(projectDir, '.gitattributes'), 'utf8'
@@ -583,7 +583,7 @@ test('setup preserves existing .gitattributes entries', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local',
+        tracker: 'local',
     })
     const lines = readFileSync(attrsPath, 'utf8').split('\n')
     t.ok(lines.includes('*.png binary'), 'keeps existing rule')
@@ -601,7 +601,7 @@ test('setup does not duplicate the .gitattributes rule', t => {
         bundledSkillsDir,
         docsTemplatesDir,
         projectDir,
-        tracker:'local' as const,
+        tracker: 'local' as const,
     }
     setup(opts)
     setup(opts)

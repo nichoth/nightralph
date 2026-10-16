@@ -45,7 +45,7 @@ export type FeatureReport = {
 export type LoadFn = (names:string[]) => LoadedSelection
 
 function idOf (t:Ticket):TicketId {
-    return { feature:t.feature, num:t.num }
+    return { feature: t.feature, num: t.num }
 }
 
 function byFeatureThenNum (a:UpstreamRef, b:UpstreamRef):number {
@@ -69,7 +69,7 @@ export function upstreamOf (
         for (const ref of t.blockers) {
             if (ref.where !== 'pending') continue
             const list = groups.get(ref.feature) ?? []
-            list.push({ from:idOf(t), ref })
+            list.push({ from: idOf(t), ref })
             groups.set(ref.feature, list)
         }
     }
@@ -101,15 +101,15 @@ function walkNeeded (
         for (const ref of t.blockers) {
             if (ref.where === 'done') continue
             if (ref.where !== 'run') {
-                reached.push({ from:idOf(t), ref })
+                reached.push({ from: idOf(t), ref })
                 continue
             }
             const key = ticketKey(ref.feature, ref.num)
             const blocker = byKey.get(key)
             if (!blocker || blocker.status === 'done') continue
             reached.push({
-                from:idOf(t),
-                ref:{ ...ref, status:blocker.status },
+                from: idOf(t),
+                ref: { ...ref, status: blocker.status },
             })
             if (blocker.status !== 'ready-for-agent') continue
             if (needed.has(key)) continue
@@ -163,7 +163,7 @@ export function suggestSelection (
         const b = ref.where === 'run' ?
             byKey.get(ticketKey(ref.feature, ref.num)) :
             undefined
-        return b ? { ...ref, status:b.status } : ref
+        return b ? { ...ref, status: b.status } : ref
     }
 
     const { reached, needed } = walkNeeded(tickets, target)
@@ -178,26 +178,26 @@ export function suggestSelection (
         .sort((a, b) => a.num - b.num)
 
     return {
-        features:[
+        features: [
             target,
             ...features
                 .filter(f => f !== target)
                 .sort((a, b) => a.localeCompare(b)),
         ],
-        edges:reached
+        edges: reached
             .filter(r => (
                 r.ref.where !== 'missing' &&
                 r.ref.feature !== r.from.feature
             ))
             .sort(byFeatureThenNum),
-        runnable:own.filter(t => (
+        runnable: own.filter(t => (
             inWave.has(ticketKey(t.feature, t.num))
         )).length,
-        total:own.length,
-        deadEnds:own.flatMap(t => (
+        total: own.length,
+        deadEnds: own.flatMap(t => (
             sim.deadRefs.get(ticketKey(t.feature, t.num)) ?? []
-        ).map(ref => ({ from:idOf(t), ref:withStatus(ref) }))),
-        cycles:sim.neverRun
+        ).map(ref => ({ from: idOf(t), ref: withStatus(ref) }))),
+        cycles: sim.neverRun
             .filter(t => {
                 const key = ticketKey(t.feature, t.num)
                 return needed.has(key) && !sim.deadRefs.has(key)
@@ -248,16 +248,16 @@ export function buildGraph (
         const suggestion = suggestSelection(cached, feature)
         reports.push({
             feature,
-            ready:findReadyTickets(alone.tickets).length,
-            total:alone.tickets.length,
-            suggestion:crossesFeatures(suggestion) ? suggestion : null,
+            ready: findReadyTickets(alone.tickets).length,
+            total: alone.tickets.length,
+            suggestion: crossesFeatures(suggestion) ? suggestion : null,
         })
     }
     return { reports, warnings }
 }
 
 function idLabel (id:TicketId):string {
-    return ticketLabel({ ...id, filename:'' })
+    return ticketLabel({ ...id, filename: '' })
 }
 
 function refLabel (ref:BlockerRef):string {

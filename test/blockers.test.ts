@@ -52,18 +52,18 @@ function parse (text:string) {
 test('AC1.1: a cross-feature ref is read with its feature', t => {
     const hir01 = parse(HIR_01)
     t.deepEqual(hir01, {
-        refs:[{ feature:'newsletter-audit', num:16 }],
-        typos:[],
+        refs: [{ feature: 'newsletter-audit', num: 16 }],
+        typos: [],
     }, 'held-import-review 01')
 
     const hir06 = parse(HIR_06)
     t.deepEqual(hir06.refs, [
-        { num:1 },
-        { num:2 },
-        { num:3 },
-        { num:4 },
-        { num:5 },
-        { feature:'newsletter-audit', num:18 },
+        { num: 1 },
+        { num: 2 },
+        { num: 3 },
+        { num: 4 },
+        { num: 5 },
+        { feature: 'newsletter-audit', num: 18 },
     ], 'held-import-review 06 refs')
     t.deepEqual(hir06.typos, [], 'held-import-review 06 typos')
 })
@@ -106,7 +106,7 @@ test('AC1.5: backtick spans are ignored', t => {
 
 test('AC1.6: no blockers when the field says none', t => {
     const analytics = parse(ANALYTICS_01)
-    t.deepEqual(analytics, { refs:[], typos:[] }, 'analytics 01')
+    t.deepEqual(analytics, { refs: [], typos: [] }, 'analytics 01')
 
     t.deepEqual(parse('None').refs, [], 'None')
     t.deepEqual(parse('none').refs, [], 'none')
@@ -119,7 +119,7 @@ test('AC1.7: numbers with a unit or a version prefix are not refs', t => {
 
 test('AC1.8: a plain word before a number is not a feature', t => {
     const also = parse('Also 01')
-    t.deepEqual(also, { refs:[{ num:1 }], typos:[] }, 'Also 01')
+    t.deepEqual(also, { refs: [{ num: 1 }], typos: [] }, 'Also 01')
 
     const og = parse(OG_04)
     t.deepEqual(og.typos, [], 'no typos for og-enhanced-cards 04')
@@ -127,7 +127,7 @@ test('AC1.8: a plain word before a number is not a feature', t => {
 
 test('AC1.9: a misspelt feature name is reported as a typo', t => {
     const p = parse('nwsletter-audit 16')
-    t.deepEqual(p.refs, [{ num:16 }], 'ref falls back to own feature')
+    t.deepEqual(p.refs, [{ num: 16 }], 'ref falls back to own feature')
     t.deepEqual(p.typos, ['nwsletter-audit'], 'typo reported')
 })
 
@@ -171,14 +171,14 @@ test('ranges expand to their endpoints', t => {
 
     const featureRange = parse('newsletter-audit 03-05')
     t.deepEqual(featureRange.refs, [
-        { feature:'newsletter-audit', num:3 },
-        { feature:'newsletter-audit', num:5 },
+        { feature: 'newsletter-audit', num: 3 },
+        { feature: 'newsletter-audit', num: 5 },
     ], 'a feature applies to both ends of a range')
 
     const list = parse('newsletter-audit 16, 17')
     t.deepEqual(list.refs, [
-        { feature:'newsletter-audit', num:16 },
-        { num:17 },
+        { feature: 'newsletter-audit', num: 16 },
+        { num: 17 },
     ], 'a feature applies only to the number right after it')
 })
 
@@ -188,18 +188,18 @@ test('a nested feature is read with its full path', t => {
         bodyWith('rollout/billing 03-05, 07'), known
     )
     t.deepEqual(p, {
-        refs:[
-            { feature:'rollout/billing', num:3 },
-            { feature:'rollout/billing', num:5 },
-            { num:7 },
+        refs: [
+            { feature: 'rollout/billing', num: 3 },
+            { feature: 'rollout/billing', num: 5 },
+            { num: 7 },
         ],
-        typos:[],
+        typos: [],
     }, 'the path is the feature')
 })
 
 test('an unknown nested feature is reported as a typo', t => {
     const p = parse('rollout/biling 03')
-    t.deepEqual(p.refs, [{ num:3 }], 'ref falls back to own feature')
+    t.deepEqual(p.refs, [{ num: 3 }], 'ref falls back to own feature')
     t.deepEqual(p.typos, ['rollout/biling'], 'typo reported')
 })
 
@@ -215,12 +215,12 @@ test('nested and code-guarded parentheses', t => {
 
 test('the field name is matched in any case', t => {
     const p = parseBlockerField('**blocked BY:** 07', KNOWN)
-    t.deepEqual(p.refs, [{ num:7 }], 'lowercase field name')
+    t.deepEqual(p.refs, [{ num: 7 }], 'lowercase field name')
 })
 
 test('only feature-shaped words are typos', t => {
     const doc = parse('FDR-018 03')
-    t.deepEqual(doc, { refs:[{ num:3 }], typos:[] }, 'doc id is prose')
+    t.deepEqual(doc, { refs: [{ num: 3 }], typos: [] }, 'doc id is prose')
 })
 
 test('unpaired delimiters do not hide text', t => {
@@ -236,7 +236,7 @@ test('unpaired delimiters do not hide text', t => {
 
 test('a body with no Blocked by field has no refs', t => {
     const p = parseBlockerField('no field here', KNOWN)
-    t.deepEqual(p, { refs:[], typos:[] }, 'no field')
+    t.deepEqual(p, { refs: [], typos: [] }, 'no field')
 })
 
 test('the old single-feature form still parses', t => {
@@ -260,60 +260,60 @@ function lookupOf (statuses:Record<string, string>) {
 }
 
 test('resolveBlockers: a ticket in a selected feature', t => {
-    const refs = resolveBlockers([{ num:2 }], 'a', SELECTED, lookupOf({}))
-    t.deepEqual(refs, [{ feature:'a', num:2, where:'run' }], 'run')
+    const refs = resolveBlockers([{ num: 2 }], 'a', SELECTED, lookupOf({}))
+    t.deepEqual(refs, [{ feature: 'a', num: 2, where: 'run' }], 'run')
 })
 
 test('resolveBlockers AC2.4: no ticket in a selected feature', t => {
-    const own = resolveBlockers([{ num:9 }], 'a', SELECTED, lookupOf({}))
-    t.deepEqual(own, [{ feature:'a', num:9, where:'missing' }], 'own')
+    const own = resolveBlockers([{ num: 9 }], 'a', SELECTED, lookupOf({}))
+    t.deepEqual(own, [{ feature: 'a', num: 9, where: 'missing' }], 'own')
 
     const other = resolveBlockers(
-        [{ feature:'b', num:9 }], 'a', SELECTED, lookupOf({})
+        [{ feature: 'b', num: 9 }], 'a', SELECTED, lookupOf({})
     )
     t.deepEqual(
-        other, [{ feature:'b', num:9, where:'missing' }], 'other'
+        other, [{ feature: 'b', num: 9, where: 'missing' }], 'other'
     )
 })
 
 test('resolveBlockers AC2.1: a done ticket outside the run', t => {
     const refs = resolveBlockers(
-        [{ feature:'c', num:3 }], 'a', SELECTED,
-        lookupOf({ 'c:3':'done' })
+        [{ feature: 'c', num: 3 }], 'a', SELECTED,
+        lookupOf({ 'c:3': 'done' })
     )
     t.deepEqual(refs, [
-        { feature:'c', num:3, where:'done', status:'done' },
+        { feature: 'c', num: 3, where: 'done', status: 'done' },
     ], 'done')
 })
 
 test('resolveBlockers AC2.2: an unfinished ticket outside', t => {
     const refs = resolveBlockers(
-        [{ feature:'c', num:3 }], 'a', SELECTED,
-        lookupOf({ 'c:3':'ready-for-agent' })
+        [{ feature: 'c', num: 3 }], 'a', SELECTED,
+        lookupOf({ 'c:3': 'ready-for-agent' })
     )
     t.deepEqual(refs, [
-        { feature:'c', num:3, where:'pending', status:'ready-for-agent' },
+        { feature: 'c', num: 3, where: 'pending', status: 'ready-for-agent' },
     ], 'pending')
 })
 
 test('resolveBlockers: no ticket outside the run', t => {
     const refs = resolveBlockers(
-        [{ feature:'c', num:3 }], 'a', SELECTED, lookupOf({})
+        [{ feature: 'c', num: 3 }], 'a', SELECTED, lookupOf({})
     )
-    t.deepEqual(refs, [{ feature:'c', num:3, where:'missing' }], 'missing')
+    t.deepEqual(refs, [{ feature: 'c', num: 3, where: 'missing' }], 'missing')
 })
 
 test('resolveBlockers: own feature written out is the same ref', t => {
     const refs = resolveBlockers(
-        [{ feature:'a', num:1 }, { num:1 }], 'a', SELECTED, lookupOf({})
+        [{ feature: 'a', num: 1 }, { num: 1 }], 'a', SELECTED, lookupOf({})
     )
-    t.deepEqual(refs, [{ feature:'a', num:1, where:'run' }], 'one ref')
+    t.deepEqual(refs, [{ feature: 'a', num: 1, where: 'run' }], 'one ref')
 })
 
 test('provisionalRefs: every ref is in the run', t => {
-    const refs = provisionalRefs([{ num:1 }, { feature:'b', num:2 }], 'a')
+    const refs = provisionalRefs([{ num: 1 }, { feature: 'b', num: 2 }], 'a')
     t.deepEqual(refs, [
-        { feature:'a', num:1, where:'run' },
-        { feature:'b', num:2, where:'run' },
+        { feature: 'a', num: 1, where: 'run' },
+        { feature: 'b', num: 2, where: 'run' },
     ], 'own feature filled in')
 })

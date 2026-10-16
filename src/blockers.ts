@@ -118,9 +118,9 @@ export function parseBlockerField (
     knownFeatures:ReadonlySet<string>
 ):BlockerParse {
     const text = fieldText(body)
-    if (text === null) return { refs:[], typos:[] }
+    if (text === null) return { refs: [], typos: [] }
     const clean = stripNotes(text)
-    if (/^\s*none\b/i.test(clean)) return { refs:[], typos:[] }
+    if (/^\s*none\b/i.test(clean)) return { refs: [], typos: [] }
 
     const refs:RawRef[] = []
     const typos:string[] = []
@@ -195,19 +195,19 @@ export function resolveBlockers (
         if (nums) {
             out.push({
                 feature,
-                num:r.num,
-                where:nums.has(r.num) ? 'run' : 'missing',
+                num: r.num,
+                where: nums.has(r.num) ? 'run' : 'missing',
             })
             continue
         }
         const status = lookup(feature, r.num)
         if (status === undefined) {
-            out.push({ feature, num:r.num, where:'missing' })
+            out.push({ feature, num: r.num, where: 'missing' })
         } else {
             out.push({
                 feature,
-                num:r.num,
-                where:status === 'done' ? 'done' : 'pending',
+                num: r.num,
+                where: status === 'done' ? 'done' : 'pending',
                 status,
             })
         }
@@ -231,7 +231,7 @@ export function provisionalRefs (
         const id = refId(feature, r.num)
         if (seen.has(id)) continue
         seen.add(id)
-        out.push({ feature, num:r.num, where:'run' })
+        out.push({ feature, num: r.num, where: 'run' })
     }
     return out
 }

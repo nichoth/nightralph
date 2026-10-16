@@ -34,7 +34,7 @@ export function isRecord (value:unknown):value is Record<string, unknown> {
 }
 
 export function emptyStreamStats ():StreamStatsState {
-    return { stats:{ subagents:0 }, seenToolIds:new Set() }
+    return { stats: { subagents: 0 }, seenToolIds: new Set() }
 }
 
 /**
@@ -77,11 +77,11 @@ function countSubagents (
     }
     if (ids.length === 0) return state
     return {
-        stats:{
+        stats: {
             ...state.stats,
-            subagents:state.stats.subagents + ids.length,
+            subagents: state.stats.subagents + ids.length,
         },
-        seenToolIds:new Set([...state.seenToolIds, ...ids]),
+        seenToolIds: new Set([...state.seenToolIds, ...ids]),
     }
 }
 
@@ -114,10 +114,10 @@ function applyResult (
         costUsd === state.stats.costUsd
     ) return state
     return {
-        stats:costUsd === undefined ?
+        stats: costUsd === undefined ?
             { subagents } :
             { subagents, costUsd },
-        seenToolIds:state.seenToolIds,
+        seenToolIds: state.seenToolIds,
     }
 }
 
@@ -133,7 +133,7 @@ export function addStats (
     }
     return {
         subagents,
-        costUsd:(total.costUsd ?? 0) + (run.costUsd ?? 0),
+        costUsd: (total.costUsd ?? 0) + (run.costUsd ?? 0),
     }
 }
 
@@ -154,7 +154,7 @@ export function formatStats (stats?:SubagentStats):string|null {
 }
 
 export function emptyRunStats ():RunStats {
-    return { agentRuns:0, withCost:0, subagents:0, costUsd:0 }
+    return { agentRuns: 0, withCost: 0, subagents: 0, costUsd: 0 }
 }
 
 export function addRun (
@@ -162,10 +162,10 @@ export function addRun (
     result:{ subagents?:number; costUsd?:number }
 ):RunStats {
     return {
-        agentRuns:run.agentRuns + 1,
-        withCost:run.withCost + (result.costUsd === undefined ? 0 : 1),
-        subagents:run.subagents + (result.subagents ?? 0),
-        costUsd:run.costUsd + (result.costUsd ?? 0),
+        agentRuns: run.agentRuns + 1,
+        withCost: run.withCost + (result.costUsd === undefined ? 0 : 1),
+        subagents: run.subagents + (result.subagents ?? 0),
+        costUsd: run.costUsd + (result.costUsd ?? 0),
     }
 }
 

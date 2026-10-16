@@ -26,7 +26,7 @@ function makeTempScratch ():{
         join(tmpdir(), 'nightralph-resolve-')
     )
     const scratchDir = join(cwd, '.scratch')
-    mkdirSync(scratchDir, { recursive:true })
+    mkdirSync(scratchDir, { recursive: true })
     return { cwd, scratchDir }
 }
 
@@ -40,7 +40,7 @@ function addFeature (
 ):void {
     const featureDir = join(scratchDir, name)
     const issuesDir = join(featureDir, 'issues')
-    mkdirSync(issuesDir, { recursive:true })
+    mkdirSync(issuesDir, { recursive: true })
     writeFileSync(
         join(featureDir, 'spec.md'),
         `# ${name}`
@@ -133,24 +133,24 @@ test(
         const { cwd, scratchDir } = makeTempScratch()
         addFeature(scratchDir, 'counted', [
             {
-                filename:'01-ready.md',
-                body:[
+                filename: '01-ready.md',
+                body: [
                     '# Ready ticket',
                     '**Status:** ready-for-agent',
                     '**Blocked by:** None',
                 ].join('\n'),
             },
             {
-                filename:'02-done.md',
-                body:[
+                filename: '02-done.md',
+                body: [
                     '# Done ticket',
                     '**Status:** done',
                     '**Blocked by:** None',
                 ].join('\n'),
             },
             {
-                filename:'03-blocked.md',
-                body:[
+                filename: '03-blocked.md',
+                body: [
                     '# Blocked ticket',
                     '**Status:** ready-for-agent',
                     '**Blocked by:** 01',
@@ -200,12 +200,12 @@ function findTicket (tickets:Ticket[], feature:string, num:number):Ticket {
 function crossFeatureTree (naStatus:string):string {
     const { scratchDir } = makeTempScratch()
     addFeature(scratchDir, NA, [{
-        filename:'16-x.md',
-        body:ticketBody(naStatus, 'None'),
+        filename: '16-x.md',
+        body: ticketBody(naStatus, 'None'),
     }])
     addFeature(scratchDir, HIR, [{
-        filename:'01-writer-can-reply.md',
-        body:ticketBody('ready-for-agent', HIR_01_BLOCKED_BY),
+        filename: '01-writer-can-reply.md',
+        body: ticketBody('ready-for-agent', HIR_01_BLOCKED_BY),
     }])
     return scratchDir
 }
@@ -216,7 +216,7 @@ test('loadSelection AC1.1 AC2.1: a done blocker in an unselected ' +
     const { tickets, warnings } = loadSelection(scratchDir, [HIR])
     const hir01 = findTicket(tickets, HIR, 1)
     t.deepEqual(hir01.blockers, [
-        { feature:NA, num:16, where:'done', status:'done' },
+        { feature: NA, num: 16, where: 'done', status: 'done' },
     ], 'the ref is done outside the run')
     t.deepEqual(
         findReadyTickets(tickets).map(x => x.num), [1], 'ticket is ready'
@@ -234,7 +234,7 @@ test('loadSelection AC2.2: an unfinished blocker in an unselected ' +
     const { tickets, warnings } = loadSelection(scratchDir, [HIR])
     const [ref] = findTicket(tickets, HIR, 1).blockers
     t.deepEqual(ref, {
-        feature:NA, num:16, where:'pending', status:'ready-for-agent',
+        feature: NA, num: 16, where: 'pending', status: 'ready-for-agent',
     }, 'the ref is pending')
     t.deepEqual(findReadyTickets(tickets), [], 'nothing is ready')
     t.ok(blockerLabel(ref).includes('newsletter-audit/16'), 'label names it')
@@ -246,32 +246,32 @@ test('loadSelection: a blocker in a selected feature is in the run', t => {
     const scratchDir = crossFeatureTree('ready-for-agent')
     const { tickets } = loadSelection(scratchDir, [HIR, NA])
     t.deepEqual(findTicket(tickets, HIR, 1).blockers, [
-        { feature:NA, num:16, where:'run' },
+        { feature: NA, num: 16, where: 'run' },
     ], 'run ref')
 })
 
 test('loadSelection AC2.4: blockers that match no ticket', t => {
     const { scratchDir } = makeTempScratch()
     addFeature(scratchDir, NA, [{
-        filename:'16-x.md',
-        body:ticketBody('done', 'None'),
+        filename: '16-x.md',
+        body: ticketBody('done', 'None'),
     }])
     addFeature(scratchDir, HIR, [
         {
-            filename:'01-other.md',
-            body:ticketBody('ready-for-agent', 'newsletter-audit 40'),
+            filename: '01-other.md',
+            body: ticketBody('ready-for-agent', 'newsletter-audit 40'),
         },
         {
-            filename:'02-own.md',
-            body:ticketBody('ready-for-agent', '09'),
+            filename: '02-own.md',
+            body: ticketBody('ready-for-agent', '09'),
         },
     ])
     const { tickets, warnings } = loadSelection(scratchDir, [HIR])
     t.deepEqual(findTicket(tickets, HIR, 1).blockers, [
-        { feature:NA, num:40, where:'missing' },
+        { feature: NA, num: 40, where: 'missing' },
     ], 'other-feature ref is missing')
     t.deepEqual(findTicket(tickets, HIR, 2).blockers, [
-        { feature:HIR, num:9, where:'missing' },
+        { feature: HIR, num: 9, where: 'missing' },
     ], 'own-feature ref is missing')
     t.deepEqual(findReadyTickets(tickets), [], 'neither is ready')
     t.deepEqual(
@@ -289,38 +289,38 @@ test('loadSelection: a misspelt feature is a typo warning', t => {
     addFeature(scratchDir, NA, [])
     addFeature(scratchDir, HIR, [
         {
-            filename:'01-typo.md',
-            body:ticketBody('ready-for-agent', 'nwsletter-audit 16'),
+            filename: '01-typo.md',
+            body: ticketBody('ready-for-agent', 'nwsletter-audit 16'),
         },
         {
-            filename:'16-own.md',
-            body:ticketBody('ready-for-agent', 'None'),
+            filename: '16-own.md',
+            body: ticketBody('ready-for-agent', 'None'),
         },
     ])
     const { tickets, warnings } = loadSelection(scratchDir, [HIR])
     t.deepEqual(
-        warnings.map(w => ({ kind:w.kind, text:w.text })),
-        [{ kind:'typo', text:'nwsletter-audit' }],
+        warnings.map(w => ({ kind: w.kind, text: w.text })),
+        [{ kind: 'typo', text: 'nwsletter-audit' }],
         'one typo warning'
     )
     t.deepEqual(findTicket(tickets, HIR, 1).blockers, [
-        { feature:HIR, num:16, where:'run' },
+        { feature: HIR, num: 16, where: 'run' },
     ], 'the number refers to the own feature')
 })
 
 test('loadSelection: a blocker in a nested feature', t => {
     const { scratchDir } = makeTempScratch()
     addFeature(scratchDir, 'rollout/billing', [{
-        filename:'03-x.md',
-        body:ticketBody('done', 'None'),
+        filename: '03-x.md',
+        body: ticketBody('done', 'None'),
     }])
     addFeature(scratchDir, HIR, [{
-        filename:'01-x.md',
-        body:ticketBody('ready-for-agent', 'rollout/billing 03'),
+        filename: '01-x.md',
+        body: ticketBody('ready-for-agent', 'rollout/billing 03'),
     }])
     const { tickets, warnings } = loadSelection(scratchDir, [HIR])
     t.deepEqual(findTicket(tickets, HIR, 1).blockers, [
-        { feature:'rollout/billing', num:3, where:'done', status:'done' },
+        { feature: 'rollout/billing', num: 3, where: 'done', status: 'done' },
     ], 'the ref resolves into the nested feature')
     t.deepEqual(warnings, [], 'no warnings')
 })
@@ -328,13 +328,13 @@ test('loadSelection: a blocker in a nested feature', t => {
 test('featureCounts AC1.11: the picker counts what a run would', t => {
     const scratchDir = crossFeatureTree('done')
     addFeature(scratchDir, HIR, [{
-        filename:'02-next.md',
-        body:ticketBody('ready-for-agent', '01'),
+        filename: '02-next.md',
+        body: ticketBody('ready-for-agent', '01'),
     }])
     const counts = featureCounts(scratchDir, HIR)
     t.deepEqual(
         counts,
-        { ready:1, total:2, badBlockers:0, waitsOn:[] },
+        { ready: 1, total: 2, badBlockers: 0, waitsOn: [] },
         'counts'
     )
     const run = loadSelection(scratchDir, [HIR])
@@ -352,8 +352,8 @@ test('featureCounts AC2.4: only missing refs are bad blockers', t => {
         'a pending outside blocker is not bad'
     )
     addFeature(scratchDir, HIR, [{
-        filename:'02-bad.md',
-        body:ticketBody('ready-for-agent', 'newsletter-audit 40'),
+        filename: '02-bad.md',
+        body: ticketBody('ready-for-agent', 'newsletter-audit 40'),
     }])
     t.equal(
         featureCounts(scratchDir, HIR).badBlockers, 1,
@@ -376,21 +376,21 @@ test('featureCounts AC1.1: names the feature it waits on', t => {
 test('featureCounts AC1.2: several upstream features, all named', t => {
     const scratchDir = crossFeatureTree('ready-for-agent')
     addFeature(scratchDir, 'zeta-feat', [{
-        filename:'01-x.md',
-        body:ticketBody('ready-for-agent', 'None'),
+        filename: '01-x.md',
+        body: ticketBody('ready-for-agent', 'None'),
     }])
     addFeature(scratchDir, 'beta-feat', [{
-        filename:'01-x.md',
-        body:ticketBody('ready-for-agent', 'None'),
+        filename: '01-x.md',
+        body: ticketBody('ready-for-agent', 'None'),
     }])
     addFeature(scratchDir, HIR, [
         {
-            filename:'02-zeta.md',
-            body:ticketBody('ready-for-agent', 'zeta-feat 01'),
+            filename: '02-zeta.md',
+            body: ticketBody('ready-for-agent', 'zeta-feat 01'),
         },
         {
-            filename:'03-beta.md',
-            body:ticketBody('ready-for-agent', 'beta-feat 01'),
+            filename: '03-beta.md',
+            body: ticketBody('ready-for-agent', 'beta-feat 01'),
         },
     ])
     const { waitsOn } = featureCounts(scratchDir, HIR)
@@ -419,29 +419,29 @@ test('featureCounts AC1.3: no pending ref gives the old label', t => {
 test('featureCounts AC1.4: done, missing and human refs add nothing', t => {
     const { scratchDir } = makeTempScratch()
     addFeature(scratchDir, NA, [{
-        filename:'16-done.md',
-        body:ticketBody('done', 'None'),
+        filename: '16-done.md',
+        body: ticketBody('done', 'None'),
     }])
     addFeature(scratchDir, 'other-feat', [{
-        filename:'01-x.md',
-        body:ticketBody('ready-for-agent', 'None'),
+        filename: '01-x.md',
+        body: ticketBody('ready-for-agent', 'None'),
     }])
     addFeature(scratchDir, HIR, [
         {
-            filename:'01-done-ref.md',
-            body:ticketBody('ready-for-agent', 'newsletter-audit 16'),
+            filename: '01-done-ref.md',
+            body: ticketBody('ready-for-agent', 'newsletter-audit 16'),
         },
         {
-            filename:'02-missing.md',
-            body:ticketBody('ready-for-agent', 'newsletter-audit 40'),
+            filename: '02-missing.md',
+            body: ticketBody('ready-for-agent', 'newsletter-audit 40'),
         },
         {
-            filename:'03-done-ticket.md',
-            body:ticketBody('done', 'other-feat 01'),
+            filename: '03-done-ticket.md',
+            body: ticketBody('done', 'other-feat 01'),
         },
         {
-            filename:'04-human.md',
-            body:ticketBody('ready-for-human', 'other-feat 01'),
+            filename: '04-human.md',
+            body: ticketBody('ready-for-human', 'other-feat 01'),
         },
     ])
     t.deepEqual(
@@ -468,8 +468,8 @@ test('featureChoiceLabel AC1.6: bad blockers sit between ready and waits',
     t => {
         const scratchDir = crossFeatureTree('ready-for-agent')
         addFeature(scratchDir, HIR, [{
-            filename:'02-bad.md',
-            body:ticketBody('ready-for-agent', 'newsletter-audit 40'),
+            filename: '02-bad.md',
+            body: ticketBody('ready-for-agent', 'newsletter-audit 40'),
         }])
         const label = featureChoiceLabel(scratchDir, HIR)
         const ready = label.indexOf('ready')

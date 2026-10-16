@@ -19,18 +19,18 @@ function initTempRepo ():string {
     const dir = mkdtempSync(
         join(tmpdir(), 'nightralph-merge-test-')
     )
-    execSync('git init', { cwd:dir })
+    execSync('git init', { cwd: dir })
     execSync('git config core.hooksPath /dev/null', {
-        cwd:dir,
+        cwd: dir,
     })
     execSync('git commit --allow-empty -m "init" --no-verify', {
-        cwd:dir,
-        env:{
+        cwd: dir,
+        env: {
             ...process.env,
-            GIT_COMMITTER_NAME:'Test User',
-            GIT_COMMITTER_EMAIL:'test@example.com',
-            GIT_AUTHOR_NAME:'Test User',
-            GIT_AUTHOR_EMAIL:'test@example.com',
+            GIT_COMMITTER_NAME: 'Test User',
+            GIT_COMMITTER_EMAIL: 'test@example.com',
+            GIT_AUTHOR_NAME: 'Test User',
+            GIT_AUTHOR_EMAIL: 'test@example.com',
         },
     })
     return dir
@@ -42,15 +42,15 @@ function initRepoWithFile (
     content:string
 ):void {
     writeFileSync(join(dir, filename), content)
-    execSync('git add .', { cwd:dir })
+    execSync('git add .', { cwd: dir })
     execSync('git commit -m "add ' + filename + '"', {
-        cwd:dir,
-        env:{
+        cwd: dir,
+        env: {
             ...process.env,
-            GIT_COMMITTER_NAME:'Test User',
-            GIT_COMMITTER_EMAIL:'test@example.com',
-            GIT_AUTHOR_NAME:'Test User',
-            GIT_AUTHOR_EMAIL:'test@example.com',
+            GIT_COMMITTER_NAME: 'Test User',
+            GIT_COMMITTER_EMAIL: 'test@example.com',
+            GIT_AUTHOR_NAME: 'Test User',
+            GIT_AUTHOR_EMAIL: 'test@example.com',
         },
     })
 }
@@ -61,14 +61,14 @@ function createBranch (
     filename:string,
     content:string
 ):void {
-    execSync('git checkout -b ' + branchName, { cwd:dir })
+    execSync('git checkout -b ' + branchName, { cwd: dir })
     initRepoWithFile(dir, filename, content)
 }
 
 function getDefaultBranch (dir:string):string {
     try {
         return execSync('git rev-parse --abbrev-ref HEAD', {
-            cwd:dir,
+            cwd: dir,
         }).toString().trim()
     } catch {
         return 'main'
@@ -105,8 +105,8 @@ function installMergeFailingGit (failBranch:string):{
     process.env.PATH = binDir + ':' + originalPath
 
     return {
-        path:binDir,
-        restore:() => {
+        path: binDir,
+        restore: () => {
             process.env.PATH = originalPath
         },
     }
@@ -130,7 +130,7 @@ test(
 
         // Go back to main/master and merge
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
 
         const result = await mergeBranch(repoRoot, 'feature-1')
@@ -143,7 +143,7 @@ test(
 
         // Verify file was merged
         const files = execSync('git ls-tree -r HEAD --name-only', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString()
         t.ok(
             files.includes('feature1.txt'),
@@ -177,45 +177,45 @@ test(
 
         // Go back to main and modify conflict.txt
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         writeFileSync(
             join(repoRoot, 'conflict.txt'),
             'updated main version\n'
         )
-        execSync('git add conflict.txt', { cwd:repoRoot })
+        execSync('git add conflict.txt', { cwd: repoRoot })
         execSync('git commit -m "update" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test User',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test User',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test User',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test User',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
         // Go back to feature-2 and modify the conflict file
-        execSync('git checkout feature-2', { cwd:repoRoot })
+        execSync('git checkout feature-2', { cwd: repoRoot })
         writeFileSync(
             join(repoRoot, 'conflict.txt'),
             'feature version\n'
         )
-        execSync('git add conflict.txt', { cwd:repoRoot })
+        execSync('git add conflict.txt', { cwd: repoRoot })
         execSync('git commit -m "conflict" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test User',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test User',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test User',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test User',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
         // Go back to main and try to merge
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
 
         const result = await mergeBranch(repoRoot, 'feature-2')
@@ -232,7 +232,7 @@ test(
 
         // Verify git state is clean (merge aborted)
         const status = execSync('git status --porcelain', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString()
         t.equal(
             status,
@@ -263,7 +263,7 @@ test(
 
         // Go back to base and add another commit
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         initRepoWithFile(repoRoot, 'base2.txt', 'more base')
 
@@ -283,7 +283,7 @@ test(
         // Verify HEAD is on base branch after success
         const currentBranch = execSync(
             'git rev-parse --abbrev-ref HEAD',
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         ).toString().trim()
         t.equal(
             currentBranch,
@@ -294,7 +294,7 @@ test(
 
         // After rebase, base branch should have both base files
         const files = execSync('git ls-tree -r HEAD --name-only', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString()
         t.ok(
             files.includes('base.txt'),
@@ -307,10 +307,10 @@ test(
 
         // Verify feature branch was rebased successfully
         // by checking out the feature branch
-        execSync('git checkout feature-3', { cwd:repoRoot })
+        execSync('git checkout feature-3', { cwd: repoRoot })
         const featureFiles = execSync(
             'git ls-tree -r HEAD --name-only',
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         ).toString()
         t.ok(
             featureFiles.includes('feature3.txt'),
@@ -341,21 +341,21 @@ test(
 
         // Go back and modify the base file
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         writeFileSync(
             join(repoRoot, 'file.txt'),
             'updated base version\n'
         )
-        execSync('git add file.txt', { cwd:repoRoot })
+        execSync('git add file.txt', { cwd: repoRoot })
         execSync('git commit -m "update file" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test User',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test User',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test User',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test User',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
@@ -379,7 +379,7 @@ test(
         // Verify we're back on base branch
         const currentBranch = execSync(
             'git rev-parse --abbrev-ref HEAD',
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         ).toString().trim()
         t.equal(
             currentBranch,
@@ -389,7 +389,7 @@ test(
 
         // Verify git state is clean
         const status = execSync('git status --porcelain', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString()
         t.equal(
             status,
@@ -417,7 +417,7 @@ test(
 
         // Go back and create second feature branch
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         createBranch(
             repoRoot,
@@ -428,18 +428,18 @@ test(
 
         // Go back to base
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
 
         // Merge both branches
         const result = await mergeWave({
             repoRoot,
-            baseBranch:defaultBranch,
-            branches:[
-                { branch:'feature-5a', ticketNum:1 },
-                { branch:'feature-5b', ticketNum:2 },
+            baseBranch: defaultBranch,
+            branches: [
+                { branch: 'feature-5a', ticketNum: 1 },
+                { branch: 'feature-5b', ticketNum: 2 },
             ],
-            strategy:'stop',
+            strategy: 'stop',
         })
 
         t.equal(
@@ -465,7 +465,7 @@ test(
 
         // Verify both files are in HEAD
         const files = execSync('git ls-tree -r HEAD --name-only', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString()
         t.ok(
             files.includes('file-a.txt'),
@@ -500,58 +500,58 @@ test(
 
         // Go back to main and modify shared.txt for second branch
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         writeFileSync(
             join(repoRoot, 'shared.txt'),
             'updated base version'
         )
-        execSync('git add shared.txt', { cwd:repoRoot })
+        execSync('git add shared.txt', { cwd: repoRoot })
         execSync('git commit -m "update shared" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test User',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test User',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test User',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test User',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
         // Create second feature from the original base,
         // which will conflict when merged
-        execSync('git checkout HEAD~1', { cwd:repoRoot })
-        execSync('git checkout -b feature-6b', { cwd:repoRoot })
+        execSync('git checkout HEAD~1', { cwd: repoRoot })
+        execSync('git checkout -b feature-6b', { cwd: repoRoot })
         writeFileSync(
             join(repoRoot, 'shared.txt'),
             'conflicting version'
         )
-        execSync('git add shared.txt', { cwd:repoRoot })
+        execSync('git add shared.txt', { cwd: repoRoot })
         execSync('git commit -m "modify shared" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test User',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test User',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test User',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test User',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
         // Go back to base
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
 
         // Merge with stop strategy
         const result = await mergeWave({
             repoRoot,
-            baseBranch:defaultBranch,
-            branches:[
-                { branch:'feature-6a', ticketNum:1 },
-                { branch:'feature-6b', ticketNum:2 },
+            baseBranch: defaultBranch,
+            branches: [
+                { branch: 'feature-6a', ticketNum: 1 },
+                { branch: 'feature-6b', ticketNum: 2 },
             ],
-            strategy:'stop',
+            strategy: 'stop',
         })
 
         t.equal(
@@ -605,59 +605,59 @@ test(
 
         // Go back to main and modify shared.txt
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         writeFileSync(
             join(repoRoot, 'shared.txt'),
             'updated base version'
         )
-        execSync('git add shared.txt', { cwd:repoRoot })
+        execSync('git add shared.txt', { cwd: repoRoot })
         execSync('git commit -m "update shared" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test User',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test User',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test User',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test User',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
         // Create second feature from the original base
-        execSync('git checkout HEAD~2', { cwd:repoRoot })
+        execSync('git checkout HEAD~2', { cwd: repoRoot })
         execSync('git checkout -b feature-6b-b', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         writeFileSync(
             join(repoRoot, 'other.txt'),
             'other content'
         )
-        execSync('git add other.txt', { cwd:repoRoot })
+        execSync('git add other.txt', { cwd: repoRoot })
         execSync('git commit -m "add other" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test User',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test User',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test User',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test User',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
         // Go back to base
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
 
         // Merge with stop strategy -- first branch should conflict
         const result = await mergeWave({
             repoRoot,
-            baseBranch:defaultBranch,
-            branches:[
-                { branch:'feature-6b-a', ticketNum:1 },
-                { branch:'feature-6b-b', ticketNum:2 },
+            baseBranch: defaultBranch,
+            branches: [
+                { branch: 'feature-6b-a', ticketNum: 1 },
+                { branch: 'feature-6b-b', ticketNum: 2 },
             ],
-            strategy:'stop',
+            strategy: 'stop',
         })
 
         t.equal(
@@ -704,46 +704,46 @@ test(
 
         // Go back to main and modify shared.txt for second branch
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         writeFileSync(
             join(repoRoot, 'shared.txt'),
             'updated base version'
         )
-        execSync('git add shared.txt', { cwd:repoRoot })
+        execSync('git add shared.txt', { cwd: repoRoot })
         execSync('git commit -m "update shared" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test User',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test User',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test User',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test User',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
         // Create second feature from the original base
-        execSync('git checkout HEAD~2', { cwd:repoRoot })
-        execSync('git checkout -b feature-7b', { cwd:repoRoot })
+        execSync('git checkout HEAD~2', { cwd: repoRoot })
+        execSync('git checkout -b feature-7b', { cwd: repoRoot })
         writeFileSync(
             join(repoRoot, 'shared.txt'),
             'conflicting version'
         )
-        execSync('git add shared.txt', { cwd:repoRoot })
+        execSync('git add shared.txt', { cwd: repoRoot })
         execSync('git commit -m "modify shared" --no-verify', {
-            cwd:repoRoot,
-            env:{
+            cwd: repoRoot,
+            env: {
                 ...process.env,
-                GIT_COMMITTER_NAME:'Test User',
-                GIT_COMMITTER_EMAIL:'test@example.com',
-                GIT_AUTHOR_NAME:'Test User',
-                GIT_AUTHOR_EMAIL:'test@example.com',
+                GIT_COMMITTER_NAME: 'Test User',
+                GIT_COMMITTER_EMAIL: 'test@example.com',
+                GIT_AUTHOR_NAME: 'Test User',
+                GIT_AUTHOR_EMAIL: 'test@example.com',
             },
         })
 
         // Go back to main and create third feature
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         createBranch(
             repoRoot,
@@ -754,19 +754,19 @@ test(
 
         // Go back to base
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
 
         // Merge with respawn strategy
         const result = await mergeWave({
             repoRoot,
-            baseBranch:defaultBranch,
-            branches:[
-                { branch:'feature-7a', ticketNum:1 },
-                { branch:'feature-7b', ticketNum:2 },
-                { branch:'feature-7c', ticketNum:3 },
+            baseBranch: defaultBranch,
+            branches: [
+                { branch: 'feature-7a', ticketNum: 1 },
+                { branch: 'feature-7b', ticketNum: 2 },
+                { branch: 'feature-7c', ticketNum: 3 },
             ],
-            strategy:'respawn',
+            strategy: 'respawn',
         })
 
         t.equal(
@@ -815,7 +815,7 @@ test(
         )
 
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         createBranch(
             repoRoot,
@@ -825,19 +825,19 @@ test(
         )
 
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
 
         const fakeGit = installMergeFailingGit('feature-8b')
         try {
             const result = await mergeWave({
                 repoRoot,
-                baseBranch:defaultBranch,
-                branches:[
-                    { branch:'feature-8a', ticketNum:1 },
-                    { branch:'feature-8b', ticketNum:2 },
+                baseBranch: defaultBranch,
+                branches: [
+                    { branch: 'feature-8a', ticketNum: 1 },
+                    { branch: 'feature-8b', ticketNum: 2 },
                 ],
-                strategy:'respawn',
+                strategy: 'respawn',
             })
 
             t.equal(
@@ -880,7 +880,7 @@ test(
         )
 
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
         createBranch(
             repoRoot,
@@ -890,19 +890,19 @@ test(
         )
 
         execSync('git checkout ' + defaultBranch, {
-            cwd:repoRoot,
+            cwd: repoRoot,
         })
 
         const fakeGit = installMergeFailingGit('feature-9b')
         try {
             const result = await mergeWave({
                 repoRoot,
-                baseBranch:defaultBranch,
-                branches:[
-                    { branch:'feature-9a', ticketNum:1 },
-                    { branch:'feature-9b', ticketNum:2 },
+                baseBranch: defaultBranch,
+                branches: [
+                    { branch: 'feature-9a', ticketNum: 1 },
+                    { branch: 'feature-9b', ticketNum: 2 },
                 ],
-                strategy:'stop',
+                strategy: 'stop',
             })
 
             t.ok(

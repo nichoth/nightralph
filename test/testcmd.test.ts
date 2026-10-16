@@ -17,7 +17,7 @@ test('detectTestCmd - no package.json', t => {
     try {
         t.equal(detectTestCmd(dir), null, 'returns null')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -26,11 +26,11 @@ test('detectTestCmd - package.json without test script', t => {
     try {
         writeFileSync(
             join(dir, 'package.json'),
-            JSON.stringify({ scripts:{ build:'tsc' } })
+            JSON.stringify({ scripts: { build: 'tsc' } })
         )
         t.equal(detectTestCmd(dir), null, 'returns null')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -39,11 +39,11 @@ test('detectTestCmd - package.json with test script', t => {
     try {
         writeFileSync(
             join(dir, 'package.json'),
-            JSON.stringify({ scripts:{ test:'node t.js' } })
+            JSON.stringify({ scripts: { test: 'node t.js' } })
         )
         t.equal(detectTestCmd(dir), 'npm test', 'uses npm test')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -53,7 +53,7 @@ test('detectTestCmd - unparseable package.json', t => {
         writeFileSync(join(dir, 'package.json'), '{ nope')
         t.equal(detectTestCmd(dir), null, 'returns null')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -62,7 +62,7 @@ test('detectInstallCmd - no package.json', t => {
     try {
         t.equal(detectInstallCmd(dir), null, 'returns null')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -77,7 +77,7 @@ test('detectInstallCmd - pnpm lockfile', t => {
             'frozen pnpm install'
         )
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -92,7 +92,7 @@ test('detectInstallCmd - npm lockfile', t => {
             'npm ci'
         )
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -107,7 +107,7 @@ test('detectInstallCmd - no lockfile', t => {
             'npm install that writes no lockfile'
         )
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -116,14 +116,14 @@ test('runTestCmd - exit code and output of a passing ' +
     const dir = tmp()
     try {
         const result = await runTestCmd({
-            cmd:'echo ok',
-            cwd:dir,
-            timeout:10,
+            cmd: 'echo ok',
+            cwd: dir,
+            timeout: 10,
         })
         t.equal(result.exitCode, 0, 'exit 0')
         t.ok(result.output.includes('ok'), 'captures stdout')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -132,9 +132,9 @@ test('runTestCmd - exit code of a failing command',
         const dir = tmp()
         try {
             const result = await runTestCmd({
-                cmd:'echo bad >&2; exit 3',
-                cwd:dir,
-                timeout:10,
+                cmd: 'echo bad >&2; exit 3',
+                cwd: dir,
+                timeout: 10,
             })
             t.equal(result.exitCode, 3, 'exit 3')
             t.ok(
@@ -142,7 +142,7 @@ test('runTestCmd - exit code of a failing command',
                 'captures stderr'
             )
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     })
 
@@ -151,13 +151,13 @@ test('runTestCmd - runs in the given directory', async t => {
     try {
         writeFileSync(join(dir, 'marker.txt'), '')
         const result = await runTestCmd({
-            cmd:'test -f marker.txt',
-            cwd:dir,
-            timeout:10,
+            cmd: 'test -f marker.txt',
+            cwd: dir,
+            timeout: 10,
         })
         t.equal(result.exitCode, 0, 'found the marker')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -167,9 +167,9 @@ test('runTestCmd - kills the command after the timeout',
         try {
             const started = Date.now()
             const result = await runTestCmd({
-                cmd:'sleep 30; echo done',
-                cwd:dir,
-                timeout:1,
+                cmd: 'sleep 30; echo done',
+                cwd: dir,
+                timeout: 1,
             })
             t.ok(result.exitCode !== 0, 'non-zero exit')
             t.ok(
@@ -177,7 +177,7 @@ test('runTestCmd - kills the command after the timeout',
                 'returned well before 30 seconds'
             )
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     })
 
@@ -187,9 +187,9 @@ test('runTestCmd - registers pid in registry during ' +
     try {
         const registry = new Set<number>()
         const result = await runTestCmd({
-            cmd:'sleep 0.5; echo done',
-            cwd:dir,
-            timeout:10,
+            cmd: 'sleep 0.5; echo done',
+            cwd: dir,
+            timeout: 10,
             registry,
         })
         // We can't inspect registry mid-run from outside
@@ -198,7 +198,7 @@ test('runTestCmd - registers pid in registry during ' +
         t.equal(registry.size, 0, 'pid removed after close')
         t.equal(result.exitCode, 0, 'exit 0')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -210,9 +210,9 @@ test('runTestCmd - pid is in registry during execution',
             // Run a command that sleeps so we can check
             // the registry mid-execution.
             const promise = runTestCmd({
-                cmd:'sleep 5',
-                cwd:dir,
-                timeout:10,
+                cmd: 'sleep 5',
+                cwd: dir,
+                timeout: 10,
                 registry,
             })
             // Give the child time to spawn.
@@ -230,7 +230,7 @@ test('runTestCmd - pid is in registry during execution',
                 'pid removed after close'
             )
         } finally {
-            rmSync(dir, { recursive:true, force:true })
+            rmSync(dir, { recursive: true, force: true })
         }
     })
 
@@ -241,15 +241,15 @@ test('runTestCmd - pid removed from registry on spawn ' +
     try {
         const registry = new Set<number>()
         const result = await runTestCmd({
-            cmd:'echo ok',
-            cwd:missing,
-            timeout:10,
+            cmd: 'echo ok',
+            cwd: missing,
+            timeout: 10,
             registry,
         })
         t.equal(registry.size, 0, 'pid removed on error')
         t.ok(result.exitCode !== 0, 'non-zero exit')
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })
 
@@ -258,9 +258,9 @@ test('runTestCmd - cwd does not exist', async t => {
     const missing = join(dir, 'missing')
     try {
         const result = await runTestCmd({
-            cmd:'echo ok',
-            cwd:missing,
-            timeout:10,
+            cmd: 'echo ok',
+            cwd: missing,
+            timeout: 10,
         })
         t.ok(result.exitCode !== 0, 'non-zero exit')
         t.ok(
@@ -268,6 +268,6 @@ test('runTestCmd - cwd does not exist', async t => {
             'output contains the error text'
         )
     } finally {
-        rmSync(dir, { recursive:true, force:true })
+        rmSync(dir, { recursive: true, force: true })
     }
 })

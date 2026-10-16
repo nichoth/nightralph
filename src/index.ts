@@ -56,24 +56,21 @@ const scriptDir = getScriptDir(import.meta.url)
 yargs(hideBin(process.argv))
     .scriptName('nightralph')
     .usage('$0 <command>')
-    .command(
-        'init',
-        'Install bundled skills and doc templates',
-        y => y,
+    .command('init', 'Install bundled skills and doc templates', y => y,
         async () => {
             const tracker = await select<TrackerKind>({
-                message:'Issue tracker format',
-                choices:[
+                message: 'Issue tracker format',
+                choices: [
                     {
-                        name:'Local Markdown',
-                        value:'local' as const,
-                        description:'Issues as .md files in ' +
+                        name: 'Local Markdown',
+                        value: 'local' as const,
+                        description: 'Issues as .md files in ' +
                             '.scratch/',
                     },
                     {
-                        name:'GitHub Issues',
-                        value:'github' as const,
-                        description:'Issues via gh CLI',
+                        name: 'GitHub Issues',
+                        value: 'github' as const,
+                        description: 'Issues via gh CLI',
                     },
                 ],
             })
@@ -91,11 +88,11 @@ yargs(hideBin(process.argv))
             }
 
             setup({
-                bundledSkillsDir:join(scriptDir, 'skills'),
-                docsTemplatesDir:join(
+                bundledSkillsDir: join(scriptDir, 'skills'),
+                docsTemplatesDir: join(
                     scriptDir, 'docs-templates'
                 ),
-                projectDir:process.cwd(),
+                projectDir: process.cwd(),
                 tracker,
             })
         }
@@ -104,8 +101,8 @@ yargs(hideBin(process.argv))
         'graph',
         'Show which features wait on tickets in other features',
         y => y.option('spec', {
-            type:'string',
-            describe:'Feature name (resolves .scratch/<name>/); ' +
+            type: 'string',
+            describe: 'Feature name (resolves .scratch/<name>/); ' +
                 'shows that feature and what it waits on',
         }),
         argv => runGraph(argv.spec)
@@ -115,40 +112,40 @@ yargs(hideBin(process.argv))
         'Execute tickets with the given provider',
         y => y
             .positional('provider', {
-                type:'string',
-                describe:'Agent CLI to spawn ' +
+                type: 'string',
+                describe: 'Agent CLI to spawn ' +
                     '(e.g. claude, codex, pi)',
-                demandOption:true,
+                demandOption: true,
             })
             .positional('turns', {
-                type:'number',
-                describe:'Max agentic turns per ' +
+                type: 'number',
+                describe: 'Max agentic turns per ' +
                     'ticket (shorthand for ' +
                     '--max-turns)',
             })
             .option('m', {
-                alias:'model',
-                type:'string',
-                describe:'Model passed to the agent',
+                alias: 'model',
+                type: 'string',
+                describe: 'Model passed to the agent',
             })
             .option('spec', {
-                type:'string',
-                describe:'Feature name ' +
+                type: 'string',
+                describe: 'Feature name ' +
                     '(resolves .scratch/<name>/)',
             })
             .option('dry-run', {
-                type:'boolean',
-                describe:'Show wave order without running',
-                default:false,
+                type: 'boolean',
+                describe: 'Show wave order without running',
+                default: false,
             })
             .option('timeout', {
-                type:'number',
-                describe:'Kill agent after N seconds',
-                default:3600,
+                type: 'number',
+                describe: 'Kill agent after N seconds',
+                default: 3600,
             })
             .option('test-cmd', {
-                type:'string',
-                describe:'Command run in each worktree ' +
+                type: 'string',
+                describe: 'Command run in each worktree ' +
                     'after the agent exits; non-zero ' +
                     'exit rejects the ticket. Defaults ' +
                     'to "npm test" when package.json has ' +
@@ -156,91 +153,91 @@ yargs(hideBin(process.argv))
                     'has no test gate. "" disables it.',
             })
             .option('install-cmd', {
-                type:'string',
-                describe:'Command run in each fresh ' +
+                type: 'string',
+                describe: 'Command run in each fresh ' +
                     'worktree before the agent starts. ' +
                     'Defaults to the install command ' +
                     'for the project\'s lockfile (npm ci ' +
                     'or pnpm install); "" disables it.',
             })
             .option('X', {
-                type:'boolean',
-                describe:'Stop on merge conflict instead of ' +
+                type: 'boolean',
+                describe: 'Stop on merge conflict instead of ' +
                     're-spawning',
-                default:false,
+                default: false,
             })
             .option('max-turns', {
-                type:'number',
-                describe:'Max agentic turns per ticket ' +
+                type: 'number',
+                describe: 'Max agentic turns per ticket ' +
                     '(forwarded to the agent CLI)',
             })
             .option('effort', {
-                type:'string',
-                choices:ALL_EFFORT_LEVELS,
-                describe:'Starting effort level. ' +
+                type: 'string',
+                choices: ALL_EFFORT_LEVELS,
+                describe: 'Starting effort level. ' +
                     'Omitted = provider default. ' +
                     'Retries step up from here.',
             })
             .option('prefer-subagent', {
-                type:'string',
-                describe:'claude only: model that subagents ' +
+                type: 'string',
+                describe: 'claude only: model that subagents ' +
                     'default to (CLAUDE_CODE_SUBAGENT_MODEL), ' +
                     'plus a prompt rule to hand read-only work ' +
                     'to them. "" disables it.',
             })
             .option('retries', {
-                type:'number',
-                default:DEFAULT_RETRIES,
-                describe:'Extra attempts per ticket ' +
+                type: 'number',
+                default: DEFAULT_RETRIES,
+                describe: 'Extra attempts per ticket ' +
                     'after a failed run, each with a ' +
                     'higher effort level. 0 ' +
                     'disables retries.',
             })
             .option('retry-delay', {
-                type:'number',
-                default:DEFAULT_RETRY_DELAY,
-                describe:'Seconds to wait before the ' +
+                type: 'number',
+                default: DEFAULT_RETRY_DELAY,
+                describe: 'Seconds to wait before the ' +
                     'first retry; doubles each further ' +
                     'retry. 0 disables the wait.',
             })
             .option('concurrency', {
-                type:'number',
-                default:DEFAULT_CONCURRENCY,
-                describe:'Max agents running at once ' +
+                type: 'number',
+                default: DEFAULT_CONCURRENCY,
+                describe: 'Max agents running at once ' +
                     'within a wave.',
             })
             .option('review', {
-                type:'boolean',
-                default:true,
-                describe:'Review the merged work and run one ' +
+                type: 'boolean',
+                default: true,
+                describe: 'Review the merged work and run one ' +
                     'fix pass at the end. --no-review skips it.',
             }),
         async argv => {
             await runExecute({
-                provider:argv.provider as string,
-                model:argv.model as string|undefined,
-                spec:argv.spec as string|undefined,
-                dryRun:argv.dryRun as boolean|undefined,
-                timeout:argv.timeout as
+                provider: argv.provider as string,
+                model: argv.model as string|undefined,
+                spec: argv.spec as string|undefined,
+                dryRun: argv.dryRun as boolean|undefined,
+                timeout: argv.timeout as
                     number|undefined,
-                testCmd:argv.testCmd as string|undefined,
-                installCmd:argv.installCmd as
+                testCmd: argv.testCmd as string|undefined,
+                installCmd: argv.installCmd as
                     string|undefined,
-                stopOnConflict:argv.X as
+                stopOnConflict: argv.X as
                     boolean|undefined,
-                maxTurns:(argv.maxTurns ??
+                maxTurns: (argv.maxTurns ??
                     argv.turns) as number|undefined,
-                effort:argv.effort as
+                effort: argv.effort as
                     EffortLevel|undefined,
-                preferSubagent:argv.preferSubagent as
+                preferSubagent: argv.preferSubagent as
                     string|undefined,
-                retries:argv.retries as
+                retries: argv.retries as
                     number|undefined,
-                retryDelay:argv.retryDelay as
+                retryDelay: argv.retryDelay as
                     number|undefined,
-                concurrency:argv.concurrency as
+                concurrency: argv.concurrency as
                     number|undefined,
-                review:argv.review as boolean|undefined,
+                review: argv.review as boolean|undefined,
             })
         }
     )
@@ -382,7 +379,7 @@ function loadTickets (
             join(process.cwd(), '.scratch'),
             valid.map(s => s.name)
         ) :
-        { tickets:[], warnings:[] }
+        { tickets: [], warnings: [] }
 
     for (const { dir, spec, name } of valid) {
         const tickets = loaded.tickets.filter(t => t.feature === name)
@@ -420,7 +417,7 @@ function loadTickets (
         firstFeatureName,
         firstLogsDir,
         missing,
-        warnings:loaded.warnings,
+        warnings: loaded.warnings,
     }
 }
 
@@ -442,7 +439,7 @@ function checkoutLaunchBranch (plan:IntegrationPlan):void {
     try {
         execFileSync(
             'git', ['checkout', '--quiet', plan.launchBranch],
-            { cwd:getRepoRoot(), stdio:'ignore' }
+            { cwd: getRepoRoot(), stdio: 'ignore' }
         )
     } catch {
         // the caller reports the stop either way
@@ -649,18 +646,18 @@ async function runExecute (argv:{
         if (isolated) {
             const repoName = getRepoName()
             dryRunIsolated({
-                tickets:allTickets,
-                specBody:fallbackSpec,
+                tickets: allTickets,
+                specBody: fallbackSpec,
                 repoName,
                 conflictStrategy,
-                progressPath:progressPaths.values()
+                progressPath: progressPaths.values()
                     .next().value!,
                 testCmd,
                 installCmd,
-                effort:argv.effort,
-                retries:argv.retries,
-                retryDelay:argv.retryDelay,
-                concurrency:argv.concurrency,
+                effort: argv.effort,
+                retries: argv.retries,
+                retryDelay: argv.retryDelay,
+                concurrency: argv.concurrency,
                 preferSubagent,
             })
             console.log(
@@ -692,31 +689,31 @@ async function runExecute (argv:{
 
     if (isolated) {
         result = await runWavesIsolated({
-            tickets:allTickets,
-            specBody:fallbackSpec,
+            tickets: allTickets,
+            specBody: fallbackSpec,
             specBodies,
             agentCmd,
-            model:argv.model ?? null,
+            model: argv.model ?? null,
             timeout,
             logsDir,
-            featureName:firstFeatureName,
+            featureName: firstFeatureName,
             conflictStrategy,
             display,
             testCmd,
             installCmd,
-            maxTurns:argv.maxTurns,
-            effort:argv.effort,
-            retries:argv.retries,
-            retryDelay:argv.retryDelay,
-            concurrency:argv.concurrency,
+            maxTurns: argv.maxTurns,
+            effort: argv.effort,
+            retries: argv.retries,
+            retryDelay: argv.retryDelay,
+            concurrency: argv.concurrency,
             preferSubagent,
             progressPaths,
-            warnings:loaded.warnings,
-            review:argv.review === false ?
+            warnings: loaded.warnings,
+            review: argv.review === false ?
                 undefined :
                 {
-                    reviewPath:reviewPathFor(loaded.issuesDirs),
-                    forkedFrom:plan?.forkedFrom ?? undefined,
+                    reviewPath: reviewPathFor(loaded.issuesDirs),
+                    forkedFrom: plan?.forkedFrom ?? undefined,
                 },
         })
     } else {

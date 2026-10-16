@@ -26,14 +26,14 @@ import type { Ticket } from '../src/orchestrator.js'
 
 function makeTestTicket (overrides?:Partial<Ticket>):Ticket {
     return {
-        num:1,
-        slug:'test-feature',
-        filename:'01-test-feature.md',
-        filepath:'/fake/01-test-feature.md',
-        body:'# Test ticket',
-        status:'ready-for-agent',
-        blockers:[],
-        feature:'',
+        num: 1,
+        slug: 'test-feature',
+        filename: '01-test-feature.md',
+        filepath: '/fake/01-test-feature.md',
+        body: '# Test ticket',
+        status: 'ready-for-agent',
+        blockers: [],
+        feature: '',
         ...overrides,
     }
 }
@@ -42,16 +42,16 @@ function initTempRepo ():string {
     const dir = mkdtempSync(
         join(tmpdir(), 'nightralph-progress-test-')
     )
-    execSync('git init', { cwd:dir })
-    execSync('git config core.hooksPath /dev/null', { cwd:dir })
+    execSync('git init', { cwd: dir })
+    execSync('git config core.hooksPath /dev/null', { cwd: dir })
     execSync('git commit --allow-empty -m "init" --no-verify', {
-        cwd:dir,
-        env:{
+        cwd: dir,
+        env: {
             ...process.env,
-            GIT_COMMITTER_NAME:'Test',
-            GIT_COMMITTER_EMAIL:'test@example.com',
-            GIT_AUTHOR_NAME:'Test',
-            GIT_AUTHOR_EMAIL:'test@example.com',
+            GIT_COMMITTER_NAME: 'Test',
+            GIT_COMMITTER_EMAIL: 'test@example.com',
+            GIT_AUTHOR_NAME: 'Test',
+            GIT_AUTHOR_EMAIL: 'test@example.com',
         },
     })
     return dir
@@ -63,9 +63,9 @@ test(
     'generateProgress creates entries for all tickets, all marked not done',
     t => {
         const tickets = [
-            makeTestTicket({ num:1, slug:'add-auth' }),
-            makeTestTicket({ num:2, slug:'add-api' }),
-            makeTestTicket({ num:3, slug:'add-tests' }),
+            makeTestTicket({ num: 1, slug: 'add-auth' }),
+            makeTestTicket({ num: 2, slug: 'add-api' }),
+            makeTestTicket({ num: 3, slug: 'add-tests' }),
         ]
 
         const data = generateProgress('my-feature', tickets)
@@ -124,8 +124,8 @@ test(
     'renderProgress produces valid markdown with unchecked boxes',
     t => {
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
-            makeTestTicket({ num:2, filename:'02-add-api.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
+            makeTestTicket({ num: 2, filename: '02-add-api.md' }),
         ]
 
         const data = generateProgress('test-feature', tickets)
@@ -161,8 +161,8 @@ test(
     'checkTicket marks the right ticket done and fills metadata',
     t => {
         const tickets = [
-            makeTestTicket({ num:1, slug:'add-auth' }),
-            makeTestTicket({ num:2, slug:'add-api' }),
+            makeTestTicket({ num: 1, slug: 'add-auth' }),
+            makeTestTicket({ num: 2, slug: 'add-api' }),
         ]
 
         const data = generateProgress('feature', tickets)
@@ -170,8 +170,8 @@ test(
         t.equal(beforeCheck, false, 'should start not done')
 
         checkTicket(data, 1, {
-            branch:'nightralph/01-add-auth',
-            exitCode:0,
+            branch: 'nightralph/01-add-auth',
+            exitCode: 0,
         })
 
         t.equal(
@@ -207,13 +207,13 @@ test(
     'renderProgress after checkTicket shows [x] with metadata lines',
     t => {
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
         ]
 
         const data = generateProgress('feature', tickets)
         checkTicket(data, 1, {
-            branch:'nightralph/01-add-auth',
-            exitCode:0,
+            branch: 'nightralph/01-add-auth',
+            exitCode: 0,
         })
 
         const markdown = renderProgress(data)
@@ -243,15 +243,15 @@ test(
     'checkTicket with done:false records exit code and keeps done as false',
     t => {
         const tickets = [
-            makeTestTicket({ num:1, slug:'add-auth' }),
+            makeTestTicket({ num: 1, slug: 'add-auth' }),
         ]
 
         const data = generateProgress('feature', tickets)
 
         checkTicket(data, 1, {
-            branch:'nightralph/01-add-auth',
-            exitCode:1,
-            done:false,
+            branch: 'nightralph/01-add-auth',
+            exitCode: 1,
+            done: false,
         })
 
         t.equal(
@@ -281,14 +281,14 @@ test(
     'renderProgress shows unchecked box with exit code for failed ticket',
     t => {
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
         ]
 
         const data = generateProgress('feature', tickets)
         checkTicket(data, 1, {
-            branch:'nightralph/01-add-auth',
-            exitCode:1,
-            done:false,
+            branch: 'nightralph/01-add-auth',
+            exitCode: 1,
+            done: false,
         })
 
         const markdown = renderProgress(data)
@@ -310,7 +310,7 @@ test(
     'checkTicket for unknown ticket number is a no-op',
     t => {
         const tickets = [
-            makeTestTicket({ num:1, slug:'add-auth' }),
+            makeTestTicket({ num: 1, slug: 'add-auth' }),
         ]
 
         const data = generateProgress('feature', tickets)
@@ -318,8 +318,8 @@ test(
         let error:unknown = null
         try {
             checkTicket(data, 999, {
-                branch:'fake',
-                exitCode:0,
+                branch: 'fake',
+                exitCode: 0,
             })
         } catch (e) {
             error = e
@@ -348,8 +348,8 @@ test(
         const fullProgressPath = join(repoRoot, progressPath)
 
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
-            makeTestTicket({ num:2, filename:'02-add-api.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
+            makeTestTicket({ num: 2, filename: '02-add-api.md' }),
         ]
 
         const data = generateProgress('test-feature', tickets)
@@ -363,7 +363,7 @@ test(
 
         // Verify commit was created
         const logOutput = execSync('git log --oneline', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString()
         t.ok(
             logOutput.includes('Track progress on test-feature'),
@@ -373,7 +373,7 @@ test(
         // Verify file is in the commit
         const showOutput = execSync(
             'git show HEAD:progress.md',
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         ).toString()
         t.ok(
             showOutput.includes('test-feature'),
@@ -391,12 +391,12 @@ test(
 
         const otherFile = join(repoRoot, 'other.txt')
         writeFileSync(otherFile, 'staged content\n')
-        execSync('git add other.txt', { cwd:repoRoot })
+        execSync('git add other.txt', { cwd: repoRoot })
 
         const tickets = [
             makeTestTicket({
-                num:1,
-                filename:'01-add-auth.md',
+                num: 1,
+                filename: '01-add-auth.md',
             }),
         ]
 
@@ -411,7 +411,7 @@ test(
 
         const filesInCommit = execSync(
             'git diff-tree --no-commit-id --name-only -r HEAD',
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         ).toString().trim()
 
         t.ok(
@@ -426,7 +426,7 @@ test(
 
         const stagedAfter = execSync(
             'git diff --cached --name-only',
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         ).toString().trim()
         t.ok(
             stagedAfter.includes('other.txt'),
@@ -444,28 +444,28 @@ test(
         const fullProgressDir = join(repoRoot, progressDir)
         const fullProgressPath = join(repoRoot, progressPath)
 
-        mkdirSync(fullProgressDir, { recursive:true })
+        mkdirSync(fullProgressDir, { recursive: true })
         writeFileSync(
             join(repoRoot, '.gitignore'),
             '.scratch/\n'
         )
-        execSync('git add .gitignore', { cwd:repoRoot })
+        execSync('git add .gitignore', { cwd: repoRoot })
         execSync(
             'git commit -m "add gitignore" --no-verify',
             {
-                cwd:repoRoot,
-                env:{
+                cwd: repoRoot,
+                env: {
                     ...process.env,
-                    GIT_COMMITTER_NAME:'Test',
-                    GIT_COMMITTER_EMAIL:'test@example.com',
-                    GIT_AUTHOR_NAME:'Test',
-                    GIT_AUTHOR_EMAIL:'test@example.com',
+                    GIT_COMMITTER_NAME: 'Test',
+                    GIT_COMMITTER_EMAIL: 'test@example.com',
+                    GIT_AUTHOR_NAME: 'Test',
+                    GIT_AUTHOR_EMAIL: 'test@example.com',
                 },
             }
         )
 
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
         ]
 
         const data = generateProgress('gitignored-feature', tickets)
@@ -489,7 +489,7 @@ test(
         )
 
         const logOutput = execSync('git log --oneline', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString()
         t.ok(
             logOutput.includes(
@@ -508,7 +508,7 @@ test(
         const fullProgressPath = join(repoRoot, progressPath)
 
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
         ]
 
         const data = generateProgress('return-value-feature', tickets)
@@ -532,7 +532,7 @@ test(
         const fullProgressPath = join(repoRoot, progressPath)
 
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
         ]
 
         const data = generateProgress('unchanged-feature', tickets)
@@ -546,7 +546,7 @@ test(
         t.equal(first, true, 'first call should commit')
 
         const countBefore = execSync('git rev-list --count HEAD', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString().trim()
 
         let error:unknown = null
@@ -565,7 +565,7 @@ test(
         t.equal(second, false, 'second call should return false')
 
         const countAfter = execSync('git rev-list --count HEAD', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString().trim()
         t.equal(
             countAfter,
@@ -585,7 +585,7 @@ test(
         const fullLearningsPath = join(repoRoot, learningsPath)
 
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
         ]
 
         const data = generateProgress('multi-file-feature', tickets)
@@ -601,7 +601,7 @@ test(
         // Verify both files are in the commit
         const showOutput = execSync(
             'git show HEAD --name-only --format=',
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         ).toString().trim()
         const files = showOutput.split('\n').filter(f => f.length > 0)
 
@@ -626,7 +626,7 @@ test(
         const fullLearningsPath = join(repoRoot, learningsPath)
 
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
         ]
 
         const data = generateProgress('array-unchanged-feature', tickets)
@@ -641,7 +641,7 @@ test(
         t.equal(first, true, 'first call should return true')
 
         const countBefore = execSync('git rev-list --count HEAD', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString().trim()
 
         const second = await commitProgress(
@@ -652,7 +652,7 @@ test(
         t.equal(second, false, 'second call should return false')
 
         const countAfter = execSync('git rev-list --count HEAD', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString().trim()
         t.equal(
             countAfter,
@@ -671,7 +671,7 @@ test(
         const fullLearningsPath = join(repoRoot, learningsPath)
 
         const data = generateProgress('later-path-feature', [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
         ])
         writeProgress(join(repoRoot, progressPath), data)
         writeFileSync(fullLearningsPath, '# Learnings\n\n')
@@ -681,7 +681,7 @@ test(
             'Initial commit'
         )
         const headBefore = execSync('git rev-parse HEAD', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString().trim()
 
         const updated = `# Learnings\n\n${randomUUID()}\n`
@@ -695,12 +695,12 @@ test(
         t.equal(committed, true, 'reports that it committed')
 
         const headAfter = execSync('git rev-parse HEAD', {
-            cwd:repoRoot,
+            cwd: repoRoot,
         }).toString().trim()
         t.notEqual(headAfter, headBefore, 'HEAD moved')
         t.equal(
             execSync(`git show HEAD:${learningsPath}`, {
-                cwd:repoRoot,
+                cwd: repoRoot,
             }).toString(),
             updated,
             'the new commit holds the changed second file'
@@ -735,13 +735,13 @@ test(
         const progressPath = join(dir, 'progress.md')
 
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
-            makeTestTicket({ num:2, filename:'02-add-api.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
+            makeTestTicket({ num: 2, filename: '02-add-api.md' }),
         ]
         const data = generateProgress('my-feature', tickets)
         checkTicket(data, 1, {
-            branch:'nightralph/01-add-auth',
-            exitCode:0,
+            branch: 'nightralph/01-add-auth',
+            exitCode: 0,
         })
         writeProgress(progressPath, data)
 
@@ -792,14 +792,14 @@ test(
     'mergeProgress carries forward completed tickets from a prior run',
     t => {
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
-            makeTestTicket({ num:2, filename:'02-add-api.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
+            makeTestTicket({ num: 2, filename: '02-add-api.md' }),
         ]
 
         const existing = generateProgress('my-feature', tickets)
         checkTicket(existing, 1, {
-            branch:'nightralph/01-add-auth',
-            exitCode:0,
+            branch: 'nightralph/01-add-auth',
+            exitCode: 0,
         })
 
         const fresh = generateProgress('my-feature', tickets)
@@ -827,7 +827,7 @@ test(
     'mergeProgress leaves fresh data unchanged when no prior run exists',
     t => {
         const tickets = [
-            makeTestTicket({ num:1, filename:'01-add-auth.md' }),
+            makeTestTicket({ num: 1, filename: '01-add-auth.md' }),
         ]
         const fresh = generateProgress('my-feature', tickets)
 
@@ -849,22 +849,22 @@ test(
     t => {
         const tickets:Ticket[] = [
             makeTestTicket({
-                num:1,
-                slug:'setup',
-                filename:'01-setup.md',
-                feature:'auth',
+                num: 1,
+                slug: 'setup',
+                filename: '01-setup.md',
+                feature: 'auth',
             }),
             makeTestTicket({
-                num:2,
-                slug:'login',
-                filename:'02-login.md',
-                feature:'auth',
+                num: 2,
+                slug: 'login',
+                filename: '02-login.md',
+                feature: 'auth',
             }),
             makeTestTicket({
-                num:1,
-                slug:'charge',
-                filename:'01-charge.md',
-                feature:'payments',
+                num: 1,
+                slug: 'charge',
+                filename: '01-charge.md',
+                feature: 'payments',
             }),
         ]
 
@@ -909,30 +909,30 @@ test(
     t => {
         const authData = generateProgress('auth', [
             makeTestTicket({
-                num:1,
-                filename:'01-setup.md',
-                feature:'auth',
+                num: 1,
+                filename: '01-setup.md',
+                feature: 'auth',
             }),
         ])
         const payData = generateProgress('payments', [
             makeTestTicket({
-                num:1,
-                filename:'01-charge.md',
-                feature:'payments',
+                num: 1,
+                filename: '01-charge.md',
+                feature: 'payments',
             }),
         ])
         const fallbackData = generateProgress('fallback', [])
 
         const tracker = createProgressTracker({
-            progressPaths:new Map([
+            progressPaths: new Map([
                 ['auth', '.scratch/auth/progress.md'],
                 ['payments', '.scratch/payments/progress.md'],
             ]),
-            dataMap:new Map([
+            dataMap: new Map([
                 ['auth', authData],
                 ['payments', payData],
             ]),
-            fallbackPath:'.scratch/default/progress.md',
+            fallbackPath: '.scratch/default/progress.md',
             fallbackData,
         })
 

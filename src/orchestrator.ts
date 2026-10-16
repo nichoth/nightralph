@@ -138,7 +138,7 @@ async function removeWorktreeQuietly (
     d:Display
 ):Promise<void> {
     try {
-        await removeWorktree(worktreePath, { force:true })
+        await removeWorktree(worktreePath, { force: true })
     } catch (err) {
         d.log(
             '  Failed to remove worktree ' +
@@ -159,14 +159,14 @@ async function commitTicketFiles (
         await execFileAsync(
             'git',
             ['add', '--force', ...paths],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
         try {
             await execFileAsync(
                 'git',
                 ['diff', '--cached', '--quiet',
                     '--', ...paths],
-                { cwd:repoRoot }
+                { cwd: repoRoot }
             )
             return
         } catch {
@@ -177,7 +177,7 @@ async function commitTicketFiles (
             ['commit', '-m',
                 'nightralph: update ticket checklists',
                 '--', ...paths],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
     } catch (err) {
         d.log(
@@ -194,7 +194,7 @@ export function parseTicketFilename (
 ):{ num:number; slug:string }|null {
     const m = filename.match(TICKET_RE)
     if (!m) return null
-    return { num:Number(m[1]), slug:m[2] }
+    return { num: Number(m[1]), slug: m[2] }
 }
 
 export function parseStatus (body:string):string {
@@ -218,7 +218,7 @@ export function scanTickets (
         .sort((a, b) => a.localeCompare(
             b,
             undefined,
-            { numeric:true, sensitivity:'base' }
+            { numeric: true, sensitivity: 'base' }
         ))
 
     return files.map(filename => {
@@ -226,13 +226,13 @@ export function scanTickets (
         const filepath = join(dir, filename)
         const body = readFileSync(filepath, 'utf8')
         return {
-            num:parsed.num,
-            slug:parsed.slug,
+            num: parsed.num,
+            slug: parsed.slug,
             filename,
             filepath,
             body,
-            status:parseStatus(body),
-            blockers:provisionalRefs(
+            status: parseStatus(body),
+            blockers: provisionalRefs(
                 parseBlockerField(body, knownFeatures).refs,
                 feature
             ),
@@ -415,7 +415,7 @@ function parseChecklistItems (
         }
         items.push({
             start,
-            text:normalizeItemText(text),
+            text: normalizeItemText(text),
         })
     }
     return items
@@ -769,14 +769,14 @@ export function simulateRun (
     tickets:ReadonlyArray<Ticket>
 ):SimulatedRun {
     return {
-        waves:[...simulateWaves(tickets)].map(w => w.ready),
-        neverRun:detectDeadlocks(tickets),
-        deadRefs:findBlockedTickets(tickets, new Set()),
+        waves: [...simulateWaves(tickets)].map(w => w.ready),
+        neverRun: detectDeadlocks(tickets),
+        deadRefs: findBlockedTickets(tickets, new Set()),
     }
 }
 
 const PROVIDER_ARGS:Record<string, string[]> = {
-    claude:[
+    claude: [
         '--print', '--verbose',
         '--output-format', 'stream-json',
         '--dangerously-skip-permissions',
@@ -785,8 +785,8 @@ const PROVIDER_ARGS:Record<string, string[]> = {
     // of claude's --dangerously-skip-permissions, and the
     // workspace-write sandbox would block commits because
     // a worktree's .git link points outside the tree
-    codex:['exec', '--dangerously-bypass-approvals-and-sandbox'],
-    pi:[
+    codex: ['exec', '--dangerously-bypass-approvals-and-sandbox'],
+    pi: [
         '-p', '--verbose',
         '--approve', '--no-session',
         '--mode', 'json',
@@ -918,9 +918,9 @@ export function createPiStreamFormatter (
         if (type === 'toolcall_start') {
             const flushed = flushBuf()
             calls.set(ci, {
-                name:(evt.toolName as
+                name: (evt.toolName as
                     string|undefined) ?? '?',
-                buf:'',
+                buf: '',
             })
             return flushed
         }
@@ -958,7 +958,7 @@ export function createPiStreamFormatter (
         return []
     }
 
-    return { process, flush:flushBuf }
+    return { process, flush: flushBuf }
 }
 
 function writePromptFile (prompt:string):string {
@@ -1111,7 +1111,7 @@ export function spawnAgent (opts:{
 
     const logStream = createWriteStream(
         opts.logPath,
-        { flags:'w' }
+        { flags: 'w' }
     )
     // The subagent model is a default: CLAUDE_CODE_SUBAGENT_MODEL_FORCE
     // is never set, so a model the user exported still wins when the
@@ -1119,13 +1119,13 @@ export function spawnAgent (opts:{
     const env = isClaude && opts.preferSubagent ?
         {
             ...process.env,
-            CLAUDE_CODE_SUBAGENT_MODEL:opts.preferSubagent,
+            CLAUDE_CODE_SUBAGENT_MODEL: opts.preferSubagent,
         } :
         undefined
     const proc = spawn(opts.agentCmd, args, {
-        stdio:['pipe', 'pipe', 'pipe'],
-        cwd:opts.cwd,
-        detached:true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: opts.cwd,
+        detached: true,
         ...(env ? { env } : {}),
     })
 
@@ -1135,7 +1135,7 @@ export function spawnAgent (opts:{
     // it: the first to reach EOF would end the log while the
     // other still has data, which drops that output or crashes
     // the run with ERR_STREAM_WRITE_AFTER_END. finish() ends it.
-    proc.stdout.pipe(logStream, { end:false })
+    proc.stdout.pipe(logStream, { end: false })
 
     const piFormatter = isPi ?
         createPiStreamFormatter() :
@@ -1179,7 +1179,7 @@ export function spawnAgent (opts:{
         return formatStreamObject(obj)
     }
 
-    const rl = createInterface({ input:proc.stdout })
+    const rl = createInterface({ input: proc.stdout })
     rl.on('line', line => {
         if (isClaude) {
             const formatted = formatClaudeLine(line)
@@ -1214,8 +1214,8 @@ export function spawnAgent (opts:{
         }
     })
 
-    proc.stderr.pipe(logStream, { end:false })
-    const rlErr = createInterface({ input:proc.stderr })
+    proc.stderr.pipe(logStream, { end: false })
+    const rlErr = createInterface({ input: proc.stderr })
     rlErr.on('line', line => {
         if (isClaude && !TOOL_USE_RE.test(line)) return
         const output = `${prefix}${line}`
@@ -1336,7 +1336,7 @@ export function spawnAgent (opts:{
             // that reads the log right away sees the message.
             logStream.end(() => {
                 resolve({
-                    exitCode:1,
+                    exitCode: 1,
                     completedItems,
                     timedOut,
                 })
@@ -1442,9 +1442,9 @@ export function dryRunIsolated (opts:{
             renderPrompt(
                 opts.specBody, firstReady[0],
                 {
-                    testCmd:opts.testCmd,
-                    installCmd:opts.installCmd,
-                    preferSubagent:opts.preferSubagent,
+                    testCmd: opts.testCmd,
+                    installCmd: opts.installCmd,
+                    preferSubagent: opts.preferSubagent,
                 }
             )
         )
@@ -1497,10 +1497,10 @@ async function runInstall (opts:{
     registry?:Set<number>
 }):Promise<boolean> {
     const result = await runTestCmd({
-        cmd:opts.installCmd,
-        cwd:opts.worktreePath,
-        timeout:opts.timeout,
-        registry:opts.registry,
+        cmd: opts.installCmd,
+        cwd: opts.worktreePath,
+        timeout: opts.timeout,
+        registry: opts.registry,
     })
     const installLogPath = attemptLogPath(
         opts.logsDir, opts.ticket, opts.attempt ?? 1,
@@ -1538,10 +1538,10 @@ async function runTestGate (opts:{
         return true
     }
     const result = await runTestCmd({
-        cmd:opts.testCmd,
-        cwd:opts.worktreePath,
-        timeout:opts.timeout,
-        registry:opts.registry,
+        cmd: opts.testCmd,
+        cwd: opts.worktreePath,
+        timeout: opts.timeout,
+        registry: opts.registry,
     })
     const testLogPath = attemptLogPath(
         opts.logsDir, opts.ticket, opts.attempt ?? 1,
@@ -1608,13 +1608,13 @@ async function respawnAndRetryMerge (opts:{
     // The base branch may have changed the dependencies.
     if (opts.installCmd) {
         const installed = await runInstall({
-            installCmd:opts.installCmd,
-            ticket:opts.ticket,
-            worktreePath:opts.worktreePath,
-            timeout:opts.timeout,
-            logsDir:opts.logsDir,
+            installCmd: opts.installCmd,
+            ticket: opts.ticket,
+            worktreePath: opts.worktreePath,
+            timeout: opts.timeout,
+            logsDir: opts.logsDir,
             log,
-            registry:runningAgents,
+            registry: runningAgents,
         })
         if (!installed) return false
     }
@@ -1622,8 +1622,8 @@ async function respawnAndRetryMerge (opts:{
     const prompt = renderMergePrompt(
         opts.specBody, opts.ticket,
         {
-            installCmd:opts.installCmd,
-            preferSubagent:opts.preferSubagent,
+            installCmd: opts.installCmd,
+            preferSubagent: opts.preferSubagent,
         }
     )
     const logPath = join(
@@ -1635,15 +1635,15 @@ async function respawnAndRetryMerge (opts:{
     )
     const result = await spawnAgent({
         prompt,
-        agentCmd:opts.agentCmd,
-        model:opts.model,
-        timeout:opts.timeout,
+        agentCmd: opts.agentCmd,
+        model: opts.model,
+        timeout: opts.timeout,
         logPath,
-        cwd:opts.worktreePath,
+        cwd: opts.worktreePath,
         label,
-        maxTurns:opts.maxTurns,
-        preferSubagent:opts.preferSubagent,
-        onLine:opts.onLine,
+        maxTurns: opts.maxTurns,
+        preferSubagent: opts.preferSubagent,
+        onLine: opts.onLine,
     })
     opts.onAgentRun?.(result)
 
@@ -1659,13 +1659,13 @@ async function respawnAndRetryMerge (opts:{
     }
 
     const passed = await runTestGate({
-        testCmd:opts.testCmd,
-        ticket:opts.ticket,
-        worktreePath:opts.worktreePath,
-        timeout:opts.timeout,
-        logsDir:opts.logsDir,
+        testCmd: opts.testCmd,
+        ticket: opts.ticket,
+        worktreePath: opts.worktreePath,
+        timeout: opts.timeout,
+        logsDir: opts.logsDir,
         log,
-        registry:runningAgents,
+        registry: runningAgents,
     })
     if (!passed) {
         log(
@@ -1728,16 +1728,16 @@ export async function runPool<T, R> (
             const i = next++
             try {
                 results[i] = {
-                    status:'fulfilled',
-                    value:await fn(items[i]),
+                    status: 'fulfilled',
+                    value: await fn(items[i]),
                 }
             } catch (reason) {
-                results[i] = { status:'rejected', reason }
+                results[i] = { status: 'rejected', reason }
             }
         }
     }
     const workers = Array.from(
-        { length:Math.min(size, items.length) },
+        { length: Math.min(size, items.length) },
         () => worker()
     )
     await Promise.all(workers)
@@ -1850,8 +1850,8 @@ export function historyFor (
         )),
     ]
     return renderHistory(selectHistory(entries, {
-        key:ticketKey(ticket.feature, ticket.num),
-        blockerKeys:ticket.blockers.map(r => {
+        key: ticketKey(ticket.feature, ticket.num),
+        blockerKeys: ticket.blockers.map(r => {
             return ticketKey(r.feature, r.num)
         }),
     }))
@@ -1890,13 +1890,13 @@ async function runTicketAttempt (
     let worktree:{ worktreePath:string; branchName:string }
     try {
         worktree = await createWorktree({
-            repoRoot:opts.repoRoot,
-            repoName:opts.repoName,
-            baseBranch:opts.baseBranch,
+            repoRoot: opts.repoRoot,
+            repoName: opts.repoName,
+            baseBranch: opts.baseBranch,
             ticket,
         })
     } catch (error) {
-        return { kind:'worktree-error', error }
+        return { kind: 'worktree-error', error }
     }
 
     d.setTicketStatus(
@@ -1904,25 +1904,25 @@ async function runTicketAttempt (
     )
     if (opts.installCmd) {
         const installed = await runInstall({
-            installCmd:opts.installCmd,
+            installCmd: opts.installCmd,
             ticket,
-            worktreePath:worktree.worktreePath,
-            timeout:opts.timeout,
-            logsDir:opts.logsDir,
-            attempt:opts.attempt,
-            log:(msg) => d.log(msg),
-            registry:runningAgents,
+            worktreePath: worktree.worktreePath,
+            timeout: opts.timeout,
+            logsDir: opts.logsDir,
+            attempt: opts.attempt,
+            log: (msg) => d.log(msg),
+            registry: runningAgents,
         })
         if (!installed) {
             await removeWorktreeQuietly(
                 worktree.worktreePath, d
             )
             return {
-                kind:'failed',
-                reason:'install',
-                branchName:worktree.branchName,
-                exitCode:1,
-                completedItems:[],
+                kind: 'failed',
+                reason: 'install',
+                branchName: worktree.branchName,
+                exitCode: 1,
+                completedItems: [],
             }
         }
     }
@@ -1941,32 +1941,32 @@ async function runTicketAttempt (
         opts.specBodies, opts.specBody, ticket.feature
     )
     const agentResult = await spawnAgent({
-        prompt:renderPrompt(
+        prompt: renderPrompt(
             ticketSpec, ticket,
             {
-                testCmd:opts.testCmd,
-                installCmd:opts.installCmd,
+                testCmd: opts.testCmd,
+                installCmd: opts.installCmd,
                 // Rebuilt every attempt, so a retry sees the
                 // entry its previous attempt just wrote
-                history:buildHistory(
+                history: buildHistory(
                     opts.learningsPath, ticket, d
                 ),
-                preferSubagent:opts.preferSubagent,
+                preferSubagent: opts.preferSubagent,
             }
         ),
-        agentCmd:opts.agentCmd,
-        model:opts.model,
-        timeout:opts.timeout,
-        logPath:attemptLogPath(
+        agentCmd: opts.agentCmd,
+        model: opts.model,
+        timeout: opts.timeout,
+        logPath: attemptLogPath(
             opts.logsDir, ticket, opts.attempt, '.log'
         ),
-        cwd:worktree.worktreePath,
-        label:ticket.filename.replace(/\.md$/, ''),
-        maxTurns:opts.maxTurns,
-        effort:opts.effort,
-        preferSubagent:opts.preferSubagent,
-        onStats:opts.onStats,
-        onLine:(line) => d.log(line),
+        cwd: worktree.worktreePath,
+        label: ticket.filename.replace(/\.md$/, ''),
+        maxTurns: opts.maxTurns,
+        effort: opts.effort,
+        preferSubagent: opts.preferSubagent,
+        onStats: opts.onStats,
+        onLine: (line) => d.log(line),
     })
     opts.onAgentRun?.(agentResult)
 
@@ -1982,16 +1982,16 @@ async function runTicketAttempt (
         )
     }
     const agentRun:AgentRunRecord = {
-        exitCode:agentResult.exitCode,
-        completedItems:agentResult.completedItems,
-        timedOut:agentResult.timedOut,
+        exitCode: agentResult.exitCode,
+        completedItems: agentResult.completedItems,
+        timedOut: agentResult.timedOut,
         notes,
         ...(agentResult.subagents === undefined ?
             {} :
-            { subagents:agentResult.subagents }),
+            { subagents: agentResult.subagents }),
         ...(agentResult.costUsd === undefined ?
             {} :
-            { costUsd:agentResult.costUsd }),
+            { costUsd: agentResult.costUsd }),
     }
 
     // A timeout kill is not the agent reporting failure.
@@ -2009,11 +2009,11 @@ async function runTicketAttempt (
         )
         await removeWorktreeQuietly(worktree.worktreePath, d)
         return {
-            kind:'failed',
-            reason:'exit',
-            branchName:worktree.branchName,
-            exitCode:agentResult.exitCode,
-            completedItems:agentResult.completedItems,
+            kind: 'failed',
+            reason: 'exit',
+            branchName: worktree.branchName,
+            exitCode: agentResult.exitCode,
+            completedItems: agentResult.completedItems,
             agentRun,
         }
     }
@@ -2037,42 +2037,42 @@ async function runTicketAttempt (
     )) {
         await removeWorktreeQuietly(worktree.worktreePath, d)
         return {
-            kind:'no-commits',
-            worktreePath:worktree.worktreePath,
-            branchName:worktree.branchName,
+            kind: 'no-commits',
+            worktreePath: worktree.worktreePath,
+            branchName: worktree.branchName,
             agentRun,
         }
     }
 
     const passed = await runTestGate({
-        testCmd:opts.testCmd,
+        testCmd: opts.testCmd,
         ticket,
-        worktreePath:worktree.worktreePath,
-        timeout:opts.timeout,
-        logsDir:opts.logsDir,
-        attempt:opts.attempt,
-        log:(msg) => d.log(msg),
-        registry:runningAgents,
+        worktreePath: worktree.worktreePath,
+        timeout: opts.timeout,
+        logsDir: opts.logsDir,
+        attempt: opts.attempt,
+        log: (msg) => d.log(msg),
+        registry: runningAgents,
     })
     if (!passed) {
         await removeWorktreeQuietly(
             worktree.worktreePath, d
         )
         return {
-            kind:'failed',
-            reason:'tests',
-            branchName:worktree.branchName,
-            exitCode:1,
-            completedItems:agentResult.completedItems,
+            kind: 'failed',
+            reason: 'tests',
+            branchName: worktree.branchName,
+            exitCode: 1,
+            completedItems: agentResult.completedItems,
             agentRun,
         }
     }
 
     return {
-        kind:'ready',
-        worktreePath:worktree.worktreePath,
-        branchName:worktree.branchName,
-        completedItems:agentResult.completedItems,
+        kind: 'ready',
+        worktreePath: worktree.worktreePath,
+        branchName: worktree.branchName,
+        completedItems: agentResult.completedItems,
         agentRun,
     }
 }
@@ -2100,22 +2100,22 @@ function attemptEntry (opts:{
 }):EntryInput|null {
     const { logsDir, ticket, attempt, effort, outcome } = opts
     const base = {
-        key:ticketKey(ticket.feature, ticket.num),
-        label:ticketLabel(ticket),
+        key: ticketKey(ticket.feature, ticket.num),
+        label: ticketLabel(ticket),
         attempt,
-        now:new Date(),
+        now: new Date(),
     }
     const logFor = (ext:string) => {
         const path = attemptLogPath(logsDir, ticket, attempt, ext)
-        return { logName:basename(path), logTail:readLogTail(path) }
+        return { logName: basename(path), logTail: readLogTail(path) }
     }
 
     switch (outcome.kind) {
         case 'ready':
             return {
                 ...base,
-                outcome:'done',
-                run:outcome.agentRun,
+                outcome: 'done',
+                run: outcome.agentRun,
                 effort,
             }
         case 'failed':
@@ -2123,22 +2123,22 @@ function attemptEntry (opts:{
                 case 'exit':
                     return {
                         ...base,
-                        outcome:'exit',
-                        run:outcome.agentRun,
+                        outcome: 'exit',
+                        run: outcome.agentRun,
                         effort,
                     }
                 case 'tests':
                     return {
                         ...base,
-                        outcome:'tests',
-                        run:outcome.agentRun,
+                        outcome: 'tests',
+                        run: outcome.agentRun,
                         effort,
                         ...logFor('.test.log'),
                     }
                 case 'install':
                     return {
                         ...base,
-                        outcome:'install',
+                        outcome: 'install',
                         ...logFor('.install.log'),
                     }
                 default: {
@@ -2149,16 +2149,16 @@ function attemptEntry (opts:{
         case 'no-commits':
             return {
                 ...base,
-                outcome:'no-commits',
-                run:outcome.agentRun,
+                outcome: 'no-commits',
+                run: outcome.agentRun,
                 effort,
             }
         case 'error':
         case 'worktree-error':
             return {
                 ...base,
-                outcome:'error',
-                error:formatErrorMessage(outcome.error),
+                outcome: 'error',
+                error: formatErrorMessage(outcome.error),
             }
         default: {
             const _exhaustive:never = outcome
@@ -2198,26 +2198,26 @@ async function runTicketAttempts (
 ):Promise<TicketOutcome> {
     const { ticket, d } = opts
     // The row shows every attempt's subagents and cost so far.
-    let prior:SubagentStats = { subagents:0 }
+    let prior:SubagentStats = { subagents: 0 }
     const showStats = (stats:SubagentStats):void => {
         d.setTicketStats(ticket.num, ticket.feature, stats)
     }
     return runWithRetries<TicketOutcome>({
-        maxAttempts:opts.retries + 1,
-        retryDelay:opts.retryDelay,
-        agentCmd:opts.agentCmd,
-        effort:opts.effort,
-        label:ticket.filename,
-        log:(msg) => d.log(msg),
+        maxAttempts: opts.retries + 1,
+        retryDelay: opts.retryDelay,
+        agentCmd: opts.agentCmd,
+        effort: opts.effort,
+        label: ticket.filename,
+        log: (msg) => d.log(msg),
     }, async (attempt, effort) => {
         const record = (o:TicketOutcome):void => {
             recordAttempt({
-                learningsPath:opts.learningsPath,
-                logsDir:opts.logsDir,
+                learningsPath: opts.learningsPath,
+                logsDir: opts.logsDir,
                 ticket,
                 attempt,
                 effort,
-                outcome:o,
+                outcome: o,
                 d,
             })
         }
@@ -2227,8 +2227,8 @@ async function runTicketAttempts (
                 ...opts,
                 attempt,
                 effort,
-                onStats:stats => showStats(addStats(prior, stats)),
-                onAgentRun:result => {
+                onStats: stats => showStats(addStats(prior, stats)),
+                onAgentRun: result => {
                     prior = addStats(prior, result)
                     opts.onAgentRun?.(result)
                 },
@@ -2238,9 +2238,9 @@ async function runTicketAttempts (
                 `  ${ticket.filename}: attempt ${attempt} ` +
                 `threw: ${formatErrorMessage(error)}`
             )
-            const errorOutcome:TicketOutcome = { kind:'error', error }
+            const errorOutcome:TicketOutcome = { kind: 'error', error }
             record(errorOutcome)
-            return { result:errorOutcome, stop:true }
+            return { result: errorOutcome, stop: true }
         }
         record(outcome)
         if (outcome.kind === 'ready') {
@@ -2250,11 +2250,11 @@ async function runTicketAttempts (
                 ticket.num, 'awaiting-merge',
                 ticket.feature,
             )
-            return { result:outcome, stop:true }
+            return { result: outcome, stop: true }
         }
         return {
-            result:outcome,
-            stop:outcome.kind === 'worktree-error',
+            result: outcome,
+            stop: outcome.kind === 'worktree-error',
         }
     })
 }
@@ -2578,7 +2578,7 @@ function sessionTickets (
 }
 
 function toRef (t:Ticket):TicketRef {
-    return { num:t.num, filename:t.filename, feature:t.feature }
+    return { num: t.num, filename: t.filename, feature: t.feature }
 }
 
 function reportBlocked (
@@ -2604,8 +2604,8 @@ function reportBlocked (
 
 function runProgress (tickets:ReadonlyArray<Ticket>):RunProgress {
     return {
-        completed:tickets.filter(t => t.status === 'done').length,
-        total:tickets.length,
+        completed: tickets.filter(t => t.status === 'done').length,
+        total: tickets.length,
     }
 }
 
@@ -2628,7 +2628,7 @@ export async function runWaves (
     // claude only: model for subagents; unset = off
     preferSubagent?:string,
 ):Promise<{ allDone:boolean }> {
-    mkdirSync(logsDir, { recursive:true })
+    mkdirSync(logsDir, { recursive: true })
 
     const d = display ?? createDisplay()
     const maxAttempts = (retries ?? DEFAULT_RETRIES) + 1
@@ -2665,9 +2665,9 @@ export async function runWaves (
             waveNum,
             totalWaves,
             ready.map(t => ({
-                num:t.num,
-                filename:t.filename,
-                feature:t.feature,
+                num: t.num,
+                filename: t.filename,
+                feature: t.feature,
             })),
             runProgress(session),
         )
@@ -2685,7 +2685,7 @@ export async function runWaves (
                 d.log(`  Starting ${t.filename}`)
                 // The row shows every attempt's subagents and
                 // cost so far.
-                let prior:SubagentStats = { subagents:0 }
+                let prior:SubagentStats = { subagents: 0 }
                 const onStats = (stats:SubagentStats):void => {
                     d.setTicketStats(
                         t.num, t.feature, addStats(prior, stats)
@@ -2701,13 +2701,13 @@ export async function runWaves (
                     agentCmd,
                     model,
                     timeout,
-                    logPath:attemptLogPath(logsDir, t, 1, '.log'),
+                    logPath: attemptLogPath(logsDir, t, 1, '.log'),
                     label,
                     maxTurns,
-                    effort:level,
+                    effort: level,
                     preferSubagent,
                     onStats,
-                    onLine:(line) => d.log(line),
+                    onLine: (line) => d.log(line),
                 })
                 tally(result)
                 // In-place runs have no worktree or test
@@ -2743,19 +2743,19 @@ export async function runWaves (
                         agentCmd,
                         model,
                         timeout,
-                        logPath:attemptLogPath(
+                        logPath: attemptLogPath(
                             logsDir, t, attempt, '.log'
                         ),
                         label,
                         maxTurns,
-                        effort:level,
+                        effort: level,
                         preferSubagent,
                         onStats,
-                        onLine:(line) => d.log(line),
+                        onLine: (line) => d.log(line),
                     })
                     tally(result)
                 }
-                return { ticket:t, result }
+                return { ticket: t, result }
             }
         )
 
@@ -2823,7 +2823,7 @@ export async function runWaves (
     if (statsLine) d.log(statsLine)
     d.cleanup()
 
-    return { allDone:remaining.length === 0 }
+    return { allDone: remaining.length === 0 }
 }
 
 export async function runWavesIsolated (opts:{
@@ -2865,7 +2865,7 @@ export async function runWavesIsolated (opts:{
         forkedFrom?:string
     }
 }):Promise<{ allDone:boolean; branch:string }> {
-    mkdirSync(opts.logsDir, { recursive:true })
+    mkdirSync(opts.logsDir, { recursive: true })
 
     const d = opts.display ?? createDisplay()
     const retries = opts.retries ?? DEFAULT_RETRIES
@@ -2918,10 +2918,10 @@ export async function runWavesIsolated (opts:{
             )
         }
         tracker = createProgressTracker({
-            progressPaths:opts.progressPaths!,
+            progressPaths: opts.progressPaths!,
             dataMap,
-            fallbackPath:fallbackProgressPath,
-            fallbackData:generateProgress(
+            fallbackPath: fallbackProgressPath,
+            fallbackData: generateProgress(
                 opts.featureName, []
             ),
         })
@@ -2938,10 +2938,10 @@ export async function runWavesIsolated (opts:{
             `nightralph: start ${opts.featureName}`, d,
         )
         tracker = createProgressTracker({
-            progressPaths:new Map(),
-            dataMap:new Map(),
-            fallbackPath:progressPath,
-            fallbackData:progress,
+            progressPaths: new Map(),
+            dataMap: new Map(),
+            fallbackPath: progressPath,
+            fallbackData: progress,
         })
     }
 
@@ -2974,9 +2974,9 @@ export async function runWavesIsolated (opts:{
             waveNum,
             totalWaves,
             ready.map(t => ({
-                num:t.num,
-                filename:t.filename,
-                feature:t.feature,
+                num: t.num,
+                filename: t.filename,
+                feature: t.feature,
             })),
             runProgress(session),
         )
@@ -2987,22 +2987,22 @@ export async function runWavesIsolated (opts:{
         // branch never race each other.
         const settled = await runPool(
             ready, poolSize, t => runTicketAttempts({
-                ticket:t,
+                ticket: t,
                 repoRoot,
                 repoName,
                 baseBranch,
-                specBody:opts.specBody,
-                specBodies:opts.specBodies,
-                agentCmd:opts.agentCmd,
-                model:opts.model,
-                timeout:opts.timeout,
-                logsDir:opts.logsDir,
-                testCmd:opts.testCmd,
-                installCmd:opts.installCmd,
-                maxTurns:opts.maxTurns,
-                effort:opts.effort,
-                preferSubagent:opts.preferSubagent,
-                learningsPath:learningsPathFor(
+                specBody: opts.specBody,
+                specBodies: opts.specBodies,
+                agentCmd: opts.agentCmd,
+                model: opts.model,
+                timeout: opts.timeout,
+                logsDir: opts.logsDir,
+                testCmd: opts.testCmd,
+                installCmd: opts.installCmd,
+                maxTurns: opts.maxTurns,
+                effort: opts.effort,
+                preferSubagent: opts.preferSubagent,
+                learningsPath: learningsPathFor(
                     tracker.pathFor(t.feature)
                 ),
                 retries,
@@ -3040,7 +3040,7 @@ export async function runWavesIsolated (opts:{
         const outcomes:TicketOutcome[] = settled.map(r =>
             r.status === 'fulfilled' ?
                 r.value :
-                { kind:'error', error:r.reason }
+                { kind: 'error', error: r.reason }
         )
 
         let waveCompleted = 0
@@ -3068,9 +3068,9 @@ export async function runWavesIsolated (opts:{
                     `worktree: ${formatErrorMessage(outcome.error)}`
                 )
                 checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
-                    branch:'',
-                    exitCode:-1,
-                    done:false,
+                    branch: '',
+                    exitCode: -1,
+                    done: false,
                 })
                 await saveProgress(
                     repoRoot,
@@ -3093,9 +3093,9 @@ export async function runWavesIsolated (opts:{
                     formatErrorMessage(outcome.error)
                 )
                 checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
-                    branch:outcome.branchName ?? '',
-                    exitCode:-1,
-                    done:false,
+                    branch: outcome.branchName ?? '',
+                    exitCode: -1,
+                    done: false,
                 })
                 await saveProgress(
                     repoRoot,
@@ -3118,9 +3118,9 @@ export async function runWavesIsolated (opts:{
                     'ready-for-agent'
                 )
                 checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
-                    branch:outcome.branchName,
-                    exitCode:0,
-                    done:false,
+                    branch: outcome.branchName,
+                    exitCode: 0,
+                    done: false,
                 })
                 await saveProgress(
                     repoRoot,
@@ -3142,9 +3142,9 @@ export async function runWavesIsolated (opts:{
                     checkItems(ticket, outcome.completedItems)
                 }
                 checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
-                    branch:outcome.branchName,
-                    exitCode:outcome.exitCode,
-                    done:false,
+                    branch: outcome.branchName,
+                    exitCode: outcome.exitCode,
+                    done: false,
                 })
                 await saveProgress(
                     repoRoot,
@@ -3168,9 +3168,9 @@ export async function runWavesIsolated (opts:{
             )
             branchToKey.set(outcome.branchName, key)
             successfulBranches.push({
-                branch:outcome.branchName,
-                ticketNum:ticket.num,
-                worktreePath:outcome.worktreePath,
+                branch: outcome.branchName,
+                ticketNum: ticket.num,
+                worktreePath: outcome.worktreePath,
             })
         }
 
@@ -3188,8 +3188,8 @@ export async function runWavesIsolated (opts:{
             const mergeResult = await mergeWave({
                 repoRoot,
                 baseBranch,
-                branches:successfulBranches,
-                strategy:opts.conflictStrategy,
+                branches: successfulBranches,
+                strategy: opts.conflictStrategy,
             })
 
             const doneThisWave:Ticket[] = []
@@ -3214,8 +3214,8 @@ export async function runWavesIsolated (opts:{
                         `  ${ticket.filename}: done`
                     )
                     checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
-                        branch:branchResult.branch,
-                        exitCode:0,
+                        branch: branchResult.branch,
+                        exitCode: 0,
                     })
                     await saveProgress(
                         repoRoot,
@@ -3246,23 +3246,23 @@ export async function runWavesIsolated (opts:{
                             await respawnAndRetryMerge({
                                 repoRoot,
                                 baseBranch,
-                                branch:branchResult.branch,
+                                branch: branchResult.branch,
                                 ticket,
                                 worktreePath,
-                                specBody:lookupSpec(
+                                specBody: lookupSpec(
                                     opts.specBodies,
                                     opts.specBody,
                                     ticket.feature,
                                 ),
-                                agentCmd:opts.agentCmd,
-                                model:opts.model,
-                                timeout:opts.timeout,
-                                logsDir:opts.logsDir,
-                                testCmd:opts.testCmd,
-                                installCmd:opts.installCmd,
-                                maxTurns:opts.maxTurns,
-                                preferSubagent:opts.preferSubagent,
-                                onLine:(msg) => d.log(msg),
+                                agentCmd: opts.agentCmd,
+                                model: opts.model,
+                                timeout: opts.timeout,
+                                logsDir: opts.logsDir,
+                                testCmd: opts.testCmd,
+                                installCmd: opts.installCmd,
+                                maxTurns: opts.maxTurns,
+                                preferSubagent: opts.preferSubagent,
+                                onLine: (msg) => d.log(msg),
                                 onAgentRun,
                             }) :
                             false
@@ -3281,8 +3281,8 @@ export async function runWavesIsolated (opts:{
                             '(resolved via respawn)'
                         )
                         checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
-                            branch:branchResult.branch,
-                            exitCode:0,
+                            branch: branchResult.branch,
+                            exitCode: 0,
                         })
                         await saveProgress(
                             repoRoot,
@@ -3297,7 +3297,7 @@ export async function runWavesIsolated (opts:{
                             try {
                                 await removeWorktree(
                                     worktreePath,
-                                    { force:true }
+                                    { force: true }
                                 )
                             } catch (err) {
                                 d.log(
@@ -3325,9 +3325,9 @@ export async function runWavesIsolated (opts:{
                             )
                         }
                         checkTicket(tracker.dataFor(ticket.feature), ticket.num, {
-                            branch:branchResult.branch,
-                            exitCode:0,
-                            done:false,
+                            branch: branchResult.branch,
+                            exitCode: 0,
+                            done: false,
                         })
                         // saveProgress below commits this entry
                         try {
@@ -3336,14 +3336,14 @@ export async function runWavesIsolated (opts:{
                                     tracker.pathFor(ticket.feature)
                                 ),
                                 renderEntry({
-                                    outcome:'merge',
-                                    key:ticketKey(
+                                    outcome: 'merge',
+                                    key: ticketKey(
                                         ticket.feature, ticket.num
                                     ),
-                                    label:ticketLabel(ticket),
-                                    attempt:0,
-                                    now:new Date(),
-                                    stderr:branchResult.stderr ?? '',
+                                    label: ticketLabel(ticket),
+                                    attempt: 0,
+                                    now: new Date(),
+                                    stderr: branchResult.stderr ?? '',
                                 })
                             )
                         } catch (err) {
@@ -3383,7 +3383,7 @@ export async function runWavesIsolated (opts:{
                     try {
                         await removeWorktree(
                             sb.worktreePath,
-                            { force:true }
+                            { force: true }
                         )
                     } catch (err) {
                         d.log(
@@ -3432,31 +3432,31 @@ export async function runWavesIsolated (opts:{
                 repoRoot,
                 repoName,
                 baseBranch,
-                reviewPath:opts.review.reviewPath,
-                forkedFrom:opts.review.forkedFrom,
+                reviewPath: opts.review.reviewPath,
+                forkedFrom: opts.review.forkedFrom,
                 launchCommit,
-                specBody:reviewSpecBody(
+                specBody: reviewSpecBody(
                     opts.specBody, opts.specBodies
                 ),
-                agentCmd:opts.agentCmd,
-                model:opts.model,
-                timeout:opts.timeout,
-                logsDir:opts.logsDir,
-                testCmd:opts.testCmd,
-                installCmd:opts.installCmd,
-                maxTurns:opts.maxTurns,
-                effort:opts.effort,
-                preferSubagent:opts.preferSubagent,
+                agentCmd: opts.agentCmd,
+                model: opts.model,
+                timeout: opts.timeout,
+                logsDir: opts.logsDir,
+                testCmd: opts.testCmd,
+                installCmd: opts.installCmd,
+                maxTurns: opts.maxTurns,
+                effort: opts.effort,
+                preferSubagent: opts.preferSubagent,
                 retries,
                 retryDelay,
-                log:(msg) => d.log(msg),
+                log: (msg) => d.log(msg),
             }, {
-                spawnAgent:async spawnOpts => {
+                spawnAgent: async spawnOpts => {
                     const result = await spawnAgent(spawnOpts)
                     onAgentRun(result)
                     return result
                 },
-                registry:runningAgents,
+                registry: runningAgents,
             })
             reviewLine = renderReviewSummary(
                 outcome, relative(repoRoot, opts.review.reviewPath)
@@ -3478,5 +3478,5 @@ export async function runWavesIsolated (opts:{
     d.log(`Work is on ${baseBranch}`)
     d.cleanup()
 
-    return { allDone:remaining.length === 0, branch:baseBranch }
+    return { allDone: remaining.length === 0, branch: baseBranch }
 }

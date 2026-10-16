@@ -10,7 +10,7 @@ export function getRepoRoot ():string {
     const stdout = execFileSync(
         'git',
         ['rev-parse', '--show-toplevel'],
-        { encoding:'utf8' }
+        { encoding: 'utf8' }
     )
     return stdout.trim()
 }
@@ -19,7 +19,7 @@ export function getRepoName ():string {
     const commonDir = execFileSync(
         'git',
         ['rev-parse', '--git-common-dir'],
-        { encoding:'utf8' }
+        { encoding: 'utf8' }
     ).trim()
     return basename(dirname(resolve(commonDir)))
 }
@@ -28,7 +28,7 @@ export function getCurrentBranch (cwd?:string):string {
     const stdout = execFileSync(
         'git',
         ['rev-parse', '--abbrev-ref', 'HEAD'],
-        { cwd, encoding:'utf8' }
+        { cwd, encoding: 'utf8' }
     )
     return stdout.trim()
 }
@@ -41,7 +41,7 @@ export function localBranchExists (
         execFileSync(
             'git',
             ['show-ref', '--verify', '--quiet', `refs/heads/${name}`],
-            { cwd:repoRoot, stdio:'ignore' }
+            { cwd: repoRoot, stdio: 'ignore' }
         )
         return true
     } catch {
@@ -60,9 +60,9 @@ export function getDefaultBranch (repoRoot:string):string|null {
                 'refs/remotes/origin/HEAD',
             ],
             {
-                cwd:repoRoot,
-                encoding:'utf8',
-                stdio:['ignore', 'pipe', 'ignore'],
+                cwd: repoRoot,
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore'],
             }
         ).trim()
         if (ref) return ref.replace(/^origin\//, '')
@@ -117,7 +117,7 @@ export type IntegrationPlan = {
 }
 
 function gitText (cwd:string, args:string[]):string {
-    return execFileSync('git', args, { cwd, encoding:'utf8' }).trim()
+    return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
 }
 
 // Enters the integration branch when the run was launched from
@@ -137,13 +137,13 @@ export function prepareIntegrationBranch (
         const onIntegration = defaultBranch !== null &&
             current === integrationBranchName(features)
         return {
-            branch:current,
-            created:false,
-            resumed:false,
-            behind:0,
-            fastForwarded:false,
-            launchBranch:current,
-            forkedFrom:onIntegration ? defaultBranch : null,
+            branch: current,
+            created: false,
+            resumed: false,
+            behind: 0,
+            fastForwarded: false,
+            launchBranch: current,
+            forkedFrom: onIntegration ? defaultBranch : null,
         }
     }
     if (isDirty(repoRoot)) {
@@ -166,24 +166,24 @@ export function prepareIntegrationBranch (
             behind = 0
         }
         return {
-            branch:name,
-            created:false,
-            resumed:true,
+            branch: name,
+            created: false,
+            resumed: true,
             behind,
             fastForwarded,
-            launchBranch:current,
-            forkedFrom:defaultBranch,
+            launchBranch: current,
+            forkedFrom: defaultBranch,
         }
     }
     gitText(repoRoot, ['checkout', '--quiet', '-b', name])
     return {
-        branch:name,
-        created:true,
-        resumed:false,
-        behind:0,
-        fastForwarded:false,
-        launchBranch:current,
-        forkedFrom:defaultBranch,
+        branch: name,
+        created: true,
+        resumed: false,
+        behind: 0,
+        fastForwarded: false,
+        launchBranch: current,
+        forkedFrom: defaultBranch,
     }
 }
 
@@ -210,7 +210,7 @@ async function branchExists (
         await execFileAsync(
             'git',
             ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
         return true
     } catch {
@@ -258,7 +258,7 @@ async function addWorktreeNow (opts:{
             await execFileAsync(
                 'git',
                 ['worktree', 'remove', '--force', worktreePath],
-                { cwd:repoRoot }
+                { cwd: repoRoot }
             )
         } catch {
             // directory may not be a registered worktree anymore;
@@ -271,7 +271,7 @@ async function addWorktreeNow (opts:{
         await execFileAsync(
             'git',
             ['worktree', 'prune'],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
     } catch {
         // best-effort cleanup of stale worktree metadata
@@ -281,7 +281,7 @@ async function addWorktreeNow (opts:{
         await execFileAsync(
             'git',
             ['branch', '-D', branchName],
-            { cwd:repoRoot }
+            { cwd: repoRoot }
         )
     }
 
@@ -295,7 +295,7 @@ async function addWorktreeNow (opts:{
             worktreePath,
             baseBranch,
         ],
-        { cwd:repoRoot }
+        { cwd: repoRoot }
     )
 
     return { worktreePath, branchName }
@@ -327,9 +327,9 @@ export function createWorktree (
         ''
     return enqueue(() => addWorktreeNow({
         repoRoot,
-        baseBranch:opts.baseBranch,
-        branchName:buildBranchName(repoName, ticket),
-        worktreePath:join(
+        baseBranch: opts.baseBranch,
+        branchName: buildBranchName(repoName, ticket),
+        worktreePath: join(
             repoRoot,
             '..',
             `${repoName}.${prefix}${num}-${ticket.slug}`
@@ -351,9 +351,9 @@ export function createNamedWorktree (
     const { repoRoot, repoName, name } = opts
     return enqueue(() => addWorktreeNow({
         repoRoot,
-        baseBranch:opts.baseBranch,
-        branchName:`${repoName}--${name}`,
-        worktreePath:join(repoRoot, '..', `${repoName}.${name}`),
+        baseBranch: opts.baseBranch,
+        branchName: `${repoName}--${name}`,
+        worktreePath: join(repoRoot, '..', `${repoName}.${name}`),
     }))
 }
 
@@ -372,7 +372,7 @@ export function deleteBranch (
     return enqueue(async () => {
         if (!(await branchExists(repoRoot, name))) return
         await execFileAsync(
-            'git', ['branch', '-D', name], { cwd:repoRoot }
+            'git', ['branch', '-D', name], { cwd: repoRoot }
         )
     })
 }
@@ -385,7 +385,7 @@ export function hasNewCommits (
     const stdout = execFileSync(
         'git',
         ['rev-list', '--count', `${base}..${branch}`],
-        { cwd:repoRoot, encoding:'utf8' }
+        { cwd: repoRoot, encoding: 'utf8' }
     )
     return Number(stdout.trim()) > 0
 }
@@ -417,7 +417,7 @@ export function isAncestor (
         execFileSync(
             'git',
             ['merge-base', '--is-ancestor', ancestor, of],
-            { cwd, stdio:'ignore' }
+            { cwd, stdio: 'ignore' }
         )
         return true
     } catch {
@@ -439,7 +439,7 @@ export function hasChangesOutside (
                 'diff', '--quiet', `${from}..${to}`,
                 '--', '.', `:(exclude)${excludeDir}`,
             ],
-            { cwd, stdio:'ignore' }
+            { cwd, stdio: 'ignore' }
         )
         return false
     } catch {
@@ -451,7 +451,7 @@ export function isDirty (cwd:string):boolean {
     const stdout = execFileSync(
         'git',
         ['status', '--porcelain'],
-        { cwd, encoding:'utf8' }
+        { cwd, encoding: 'utf8' }
     )
     return stdout.trim().length > 0
 }
@@ -489,7 +489,7 @@ export async function listWorktrees (
     const { stdout } = await execFileAsync(
         'git',
         ['worktree', 'list', '--porcelain'],
-        { cwd:repoRoot }
+        { cwd: repoRoot }
     )
     return stdout
         .trim()

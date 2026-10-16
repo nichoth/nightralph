@@ -20,7 +20,7 @@ function makeScratch ():{
 } {
     const root = mkdtempSync(join(tmpdir(), 'nightralph-graph-'))
     const scratchDir = join(root, '.scratch')
-    mkdirSync(scratchDir, { recursive:true })
+    mkdirSync(scratchDir, { recursive: true })
     const load:LoadFn = names => loadSelection(scratchDir, names)
     return { root, scratchDir, load }
 }
@@ -32,7 +32,7 @@ function addFeature (
 ):void {
     const featureDir = join(scratchDir, name)
     const issuesDir = join(featureDir, 'issues')
-    mkdirSync(issuesDir, { recursive:true })
+    mkdirSync(issuesDir, { recursive: true })
     writeFileSync(join(featureDir, 'spec.md'), `# ${name}`)
     for (const [num, status, blockedBy] of tickets) {
         const nn = String(num).padStart(2, '0')
@@ -112,7 +112,7 @@ test('AC3.1: rebase.blog suggests both features, 6 of 6 runnable', t => {
             'analytics has no suggestion'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -135,7 +135,7 @@ test('AC3.2: a transitive chain is suggested in full', t => {
             'edges include the beta -> gamma hop'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -155,7 +155,7 @@ test('AC3.3: an upstream ticket the target does not need is ignored', t => {
             'no edge starts in beta'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -169,16 +169,16 @@ test('AC3.4: a needed ready-for-human upstream is a dead end', t => {
         t.equal(s.runnable, 0, 'alpha/01 cannot run')
         t.equal(s.total, 1, 'one target ticket')
         t.deepEqual(s.deadEnds, [{
-            from:{ feature:'alpha', num:1 },
-            ref:{
-                feature:'beta',
-                num:4,
-                where:'run',
-                status:'ready-for-human',
+            from: { feature: 'alpha', num: 1 },
+            ref: {
+                feature: 'beta',
+                num: 4,
+                where: 'run',
+                status: 'ready-for-human',
             },
         }], 'the human-gated ref is named')
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -204,7 +204,7 @@ test('AC3.5: a missing ref never grows the selection', t => {
             'alpha/02 missing ref is a dead end'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -233,7 +233,7 @@ test('AC3.5: a lone missing ref does not widen the selection', t => {
             'beta has no suggestion'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -260,7 +260,7 @@ test('buildGraph loads each feature set once, names sorted', t => {
             'every load call gets its names sorted'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -275,7 +275,7 @@ test('AC3.6: mutually waiting features terminate as deadlocked', t => {
         t.deepEqual(s.deadEnds, [], 'a cycle is not a dead ref')
         t.deepEqual(s.cycles, ['alpha/01', 'beta/01'], 'both in the cycle')
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -353,7 +353,7 @@ test('AC2.2 and AC3.1: rebase.blog ref lines and Run together', t => {
             'a later Run together line names both features'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -371,7 +371,7 @@ test('AC2.3: upstream groups inside a block are ordered', t => {
         t.ok(first >= 0, 'alpha/01 line names beta/01')
         t.ok(second > first, 'the beta/01 to gamma/01 line comes after')
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -414,7 +414,7 @@ test('AC2.3 and AC2.10: groups put the target first, then sort', t => {
             'the other groups sort by from-feature name'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -434,7 +434,7 @@ test('AC3.1 (n > 2): the picker hint names all three features', t => {
         t.ok(hint >= 0, 'one line names all three and the count')
         t.ok(!lines[hint].includes('/'), 'the hint line names no ticket')
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -465,7 +465,7 @@ test('AC2.9: only the target and its direct needs are shown', t => {
             'no line pairs alpha/01 with alpha/02'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -509,7 +509,7 @@ test('AC2.10: order is by name and number, and output is stable', t => {
 
         t.equal(twice.join('\n'), once.join('\n'), 'rendering twice matches')
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -527,7 +527,7 @@ test('AC2.11: unblocked features share one line', t => {
             'that line also names newsletter-audit'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 
     const fresh = makeScratch()
@@ -542,7 +542,7 @@ test('AC2.11: unblocked features share one line', t => {
             'that line names both features'
         )
     } finally {
-        rmSync(fresh.root, { recursive:true, force:true })
+        rmSync(fresh.root, { recursive: true, force: true })
     }
 })
 
@@ -565,7 +565,7 @@ test('AC2.11: a misspelt feature warning is shown once, last', t => {
             'and it is on the last line'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -590,7 +590,7 @@ test('AC3.4: a human-gated upstream is shown after the count', t => {
             'a line names the human-gated ref after the count'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -608,7 +608,7 @@ test('AC3.6: a cycle is shown after the count', t => {
             'a line names both cycle tickets after the count'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -656,7 +656,7 @@ test('a Run together hint names a feature the picker cannot list', t => {
             'the Run together line comes after the block header'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -681,7 +681,7 @@ test('a Run together hint with every feature pickable is today\'s hint',
                 'an omitted pickable set gives the same hint'
             )
         } finally {
-            rmSync(root, { recursive:true, force:true })
+            rmSync(root, { recursive: true, force: true })
         }
     }
 )
@@ -704,7 +704,7 @@ test('a Run together hint names several unlisted features in order', t => {
             'the unlisted features follow the features order'
         )
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })
 
@@ -729,6 +729,6 @@ test('AC3.5: a missing ref is shown with no Run together line', t => {
         )
         t.equal(lineIndex(lines, ['picker']), -1, 'no picker line')
     } finally {
-        rmSync(root, { recursive:true, force:true })
+        rmSync(root, { recursive: true, force: true })
     }
 })

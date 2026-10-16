@@ -18,35 +18,35 @@ const FEAT = 'feat'
 
 const GIT_ENV = {
     ...process.env,
-    GIT_COMMITTER_NAME:'Test',
-    GIT_COMMITTER_EMAIL:'test@example.com',
-    GIT_AUTHOR_NAME:'Test',
-    GIT_AUTHOR_EMAIL:'test@example.com',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@example.com',
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@example.com',
 }
 
 function git (cwd:string, args:string[]):string {
     return execFileSync('git', args, {
-        cwd, env:GIT_ENV, encoding:'utf8',
+        cwd, env: GIT_ENV, encoding: 'utf8',
     }).trim()
 }
 
 function quietDisplay ():Display {
     const noop = ():void => {}
     return {
-        startRun:noop,
-        startWave:noop,
-        setTicketStatus:noop,
-        setBlocked:noop,
-        setTicketStats:noop,
-        log:noop,
-        cleanup:noop,
+        startRun: noop,
+        startWave: noop,
+        setTicketStatus: noop,
+        setBlocked: noop,
+        setTicketStats: noop,
+        log: noop,
+        cleanup: noop,
     }
 }
 
 type Roles = { reviewer:number; fixer:number; ticket:number }
 
 function countRoles (recordDir:string):Roles {
-    const counts:Roles = { reviewer:0, fixer:0, ticket:0 }
+    const counts:Roles = { reviewer: 0, fixer: 0, ticket: 0 }
     for (const f of readdirSync(recordDir)) {
         const { role } = JSON.parse(
             readFileSync(join(recordDir, f), 'utf8')
@@ -59,7 +59,7 @@ function countRoles (recordDir:string):Roles {
 // The prompts each role received, from the mock's records
 function promptsByRole (recordDir:string):Record<keyof Roles, string[]> {
     const prompts:Record<keyof Roles, string[]> = {
-        reviewer:[], fixer:[], ticket:[],
+        reviewer: [], fixer: [], ticket: [],
     }
     for (const f of readdirSync(recordDir)) {
         const { role, prompt } = JSON.parse(
@@ -112,14 +112,14 @@ async function withHarness (
     const originalCwd = process.cwd()
     try {
         execFileSync('git', ['init', `--template=${templateDir}`],
-            { cwd:projectDir, stdio:'ignore' })
+            { cwd: projectDir, stdio: 'ignore' })
         execSync('git config core.excludesFile /dev/null',
-            { cwd:projectDir })
+            { cwd: projectDir })
         execSync('git config core.hooksPath /dev/null',
-            { cwd:projectDir })
+            { cwd: projectDir })
         const base = join(projectDir, '.scratch', FEAT)
         const issuesDir = join(base, 'issues')
-        mkdirSync(issuesDir, { recursive:true })
+        mkdirSync(issuesDir, { recursive: true })
         writeFileSync(join(projectDir, '.gitignore'),
             '.scratch/*/logs/\n')
         writeFileSync(join(issuesDir, '01-only.md'),
@@ -140,30 +140,30 @@ async function withHarness (
             projectDir,
             recordDir,
             reviewPath,
-            run:(
+            run: (
                 review = true,
                 display = quietDisplay(),
                 forkedFrom,
                 extra = {}
             ) => {
                 return runWavesIsolated({
-                    tickets:scanTickets(issuesDir, FEAT),
-                    specBody:'SPEC',
-                    specBodies:new Map([[FEAT, 'SPEC']]),
-                    progressPaths:new Map([
+                    tickets: scanTickets(issuesDir, FEAT),
+                    specBody: 'SPEC',
+                    specBodies: new Map([[FEAT, 'SPEC']]),
+                    progressPaths: new Map([
                         [FEAT, join(base, 'progress.md')],
                     ]),
-                    agentCmd:MOCK,
-                    model:null,
-                    timeout:30,
-                    logsDir:join(base, 'logs'),
-                    featureName:FEAT,
-                    conflictStrategy:'respawn',
+                    agentCmd: MOCK,
+                    model: null,
+                    timeout: 30,
+                    logsDir: join(base, 'logs'),
+                    featureName: FEAT,
+                    conflictStrategy: 'respawn',
                     display,
-                    testCmd:'test ! -f broken.txt',
-                    retries:0,
-                    retryDelay:0,
-                    review:review ? { reviewPath, forkedFrom } : undefined,
+                    testCmd: 'test ! -f broken.txt',
+                    retries: 0,
+                    retryDelay: 0,
+                    review: review ? { reviewPath, forkedFrom } : undefined,
                     ...extra,
                 })
             },
@@ -177,9 +177,9 @@ async function withHarness (
                 process.env[k] = saved[k]
             }
         }
-        rmSync(projectDir, { recursive:true, force:true })
-        rmSync(recordDir, { recursive:true, force:true })
-        rmSync(templateDir, { recursive:true, force:true })
+        rmSync(projectDir, { recursive: true, force: true })
+        rmSync(recordDir, { recursive: true, force: true })
+        rmSync(templateDir, { recursive: true, force: true })
     }
 }
 
@@ -193,7 +193,7 @@ function committedEntries (projectDir:string, reviewPath:string) {
 test('review pass - AC6.1 AC7.1 a fix merges and the log is ' +
     'committed', async t => {
     await withHarness({
-        MOCK_REVIEW:'findings', MOCK_FIX:'pass', MOCK_TICKET:'pass',
+        MOCK_REVIEW: 'findings', MOCK_FIX: 'pass', MOCK_TICKET: 'pass',
     }, async h => {
         const result = await h.run()
         t.ok(result.allDone, 'tickets done')
@@ -201,7 +201,7 @@ test('review pass - AC6.1 AC7.1 a fix merges and the log is ' +
             'the run leaves a clean tree')
         t.equal(result.branch, 'main', 'AC2.4 reports the branch')
         t.deepEqual(countRoles(h.recordDir),
-            { reviewer:1, fixer:1, ticket:1 }, 'one of each')
+            { reviewer: 1, fixer: 1, ticket: 1 }, 'one of each')
         const entries = committedEntries(h.projectDir, h.reviewPath)
         t.equal(entries.length, 1, 'one committed entry')
         t.equal(entries[0].status, 'fixed', 'fixed')
@@ -218,19 +218,19 @@ test('review pass - prefer-subagent AC1.6 reaches the reviewer ' +
     const envLog = join(logDir, 'env.log')
     try {
         await withHarness({
-            MOCK_REVIEW:'findings',
-            MOCK_FIX:'pass',
-            MOCK_TICKET:'pass',
-            FAKE_CLAUDE_DELEGATE:MOCK,
-            FAKE_CLAUDE_ENV_LOG:envLog,
+            MOCK_REVIEW: 'findings',
+            MOCK_FIX: 'pass',
+            MOCK_TICKET: 'pass',
+            FAKE_CLAUDE_DELEGATE: MOCK,
+            FAKE_CLAUDE_ENV_LOG: envLog,
         }, async h => {
             const result = await h.run(true, quietDisplay(), undefined, {
-                agentCmd:FAKE_CLAUDE,
-                preferSubagent:'haiku',
+                agentCmd: FAKE_CLAUDE,
+                preferSubagent: 'haiku',
             })
             t.ok(result.allDone, 'tickets done')
             t.deepEqual(countRoles(h.recordDir),
-                { reviewer:1, fixer:1, ticket:1 }, 'one of each')
+                { reviewer: 1, fixer: 1, ticket: 1 }, 'one of each')
             const values = readFileSync(envLog, 'utf8')
                 .split('\n')
                 .filter(line => line !== '')
@@ -258,14 +258,14 @@ test('review pass - prefer-subagent AC1.6 reaches the reviewer ' +
                 'the ticket prompt carries the full rule')
         })
     } finally {
-        rmSync(logDir, { recursive:true, force:true })
+        rmSync(logDir, { recursive: true, force: true })
     }
 })
 
 test('review pass - AC6.2 AC6.3 a red fix merges nothing but ' +
     'the marker advances', async t => {
     await withHarness({
-        MOCK_REVIEW:'findings', MOCK_FIX:'break', MOCK_TICKET:'pass',
+        MOCK_REVIEW: 'findings', MOCK_FIX: 'break', MOCK_TICKET: 'pass',
     }, async h => {
         await h.run()
         t.ok(!existsSync(join(h.projectDir, 'broken.txt')),
@@ -283,7 +283,7 @@ test('review pass - AC6.2 AC6.3 a red fix merges nothing but ' +
 test('review pass - AC4.4 bookkeeping-only changes skip the ' +
     'review', async t => {
     await withHarness({
-        MOCK_REVIEW:'findings', MOCK_FIX:'pass', MOCK_TICKET:'fail',
+        MOCK_REVIEW: 'findings', MOCK_FIX: 'pass', MOCK_TICKET: 'fail',
     }, async h => {
         await h.run()
         t.equal(countRoles(h.recordDir).reviewer, 0, 'no reviewer')
@@ -294,7 +294,7 @@ test('review pass - AC4.4 bookkeeping-only changes skip the ' +
 test('review pass - a clean review, then nothing new to review',
     async t => {
         await withHarness({
-            MOCK_REVIEW:'clean', MOCK_FIX:'pass', MOCK_TICKET:'pass',
+            MOCK_REVIEW: 'clean', MOCK_FIX: 'pass', MOCK_TICKET: 'pass',
         }, async h => {
             await h.run()
             const counts = countRoles(h.recordDir)
@@ -313,17 +313,17 @@ test('review pass - a clean review, then nothing new to review',
 test('review pass - AC7.2 a broken review does not change the ' +
     'result', async t => {
     await withHarness({
-        MOCK_REVIEW:'clean', MOCK_FIX:'pass', MOCK_TICKET:'pass',
+        MOCK_REVIEW: 'clean', MOCK_FIX: 'pass', MOCK_TICKET: 'pass',
     }, async h => {
         // A directory where the log file should be: appending throws
-        mkdirSync(h.reviewPath, { recursive:true })
+        mkdirSync(h.reviewPath, { recursive: true })
         writeFileSync(join(h.reviewPath, 'keep'), '')
         git(h.projectDir, ['add', '-A'])
         git(h.projectDir, ['commit', '-m', 'block the log'])
         const logs:string[] = []
         const display = {
             ...quietDisplay(),
-            log:(msg:string) => { logs.push(msg) },
+            log: (msg:string) => { logs.push(msg) },
         }
         const result = await h.run(true, display)
         t.ok(result.allDone, 'still all done')
@@ -335,9 +335,9 @@ test('review pass - AC7.2 a broken review does not change the ' +
 test('review pass - AC7.3 no review option, no reviewer',
     async t => {
         await withHarness({
-            MOCK_REVIEW:'findings',
-            MOCK_FIX:'pass',
-            MOCK_TICKET:'pass',
+            MOCK_REVIEW: 'findings',
+            MOCK_FIX: 'pass',
+            MOCK_TICKET: 'pass',
         }, async h => {
             await h.run(false)
             t.equal(countRoles(h.recordDir).reviewer, 0, 'no reviewer')
@@ -347,7 +347,7 @@ test('review pass - AC7.3 no review option, no reviewer',
 test('review pass - a reviewer that writes no findings file is ' +
     'review-failed and is retried next run', async t => {
     await withHarness({
-        MOCK_REVIEW:'none', MOCK_FIX:'pass', MOCK_TICKET:'pass',
+        MOCK_REVIEW: 'none', MOCK_FIX: 'pass', MOCK_TICKET: 'pass',
     }, async h => {
         // As on an integration branch: the fork point is the floor
         git(h.projectDir, ['checkout', '-b', 'nightralph--feat'])
@@ -371,47 +371,47 @@ test('review pass - prefer-subagent AC6.4 the stats tally counts ' +
     const streamFile = join(dataDir, 'stream.jsonl')
     writeFileSync(streamFile, [
         {
-            type:'assistant',
-            message:{
-                content:[{
-                    type:'tool_use', id:'toolu_1', name:'Agent', input:{},
+            type: 'assistant',
+            message: {
+                content: [{
+                    type: 'tool_use', id: 'toolu_1', name: 'Agent', input: {},
                 }],
             },
         },
         {
-            type:'result',
-            subtype:'success',
-            total_cost_usd:0.25,
-            subagent_stats:{ spawned:1 },
+            type: 'result',
+            subtype: 'success',
+            total_cost_usd: 0.25,
+            subagent_stats: { spawned: 1 },
         },
     ].map(line => JSON.stringify(line)).join('\n') + '\n')
     try {
         await withHarness({
-            MOCK_REVIEW:'findings',
-            MOCK_FIX:'pass',
-            MOCK_TICKET:'pass',
-            FAKE_CLAUDE_DELEGATE:MOCK,
-            FAKE_CLAUDE_STREAM:streamFile,
+            MOCK_REVIEW: 'findings',
+            MOCK_FIX: 'pass',
+            MOCK_TICKET: 'pass',
+            FAKE_CLAUDE_DELEGATE: MOCK,
+            FAKE_CLAUDE_STREAM: streamFile,
         }, async h => {
             const logs:string[] = []
             const display = {
                 ...quietDisplay(),
-                log:(m:string) => { logs.push(m) },
+                log: (m:string) => { logs.push(m) },
             }
             const result = await h.run(true, display, undefined, {
-                agentCmd:FAKE_CLAUDE,
+                agentCmd: FAKE_CLAUDE,
             })
             t.ok(result.allDone, 'tickets done')
             t.deepEqual(countRoles(h.recordDir),
-                { reviewer:1, fixer:1, ticket:1 }, 'one of each')
+                { reviewer: 1, fixer: 1, ticket: 1 }, 'one of each')
             const expected = renderRunStats({
-                agentRuns:3, withCost:3, subagents:3, costUsd:0.75,
+                agentRuns: 3, withCost: 3, subagents: 3, costUsd: 0.75,
             })
             t.ok(expected !== null, 'a stats line is expected')
             t.ok(logs.includes(expected as string),
                 'the ticket, reviewer and fixer are tallied')
         })
     } finally {
-        rmSync(dataDir, { recursive:true, force:true })
+        rmSync(dataDir, { recursive: true, force: true })
     }
 })

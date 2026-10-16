@@ -37,7 +37,7 @@ export function findFeatureDirs (cwd:string):{
     const scratchDir = join(cwd, '.scratch')
     if (!existsSync(scratchDir)) return []
     const entries = readdirSync(
-        scratchDir, { withFileTypes:true }
+        scratchDir, { withFileTypes: true }
     )
     const results:{ name:string; dir:string; spec:string }[] = []
     for (const entry of entries) {
@@ -54,9 +54,9 @@ export function findFeatureDirs (cwd:string):{
         )
         if (isSpecComplete(progressFile)) continue
         results.push({
-            name:entry.name,
-            dir:issuesDir,
-            spec:specFile,
+            name: entry.name,
+            dir: issuesDir,
+            spec: specFile,
         })
     }
     results.sort((a, b) => a.name.localeCompare(b.name))
@@ -76,7 +76,7 @@ function knownFeatureNames (scratchDir:string):Set<string> {
     const names = new Set<string>()
     const walk = (rel:string) => {
         const dir = rel === '' ? scratchDir : join(scratchDir, rel)
-        for (const e of readdirSync(dir, { withFileTypes:true })) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
             if (!e.isDirectory() || e.name === 'issues') continue
             const name = rel === '' ? e.name : `${rel}/${e.name}`
             if (existsSync(join(scratchDir, name, 'issues'))) {
@@ -134,12 +134,12 @@ export function loadSelection (
         )
         const ticket = ticketLabel(t)
         for (const word of parsed.typos) {
-            warnings.push({ ticket, kind:'typo', text:word })
+            warnings.push({ ticket, kind: 'typo', text: word })
         }
         for (const ref of t.blockers) {
             if (ref.where !== 'missing') continue
             warnings.push({
-                ticket, kind:'missing', text:blockerLabel(ref),
+                ticket, kind: 'missing', text: blockerLabel(ref),
             })
         }
     }
@@ -164,10 +164,10 @@ export function featureCounts (
 ):FeatureCounts {
     const { tickets, warnings } = loadSelection(scratchDir, [name])
     return {
-        ready:findReadyTickets(tickets).length,
-        total:tickets.length,
-        badBlockers:warnings.filter(w => w.kind === 'missing').length,
-        waitsOn:[...upstreamOf(tickets).keys()]
+        ready: findReadyTickets(tickets).length,
+        total: tickets.length,
+        badBlockers: warnings.filter(w => w.kind === 'missing').length,
+        waitsOn: [...upstreamOf(tickets).keys()]
             .sort((a, b) => a.localeCompare(b)),
     }
 }
@@ -200,9 +200,9 @@ export async function resolveIssuesDir (
     if (specName) {
         const featureDir = join(cwd, '.scratch', specName)
         return [{
-            dir:join(featureDir, 'issues'),
-            spec:join(featureDir, 'spec.md'),
-            name:specName,
+            dir: join(featureDir, 'issues'),
+            spec: join(featureDir, 'spec.md'),
+            name: specName,
         }]
     }
 
@@ -216,20 +216,20 @@ export async function resolveIssuesDir (
     if (features.length === 1) {
         const f = features[0]
         console.log(`Using feature: ${f.name}`)
-        return [{ dir:f.dir, spec:f.spec, name:f.name }]
+        return [{ dir: f.dir, spec: f.spec, name: f.name }]
     }
 
     const scratchDir = join(cwd, '.scratch')
     const featureChoices = features.map(f => ({
-        name:featureChoiceLabel(scratchDir, f.name),
-        value:f.name,
+        name: featureChoiceLabel(scratchDir, f.name),
+        value: f.name,
     }))
 
     while (true) {
         const selected = await checkbox({
-            message:'Which features?',
-            choices:[
-                { name:'All', value:ALL_VALUE },
+            message: 'Which features?',
+            choices: [
+                { name: 'All', value: ALL_VALUE },
                 new Separator(),
                 ...featureChoices,
             ],
@@ -248,7 +248,7 @@ export async function resolveIssuesDir (
             const f = features.find(
                 ff => ff.name === name
             )!
-            return { dir:f.dir, spec:f.spec, name:f.name }
+            return { dir: f.dir, spec: f.spec, name: f.name }
         })
     }
 }
