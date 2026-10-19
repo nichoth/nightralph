@@ -456,7 +456,7 @@ never change a ticket's outcome or the exit code.
 Tickets run in waves. A wave is a batch of tickets whose blockers are
 all done. The tickets in a wave run in parallel, up to `--concurrency`
 at once, and each ticket gets a worktree named after the ticket slug.
-nightralph waits for the whole batch to finish, merges the branches of
+`nightralph` waits for the whole batch to finish, merges the branches of
 the tickets that succeeded, and marks them `done`. Then it looks for
 tickets that are newly unblocked. Those form the next wave. This
 continues until no ticket is ready to run.

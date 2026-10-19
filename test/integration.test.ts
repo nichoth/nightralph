@@ -5927,6 +5927,7 @@ const FAKE_CLAUDE = join(process.cwd(), 'test', 'fake-claude', 'claude')
 const SUBAGENT_RULE = subagentRule('haiku')
 const FAKE_CLAUDE_KEYS = [
     'CLAUDE_CODE_SUBAGENT_MODEL',
+    'FAKE_CLAUDE_ARGV_LOG',
     'FAKE_CLAUDE_DELEGATE',
     'FAKE_CLAUDE_ENV_LOG',
     'FAKE_CLAUDE_FAIL_ONCE',

@@ -780,6 +780,11 @@ const PROVIDER_ARGS:Record<string, string[]> = {
         '--print', '--verbose',
         '--output-format', 'stream-json',
         '--dangerously-skip-permissions',
+        // A pending wakeup or cron job keeps a --print session
+        // alive after its final result, and spawnAgent waits for
+        // the process to exit. One comma-joined value, since the
+        // flag is variadic.
+        '--disallowedTools', 'ScheduleWakeup,CronCreate',
     ],
     // codex removed --full-auto; this is the counterpart
     // of claude's --dangerously-skip-permissions, and the

@@ -4,6 +4,8 @@
 // the claude branch. With FAKE_CLAUDE_DELEGATE set to a
 // test/mock-agent-*.js path, it then runs that mock with the same
 // prompt, cwd, env and arguments and exits with its status.
+// With FAKE_CLAUDE_ARGV_LOG set, it appends its arguments to that
+// file as one JSON array per run.
 // With FAKE_CLAUDE_PROMPT_DIR set, it writes each prompt it reads
 // to a uniquely named file in that directory. With
 // FAKE_CLAUDE_FAIL_ONCE set to a marker path, the first run exits 1.
@@ -25,6 +27,13 @@ process.stdin.on('end', () => {
     if (envLog) {
         const value = process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? null
         appendFileSync(envLog, JSON.stringify(value) + '\n')
+    }
+    const argvLog = process.env.FAKE_CLAUDE_ARGV_LOG
+    if (argvLog) {
+        appendFileSync(
+            argvLog,
+            JSON.stringify(process.argv.slice(2)) + '\n'
+        )
     }
     const promptDir = process.env.FAKE_CLAUDE_PROMPT_DIR
     if (promptDir) {

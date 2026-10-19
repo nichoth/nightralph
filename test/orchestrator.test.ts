@@ -2582,6 +2582,7 @@ const FAKE_CLAUDE_JS = join(
 )
 const FAKE_ENV_KEYS = [
     'CLAUDE_CODE_SUBAGENT_MODEL',
+    'FAKE_CLAUDE_ARGV_LOG',
     'FAKE_CLAUDE_DELEGATE',
     'FAKE_CLAUDE_ENV_LOG',
     'FAKE_CLAUDE_FAIL_ONCE',
@@ -2735,6 +2736,32 @@ test('spawnAgent sets no subagent model for non-claude agents',
             [null],
             'preferSubagent is ignored outside the claude provider'
         )
+    }
+)
+
+// A pending wakeup or cron job keeps `claude --print` alive after
+// its final result, and spawnAgent waits for the process to exit.
+test('spawnAgent denies claude its self-scheduling tools',
+    async t => {
+        const base = tmp()
+        const argvLog = join(base, 'argv.log')
+
+        await withFakeEnv({ FAKE_CLAUDE_ARGV_LOG: argvLog }, async () => {
+            await spawnAgent({
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE,
+                model: 'opus',
+                timeout: 10,
+                logPath: join(base, 'test.log'),
+            })
+        })
+
+        const [argv] = readEnvLog(argvLog) as string[][]
+        const flag = argv.indexOf('--disallowedTools')
+        t.ok(flag >= 0, 'claude gets --disallowedTools')
+        const denied = (argv[flag + 1] ?? '').split(',')
+        t.ok(denied.includes('ScheduleWakeup'), 'ScheduleWakeup is denied')
+        t.ok(denied.includes('CronCreate'), 'CronCreate is denied')
     }
 )
 
@@ -3777,6 +3804,7 @@ test('getProviderArgs - claude provider adds stream flags',
                 '--print', '--verbose',
                 '--output-format', 'stream-json',
                 '--dangerously-skip-permissions',
+                '--disallowedTools', 'ScheduleWakeup,CronCreate',
             ],
             'claude gets stream-json and skip-permissions'
         )
@@ -3809,11 +3837,7 @@ test('getProviderArgs - full path with claude basename',
         )
         t.deepEqual(
             args,
-            [
-                '--print', '--verbose',
-                '--output-format', 'stream-json',
-                '--dangerously-skip-permissions',
-            ],
+            getProviderArgs('claude'),
             'full path to claude still gets stream flags'
         )
     })
