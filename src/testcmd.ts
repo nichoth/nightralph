@@ -47,9 +47,31 @@ export function runTestCmd (opts:{
     cwd:string
     timeout:number
     registry?:Set<number>
+    progress?:{
+        label:string
+        onLine:(line:string) => void
+    }
 }):Promise<TestResult> {
     return new Promise(resolve => {
         let settled = false
+        const started = performance.now()
+        const report = (message:string):void => {
+            if (opts.progress) {
+                opts.progress.onLine(
+                    `  ${opts.progress.label}: ${message}`
+                )
+            }
+        }
+        report(`starting tests: ${opts.cmd}`)
+        report(`worktree ${opts.cwd}; timeout ${opts.timeout}s`)
+        report('output is saved when tests finish')
+        const heartbeat = opts.progress ? setInterval(() => {
+            const elapsed = Math.floor(
+                (performance.now() - started) / 1000
+            )
+            report(`tests still running (${elapsed}s elapsed)`)
+        }, 15000) : undefined
+        heartbeat?.unref()
         const child = spawn('sh', ['-c', opts.cmd], {
             cwd: opts.cwd,
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -65,6 +87,8 @@ export function runTestCmd (opts:{
         child.stderr.on('data', d => chunks.push(String(d)))
 
         const timer = setTimeout(() => {
+            clearInterval(heartbeat)
+            report(`timeout reached (${opts.timeout}s); stopping tests`)
             if (child.pid) {
                 try {
                     process.kill(-child.pid, 'SIGKILL')
@@ -80,6 +104,7 @@ export function runTestCmd (opts:{
             if (settled) return
             settled = true
             clearTimeout(timer)
+            clearInterval(heartbeat)
             if (child.pid !== undefined && opts.registry) {
                 opts.registry.delete(child.pid)
             }
@@ -94,6 +119,7 @@ export function runTestCmd (opts:{
             if (settled) return
             settled = true
             clearTimeout(timer)
+            clearInterval(heartbeat)
             if (child.pid !== undefined && opts.registry) {
                 opts.registry.delete(child.pid)
             }

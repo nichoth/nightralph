@@ -1038,6 +1038,7 @@ test('runWavesIsolated - passing test command runs in the ' +
         const originalCwd = process.cwd()
         process.chdir(projectDir)
         try {
+            const recording = recordingDisplay()
             const result = await runWavesIsolated({
                 tickets,
                 specBody: 'test spec',
@@ -1050,6 +1051,7 @@ test('runWavesIsolated - passing test command runs in the ' +
                 // Only succeeds inside the worktree where
                 // the mock agent wrote its file.
                 testCmd: 'ls mock-agent-change-*.txt',
+                display: recording.display,
             })
 
             t.equal(result.allDone, true, 'run done')
@@ -1058,6 +1060,18 @@ test('runWavesIsolated - passing test command runs in the ' +
                 existsSync(join(logsDir, '01-first.test.log')),
                 'test log written on success too'
             )
+            const lines = recording.calls
+                .filter(call => call.method === 'log')
+                .map(call => String(call.args[0]))
+            const start = lines.findIndex(line =>
+                line.includes('starting tests:') &&
+                line.includes('attempt 1'))
+            const end = lines.findIndex(line =>
+                line.includes('tests passed'))
+            t.ok(start >= 0 && end > start,
+                'display reports gate start before completion')
+            t.ok(lines[end]?.includes('.test.log'),
+                'completion identifies saved output')
         } finally {
             process.chdir(originalCwd)
         }

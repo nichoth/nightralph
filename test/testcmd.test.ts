@@ -271,3 +271,103 @@ test('runTestCmd - cwd does not exist', async t => {
         rmSync(dir, { recursive: true, force: true })
     }
 })
+
+test('runTestCmd reports a live gate and stops reporting on exit',
+    async t => {
+        const dir = tmp()
+        const lines:string[] = []
+        const registry = new Set<number>()
+        let finished = false
+        let observedLive = false
+        writeFileSync(join(dir, 'gate.cjs'), [
+            "const fs = require('node:fs')",
+            "process.stdout.write('stdout marker\\n')",
+            "process.stderr.write('stderr marker\\n')",
+            'setInterval(() => {',
+            "  if (fs.existsSync('release')) process.exit(0)",
+            '}, 25)',
+        ].join('\n'))
+        try {
+            const result = await runTestCmd({
+                cmd: 'exec node gate.cjs',
+                cwd: dir,
+                timeout: 30,
+                registry,
+                progress: {
+                    label: 'feature/01 attempt 1',
+                    onLine: line => {
+                        lines.push(line)
+                        if (line.includes('still running')) {
+                            observedLive = !finished && registry.size > 0
+                            writeFileSync(join(dir, 'release'), '')
+                        }
+                    },
+                },
+            })
+            finished = true
+            t.equal(result.exitCode, 0, 'released command passes')
+            t.ok(observedLive, 'heartbeat arrived during execution')
+            t.ok(lines[0]?.includes('exec node gate.cjs'),
+                'start names the command')
+            t.ok(lines.some(line => line.includes(dir)),
+                'start identifies the worktree')
+            t.ok(lines.some(line => line.includes('timeout 30s')),
+                'start names the timeout')
+            t.ok(lines.every(line => line.includes('feature/01')),
+                'messages retain their owner')
+            t.ok(result.output.includes('stdout marker'),
+                'stdout still captured')
+            t.ok(result.output.includes('stderr marker'),
+                'stderr still captured')
+            t.ok(!result.output.includes('still running'),
+                'progress stays out of the test log')
+            t.equal(registry.size, 0, 'registry cleared')
+            const count = lines.length
+            await new Promise(resolve => setTimeout(resolve, 16000))
+            t.equal(lines.length, count, 'no progress after completion')
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+test('runTestCmd clears progress on failure and timeout', async t => {
+    const dir = tmp()
+    const cases = [
+        { cmd: 'exit 3', cwd: dir, timeout: 5, code: 3 },
+        {
+            cmd: 'true',
+            cwd: join(dir, 'missing'),
+            timeout: 5,
+            code: 1,
+        },
+        { cmd: 'exec sleep 30', cwd: dir, timeout: 0.1, code: 1 },
+    ]
+    try {
+        const observations = await Promise.all(cases.map(async c => {
+            const lines:string[] = []
+            const registry = new Set<number>()
+            const result = await runTestCmd({
+                ...c,
+                registry,
+                progress: {
+                    label: c.cmd,
+                    onLine: line => { lines.push(line) },
+                },
+            })
+            t.equal(result.exitCode, c.code, 'exit behavior retained')
+            t.equal(registry.size, 0, 'terminal path clears registry')
+            if (c.timeout === 0.1) {
+                t.ok(lines.some(line => line.includes('timeout reached')),
+                    'timeout explained')
+            }
+            return { lines, count: lines.length }
+        }))
+        await new Promise(resolve => setTimeout(resolve, 16000))
+        for (const item of observations) {
+            t.equal(item.lines.length, item.count,
+                'terminal command has no remaining heartbeat')
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true })
+    }
+})

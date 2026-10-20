@@ -220,6 +220,14 @@ Flags:
   Failed tickets (non-zero exit) keep their status and block
   dependents. The status display marks those dependents as blocked
   and names the failed ticket.
+* After an agent finishes, nightralph independently runs the test gate,
+  even if the agent already ran tests. Ticket gates and the final
+  review-fix gate announce the command, worktree, and timeout, then
+  report elapsed time every 15 seconds while waiting for it to finish.
+  A heartbeat means the command is still running; it does not prove
+  that individual tests are advancing. Test output is captured and
+  saved when the command finishes, and the completion message gives
+  the log path. The log is not a live stream.
 * A failed attempt is retried, up to `--retries` times, before the
   ticket is recorded as failed. Non-zero exit, exit 0 with no new
   commits, and a red test command all count as failures; a timeout

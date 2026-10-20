@@ -1542,16 +1542,21 @@ async function runTestGate (opts:{
         opts.log(`  ${opts.ticket.filename}: no test gate`)
         return true
     }
+    const testLogPath = attemptLogPath(
+        opts.logsDir, opts.ticket, opts.attempt ?? 1,
+        '.test.log'
+    )
     const result = await runTestCmd({
         cmd: opts.testCmd,
         cwd: opts.worktreePath,
         timeout: opts.timeout,
         registry: opts.registry,
+        progress: {
+            label: `${ticketLabel(opts.ticket)} ` +
+                `attempt ${opts.attempt ?? 1}`,
+            onLine: opts.log,
+        },
     })
-    const testLogPath = attemptLogPath(
-        opts.logsDir, opts.ticket, opts.attempt ?? 1,
-        '.test.log'
-    )
     writeFileSync(testLogPath, result.output)
 
     if (result.exitCode !== 0) {
@@ -1563,7 +1568,9 @@ async function runTestGate (opts:{
         return false
     }
 
-    opts.log(`  ${opts.ticket.filename}: tests passed`)
+    opts.log(
+        `  ${opts.ticket.filename}: tests passed; see ${testLogPath}`
+    )
     return true
 }
 

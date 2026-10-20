@@ -1,7 +1,7 @@
 import { test } from '@substrate-system/tapzero'
 import {
     mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync,
-    realpathSync, readdirSync,
+    realpathSync, readdirSync, readFileSync,
 } from 'node:fs'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -252,12 +252,46 @@ test('runFixer - an empty test command writes no fixer test log ' +
         t.ok(result.merged, 'merged')
         t.ok(lines.some(l => /no test gate/.test(l)),
             'the skipped gate is logged')
+        t.ok(!lines.some(line => line.includes('starting tests:')),
+            'skipped gate does not announce execution')
         t.ok(existsSync(join(repoRoot, 'fix.ts')),
             'the fix is on main')
         const testLogs = readdirSync(opts.logsDir).filter(
             f => /^review-fix.*\.test\.log$/.test(f)
         )
         t.equal(testLogs.length, 0, 'no fixer test log')
+    })
+})
+
+test('runFixer reports its gate and then its saved result', async t => {
+    await withRepo(async repoRoot => {
+        const agent = fakeAgent(cwd => {
+            commitIn(cwd, 'fix.ts')
+            return { completedItems: ['first thing'] }
+        })
+        const lines:string[] = []
+        let outputAtCompletion = ''
+        const path = join(repoRoot, '.scratch', 'feat', 'logs',
+            'review-fix.test.log')
+        const opts = passOpts(repoRoot, {
+            testCmd: 'echo gate-marker',
+            log: line => {
+                lines.push(line)
+                if (line.includes('tests passed')) {
+                    outputAtCompletion = readFileSync(path, 'utf8')
+                }
+            },
+        })
+        const result = await runFixer(opts,
+            { spawnAgent: agent.spawnAgent }, FINDINGS)
+        const start = lines.findIndex(line =>
+            line.includes('review-fix attempt 1: starting tests:'))
+        const end = lines.findIndex(line => line.includes('tests passed'))
+        t.ok(result.merged, 'successful gate still merges')
+        t.ok(start >= 0 && end > start, 'ordered phase messages')
+        t.ok(outputAtCompletion.includes('gate-marker'),
+            'log is readable when completion is announced')
+        t.ok(lines[end]?.includes(path), 'saved log is discoverable')
     })
 })
 
@@ -269,9 +303,12 @@ test('runFixer - AC6.2 a red test gate is retried, then nothing ' +
             commitIn(cwd, 'broken.txt')
             return { completedItems: ['first thing'] }
         })
+        const lines:string[] = []
         const result = await runFixer(
             passOpts(repoRoot, {
-                retries: 1, testCmd: 'test ! -f broken.txt',
+                retries: 1,
+                testCmd: 'test ! -f broken.txt',
+                log: line => { lines.push(line) },
             }),
             { spawnAgent: agent.spawnAgent },
             FINDINGS
@@ -282,6 +319,13 @@ test('runFixer - AC6.2 a red test gate is retried, then nothing ' +
             'every finding unchecked')
         t.equal(git(repoRoot, ['rev-parse', 'main']), before,
             'main unchanged')
+        t.ok(lines.some(line =>
+            line.includes('review-fix attempt 2: starting tests:')),
+        'retry identifies its attempt')
+        t.ok(lines.some(line =>
+            line.includes('tests failed (exit 1)') &&
+            line.includes('review-fix.attempt2.test.log')),
+        'failed retry names its own saved log')
     })
 })
 

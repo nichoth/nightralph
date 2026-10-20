@@ -543,15 +543,25 @@ async function runStep (
     deps:ReviewDeps,
     cmd:string,
     cwd:string,
-    path:string
+    path:string,
+    testLabel?:string
 ):Promise<boolean> {
     const result = await runTestCmd({
         cmd,
         cwd,
         timeout: opts.timeout,
         registry: deps.registry,
+        progress: testLabel ? {
+            label: testLabel,
+            onLine: opts.log,
+        } : undefined,
     })
     writeFileSync(path, result.output)
+    if (testLabel) {
+        const outcome = result.exitCode === 0 ?
+            'tests passed' : `tests failed (exit ${result.exitCode})`
+        opts.log(`  review fix: ${outcome}; see ${path}`)
+    }
     return result.exitCode === 0
 }
 
@@ -749,7 +759,8 @@ export async function runFixer (
                 opts, deps, opts.testCmd, wt.worktreePath,
                 logPath(
                     opts.logsDir, 'review-fix', attempt, '.test.log'
-                )
+                ),
+                `review-fix attempt ${attempt}`
             ))) {
                 return fail('tests', agent.exitCode, notes)
             }
