@@ -46,6 +46,7 @@ import {
 } from './merge.js'
 import {
     createDisplay,
+    formatElapsed,
     ticketLabel,
     type RunProgress,
     type Display,
@@ -819,6 +820,16 @@ export function formatStreamLine (
 // not objects (a bare `null` or number line) and fields of the
 // wrong type are ignored rather than thrown on, since one bad line
 // must not crash the run.
+// Tool calls in one claude stream-json object, subagents' included
+function countToolUses (value:unknown):number {
+    if (!isRecord(value) || value.type !== 'assistant') return 0
+    const msg = isRecord(value.message) ? value.message : undefined
+    if (!Array.isArray(msg?.content)) return 0
+    return msg.content.filter(block => {
+        return isRecord(block) && block.type === 'tool_use'
+    }).length
+}
+
 function formatStreamObject (value:unknown):string|null {
     if (!isRecord(value)) return null
     const obj = value
@@ -1001,6 +1012,9 @@ export type AgentResult = {
 // otherwise leave spawnAgent's promise pending forever.
 const CLOSE_GRACE_MS = 2000
 
+// How often a spawnAgent `progress` heartbeat reports
+const AGENT_HEARTBEAT_MS = 30_000
+
 // Agents are spawned with detached:true so they become their own
 // process group leader; this lets us kill the whole tree (agent +
 // any children it spawned, like dev servers) with one signal to
@@ -1052,6 +1066,13 @@ export function spawnAgent (opts:{
     preferSubagent?:string
     // claude only: called each time the subagent stats change
     onStats?:(stats:SubagentStats) => void
+    // a line every intervalMs (default 30s) while the agent
+    // runs, so a quiet agent does not look hung
+    progress?:{
+        label:string
+        onLine:(line:string) => void
+        intervalMs?:number
+    }
 }):Promise<AgentResult> {
     const args:string[] = [
         ...getProviderArgs(opts.agentCmd),
@@ -1165,6 +1186,8 @@ export function spawnAgent (opts:{
     }
 
     let streamStats = emptyStreamStats()
+    // claude only: tool calls so far, for the heartbeat
+    let toolCalls = 0
 
     // Formats one claude stream-json line and tracks subagent stats.
     // The stats are read from the raw object, so subagent text is
@@ -1181,6 +1204,7 @@ export function spawnAgent (opts:{
             streamStats = next
             opts.onStats?.(next.stats)
         }
+        toolCalls += countToolUses(obj)
         return formatStreamObject(obj)
     }
 
@@ -1250,6 +1274,20 @@ export function spawnAgent (opts:{
         killProcessGroup(proc.pid)
     }, opts.timeout * 1000)
 
+    const started = performance.now()
+    const progress = opts.progress
+    const heartbeat = progress ? setInterval(() => {
+        const elapsed = formatElapsed(performance.now() - started)
+        const tools = isClaude ?
+            `, ${toolCalls} tool call${toolCalls === 1 ? '' : 's'}` :
+            ''
+        progress.onLine(
+            `  ${progress.label}: agent still running ` +
+            `(${elapsed}${tools})`
+        )
+    }, progress.intervalMs ?? AGENT_HEARTBEAT_MS) : undefined
+    heartbeat?.unref()
+
     // An agent that exits before draining stdin (bad flags,
     // auth failure) closes its end of the pipe; writing to it
     // then raises EPIPE on proc.stdin. Without a listener that
@@ -1274,6 +1312,7 @@ export function spawnAgent (opts:{
             if (settled) return
             settled = true
             clearTimeout(timeout)
+            clearInterval(heartbeat)
             if (graceTimer) clearTimeout(graceTimer)
             if (proc.pid !== undefined) {
                 runningAgents.delete(proc.pid)
@@ -1323,6 +1362,7 @@ export function spawnAgent (opts:{
             settled = true
             if (graceTimer) clearTimeout(graceTimer)
             clearTimeout(timeout)
+            clearInterval(heartbeat)
             if (proc.pid !== undefined) {
                 runningAgents.delete(proc.pid)
             }
@@ -3462,6 +3502,7 @@ export async function runWavesIsolated (opts:{
                 retries,
                 retryDelay,
                 log: (msg) => d.log(msg),
+                onPhase: label => d.setPhase(label),
             }, {
                 spawnAgent: async spawnOpts => {
                     const result = await spawnAgent(spawnOpts)
@@ -3475,6 +3516,8 @@ export async function runWavesIsolated (opts:{
             )
         } catch (err) {
             d.log(`\nReview failed: ${formatErrorMessage(err)}`)
+        } finally {
+            d.setPhase(null)
         }
     }
 

@@ -377,3 +377,53 @@ test('runFixer - AC6.4 a retry sees the previous attempt\'s notes',
                 'retry prompt carries them')
         })
     })
+
+// The status header names what the review pass is doing, so a
+// quiet agent after the last ticket does not look like a hang.
+test('runReviewer names its phase and gives its agent a heartbeat',
+    async t => {
+        await withRepo(async repoRoot => {
+            const phases:string[] = []
+            let phaseAtSpawn:string|undefined
+            let progressAtSpawn:unknown
+            const spawnAgent:SpawnAgentFn = async opts => {
+                phaseAtSpawn = phases[phases.length - 1]
+                progressAtSpawn = opts.progress
+                writeFindings(opts.cwd!, NO_FINDINGS)
+                return { exitCode: 0, timedOut: false, completedItems: [] }
+            }
+            await runReviewer(
+                passOpts(repoRoot, { onPhase: p => { phases.push(p) } }),
+                { spawnAgent },
+                range(repoRoot)
+            )
+            t.ok(phaseAtSpawn, 'a phase is set before the reviewer runs')
+            t.ok(progressAtSpawn, 'the reviewer gets a heartbeat')
+        })
+    }
+)
+
+test('runFixer moves to a new phase for its test gate', async t => {
+    await withRepo(async repoRoot => {
+        const phases:string[] = []
+        let phaseAtSpawn:string|undefined
+        let progressAtSpawn:unknown
+        const spawnAgent:SpawnAgentFn = async opts => {
+            phaseAtSpawn = phases[phases.length - 1]
+            progressAtSpawn = opts.progress
+            commitIn(opts.cwd!, 'fix.ts')
+            return { exitCode: 0, timedOut: false, completedItems: [] }
+        }
+        const result = await runFixer(
+            passOpts(repoRoot, { onPhase: p => { phases.push(p) } }),
+            { spawnAgent },
+            FINDINGS
+        )
+        t.ok(result.merged, 'merged')
+        t.ok(phaseAtSpawn, 'a phase is set before the fixer runs')
+        t.ok(progressAtSpawn, 'the fixer gets a heartbeat')
+        const last = phases[phases.length - 1]
+        t.ok(last && last !== phaseAtSpawn,
+            'the test gate has its own phase')
+    })
+})

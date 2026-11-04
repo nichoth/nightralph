@@ -2335,6 +2335,7 @@ function recordingDisplay ():{
             setTicketStatus: record('setTicketStatus'),
             setBlocked: record('setBlocked'),
             setTicketStats: record('setTicketStats'),
+            setPhase: record('setPhase'),
             log: record('log'),
             cleanup: record('cleanup'),
         },
@@ -4489,6 +4490,7 @@ test('runWavesIsolated - multi-feature tickets write ' +
             setTicketStatus () {},
             setBlocked () {},
             setTicketStats () {},
+            setPhase () {},
             log (m:string) { logs.push(m) },
             cleanup () {},
         }

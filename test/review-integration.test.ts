@@ -38,6 +38,7 @@ function quietDisplay ():Display {
         setTicketStatus: noop,
         setBlocked: noop,
         setTicketStats: noop,
+        setPhase: noop,
         log: noop,
         cleanup: noop,
     }

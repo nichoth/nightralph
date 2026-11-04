@@ -78,8 +78,28 @@ export type Display = {
         feature:string|undefined,
         stats:SubagentStats,
     ):void
+    /**
+     * Name the work running after the last wave, such as the
+     * review pass, or `null` when it ends. While a phase is set
+     * the run is not finished, so the header stays below 100%.
+     */
+    setPhase(label:string|null):void
     log(message:string):void
     cleanup():void
+}
+
+/**
+ * Elapsed time for progress lines: `45s`, `3m 05s`, `1h 02m`.
+ */
+export function formatElapsed (ms:number):string {
+    const total = Math.max(0, Math.floor(ms / 1000))
+    const hours = Math.floor(total / 3600)
+    const minutes = Math.floor((total % 3600) / 60)
+    const seconds = total % 60
+    const pad = (n:number):string => String(n).padStart(2, '0')
+    if (hours > 0) return `${hours}h ${pad(minutes)}m`
+    if (minutes > 0) return `${minutes}m ${pad(seconds)}s`
+    return `${seconds}s`
 }
 
 const ESC = '\x1b['
@@ -144,6 +164,8 @@ const SEPARATOR_WIDTH = 50
 const DEFAULT_COLUMNS = 80
 const MIN_LOG_ROWS = 1
 const MAX_MESSAGE_BUFFER = 200
+// How often an active phase repaints its elapsed time
+const PHASE_TICK_MS = 1000
 
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g
@@ -216,6 +238,8 @@ export class StatusDisplay implements Display {
     private config:DisplayConfig
     private viewportStart:number = 0
     private resizeListener:(() => void)|null = null
+    private phase:{ label:string; started:number }|null = null
+    private phaseTimer:ReturnType<typeof setInterval>|null = null
 
     constructor (config?:Readonly<Partial<DisplayConfig>>) {
         this.config = {
@@ -358,7 +382,29 @@ export class StatusDisplay implements Display {
         this.render()
     }
 
+    setPhase (label:string|null):void {
+        this.stopPhaseTimer()
+        this.phase = label === null ?
+            null :
+            { label, started: Date.now() }
+        if (this.phase) {
+            // Repaints the elapsed time while the agent is quiet.
+            // unref, so a phase left open never keeps the process
+            // alive.
+            const timer = setInterval(() => this.render(), PHASE_TICK_MS)
+            timer.unref()
+            this.phaseTimer = timer
+        }
+        this.render()
+    }
+
+    private stopPhaseTimer ():void {
+        if (this.phaseTimer) clearInterval(this.phaseTimer)
+        this.phaseTimer = null
+    }
+
     cleanup ():void {
+        this.stopPhaseTimer()
         // Remove resize listener if it exists
         if (this.resizeListener && this.config.stream.isTTY) {
             this.config.stream.removeListener('resize', this.resizeListener)
@@ -379,15 +425,23 @@ export class StatusDisplay implements Display {
             t => t.status === 'done',
         ).length
         const total = this.tickets.length
-        const pct = total === 0 ? 0 : Math.round((done / total) * 100)
+        const ticketPct = total === 0 ?
+            0 :
+            Math.round((done / total) * 100)
+        // Work after the last ticket still belongs to the run
+        const pct = this.phase ? Math.min(ticketPct, 99) : ticketPct
         const width = Math.max(
             1,
             (this.config.stream.columns ?? DEFAULT_COLUMNS) - 1,
         )
 
+        const phase = this.phase ?
+            ` - ${this.phase.label} ` +
+                `(${formatElapsed(Date.now() - this.phase.started)})` :
+            ''
         const header = `Wave ${this.wave.waveNum}/` +
             `${this.wave.totalWaves} - ` +
-            `${done}/${total} done - ${pct}%`
+            `${done}/${total} done - ${pct}%${phase}`
         output += fitLine(header, width) + '\n'
 
         // Pagination logic
@@ -541,6 +595,11 @@ export class PlainDisplay implements Display {
         _stats:SubagentStats,
     ):void {
         // no-op: plain mode has no fixed list
+    }
+
+    setPhase (_label:string|null):void {
+        // no-op: plain mode has no header; heartbeat lines from
+        // log() show that the work is still running
     }
 
     log (message:string):void {

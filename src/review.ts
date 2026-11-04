@@ -490,6 +490,11 @@ export type SpawnAgentFn = (opts:{
     // claude only: model for subagents; unset = off
     preferSubagent?:string
     onLine?:(line:string) => void
+    progress?:{
+        label:string
+        onLine:(line:string) => void
+        intervalMs?:number
+    }
 }) => Promise<AgentResult>
 
 export type ReviewDeps = {
@@ -521,6 +526,8 @@ export type ReviewPassOpts = {
     retries:number
     retryDelay:number
     log:(msg:string) => void
+    // names the step now running, for the status header
+    onPhase?:(label:string) => void
     now?:() => Date
 }
 
@@ -597,6 +604,7 @@ export async function runReviewer (
         label: 'review',
         log: opts.log,
     }, async (attempt, effort) => {
+        opts.onPhase?.('reviewing')
         const wt = await createNamedWorktree({
             repoRoot: opts.repoRoot,
             repoName: opts.repoName,
@@ -631,6 +639,7 @@ export async function runReviewer (
                 effort,
                 preferSubagent: opts.preferSubagent,
                 onLine: opts.log,
+                progress: { label: 'review', onLine: opts.log },
             })
             const text = collectNotes(wt.worktreePath, FINDINGS_FILE)
             const findings = text === null ? null : parseFindings(text)
@@ -696,6 +705,7 @@ export async function runFixer (
             }
         }
 
+        opts.onPhase?.('fixing findings')
         const wt = await createNamedWorktree({
             repoRoot: opts.repoRoot,
             repoName: opts.repoName,
@@ -734,6 +744,7 @@ export async function runFixer (
                 effort,
                 preferSubagent: opts.preferSubagent,
                 onLine: opts.log,
+                progress: { label: 'review-fix', onLine: opts.log },
             })
             // Before any auto-commit, so notes never get committed
             const notes = collectNotes(wt.worktreePath)
@@ -755,14 +766,18 @@ export async function runFixer (
             }
             if (opts.testCmd === '') {
                 opts.log('  review fix: no test gate')
-            } else if (!(await runStep(
-                opts, deps, opts.testCmd, wt.worktreePath,
-                logPath(
-                    opts.logsDir, 'review-fix', attempt, '.test.log'
-                ),
-                `review-fix attempt ${attempt}`
-            ))) {
-                return fail('tests', agent.exitCode, notes)
+            } else {
+                opts.onPhase?.('testing fix')
+                if (!(await runStep(
+                    opts, deps, opts.testCmd, wt.worktreePath,
+                    logPath(
+                        opts.logsDir, 'review-fix', attempt,
+                        '.test.log'
+                    ),
+                    `review-fix attempt ${attempt}`
+                ))) {
+                    return fail('tests', agent.exitCode, notes)
+                }
             }
             const merged = await mergeBranch(
                 opts.repoRoot, wt.branchName

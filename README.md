@@ -576,6 +576,20 @@ Wave 2/3 - 5/8 done - 63%
 The counts cover only this run's tickets, the ones in the list.
 Tickets finished by an earlier run are not counted.
 
+The review pass runs after the last ticket, so the header holds at
+99% until it ends and names the step it is on, with that step's
+elapsed time:
+
+```
+Wave 5/5 - 9/9 done - 99% - fixing findings (3m 12s)
+```
+
+The steps are `reviewing`, `fixing findings` and `testing fix`. The
+reviewer and the fixer can work for minutes without printing a
+message, so every 30 seconds each one logs that it is still running,
+with its elapsed time and, for claude, how many tools it has called
+so far. These lines also appear when stdout is not a terminal.
+
 When stdout is not a terminal, for example when it is piped to a file,
 nightralph prints one line per wave that names the wave's tickets,
 followed by plain log lines.
