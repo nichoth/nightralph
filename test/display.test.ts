@@ -1814,6 +1814,13 @@ class RecordingDisplay implements Display {
         })
     }
 
+    setPhase (label:string|null):void {
+        this.calls.push({
+            method: 'setPhase',
+            args: [label],
+        })
+    }
+
     cleanup ():void {
         this.calls.push({
             method: 'cleanup',
@@ -2892,4 +2899,82 @@ test('AC5.4: PlainDisplay setTicketStats is a no-op', t => {
     }
 
     t.equal(logs.length, 0, 'no logs from setTicketStats')
+})
+
+// -- Run phases after the last wave (the review pass) --
+
+test('an active phase holds the header below 100% until it ends',
+    t => {
+        const stream = createMockStream()
+        const display = new StatusDisplay({ stream })
+        const tickets = createTestTickets()
+        display.startWave(1, 1, tickets)
+        for (const ticket of tickets) {
+            display.setTicketStatus(ticket.num, 'done')
+        }
+        t.equal(headerNumbers(lastFrame(stream.getOutput()))?.pct, 100,
+            'every ticket done and no phase is 100%')
+
+        display.setPhase('reviewing')
+        const during = lastFrame(stream.getOutput())
+        t.equal(headerNumbers(during)?.pct, 99,
+            'a phase after the last ticket holds the header at 99%')
+        t.equal(headerNumbers(during)?.done, 3,
+            'the done count still counts every ticket')
+
+        display.setPhase(null)
+        t.equal(headerNumbers(lastFrame(stream.getOutput()))?.pct, 100,
+            'ending the phase restores 100%')
+        display.cleanup()
+    }
+)
+
+test('an active phase repaints the header while nothing else happens',
+    async t => {
+        const stream = createMockStream()
+        const display = new StatusDisplay({ stream })
+        display.startWave(1, 1, createTestTickets())
+        display.setPhase('reviewing')
+        stream.clear()
+
+        await new Promise(resolve => setTimeout(resolve, 1200))
+        t.ok(headerNumbers(lastFrame(stream.getOutput())),
+            'the header was repainted with no other calls')
+
+        display.setPhase(null)
+        stream.clear()
+        await new Promise(resolve => setTimeout(resolve, 1200))
+        t.equal(stream.getOutput(), '',
+            'ending the phase stops the repaint')
+        display.cleanup()
+    }
+)
+
+test('an active phase never keeps the process alive', t => {
+    const active = ():number => process.getActiveResourcesInfo()
+        .filter(r => r === 'Timeout').length
+    const stream = createMockStream()
+    const display = new StatusDisplay({ stream })
+    display.startWave(1, 1, createTestTickets())
+    const before = active()
+    display.setPhase('reviewing')
+    t.equal(active(), before,
+        'the repaint timer does not hold the event loop open')
+    display.cleanup()
+})
+
+test('PlainDisplay accepts phases without printing anything', t => {
+    const logs:string[] = []
+    const origLog = console.log
+    console.log = (...args:unknown[]) => {
+        logs.push(args.join(' '))
+    }
+    try {
+        const display = new PlainDisplay()
+        display.setPhase('reviewing')
+        display.setPhase(null)
+    } finally {
+        console.log = origLog
+    }
+    t.equal(logs.length, 0, 'plain output relies on log lines instead')
 })

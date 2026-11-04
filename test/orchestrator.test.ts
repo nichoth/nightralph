@@ -2739,6 +2739,51 @@ test('spawnAgent sets no subagent model for non-claude agents',
     }
 )
 
+// An agent can work for minutes between text messages; the
+// heartbeat shows it is alive and how many tools it has called.
+test('spawnAgent reports a heartbeat while the agent runs',
+    async t => {
+        const base = tmp()
+        const toolUse = (id:string) => ({
+            type: 'assistant',
+            message: {
+                content: [{ type: 'tool_use', id, name: 'Bash', input: {} }],
+            },
+        })
+        const streamFile = writeStreamFile(
+            base, [toolUse('a'), toolUse('b')]
+        )
+        const beats:string[] = []
+        const shown:string[] = []
+
+        await withFakeEnv({
+            FAKE_CLAUDE_STREAM: streamFile,
+            FAKE_CLAUDE_HANG: '1',
+        }, async () => {
+            await spawnAgent({
+                prompt: 'test',
+                agentCmd: FAKE_CLAUDE,
+                model: null,
+                timeout: 1,
+                logPath: join(base, 'test.log'),
+                onLine: line => { shown.push(line) },
+                progress: {
+                    label: 'review',
+                    onLine: line => { beats.push(line) },
+                    intervalMs: 100,
+                },
+            })
+        })
+        const atExit = beats.length
+
+        t.ok(atExit >= 2, 'beats repeat while the agent runs')
+        t.ok(/\b2 tool calls\b/.test(beats[atExit - 1] ?? ''),
+            'the last beat counts the tool calls so far')
+        await new Promise(resolve => setTimeout(resolve, 300))
+        t.equal(beats.length, atExit, 'beats stop when the agent exits')
+    }
+)
+
 // A pending wakeup or cron job keeps `claude --print` alive after
 // its final result, and spawnAgent waits for the process to exit.
 test('spawnAgent denies claude its self-scheduling tools',
@@ -5489,6 +5534,7 @@ test('runWaves with nothing runnable reports no blocked tickets',
                 t.fail('no setBlocked should be called')
             },
             setTicketStats () {},
+            setPhase () {},
             log (m:string) { logs.push(m) },
             cleanup () {},
         }
@@ -5541,6 +5587,7 @@ test('runWaves with only human tickets logs them and is allDone',
                 t.fail('no setBlocked should be called')
             },
             setTicketStats () {},
+            setPhase () {},
             log (m:string) { logs.push(m) },
             cleanup () {},
         }
@@ -5842,6 +5889,7 @@ async function runOneInPlace (
         setTicketStats (_num:number, _feature:string, s:unknown) {
             stats.push(s)
         },
+        setPhase () {},
         log (m:string) { logs.push(m) },
         cleanup () {},
     }
