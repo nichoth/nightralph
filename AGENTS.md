@@ -25,7 +25,11 @@ merges into that branch.
   `npm run build` first when `src/` changed. The script gives
   the run a private `TMPDIR` and deletes it (plus any
   `mock-change-*.txt` in the repo root) when the run ends, pass
-  or fail
+  or fail. It also hides the global and system git config and
+  sets `user.useConfigOnly`, as on a CI runner, so every test
+  repo must set `user.name` and `user.email` in its own config
+  (env vars on the test's git calls do not reach the git that
+  `src/` runs)
 - `npm run lint` -- eslint
 - Both file lists are explicit: a new `src/` module must be
   added to the second esbuild call in `build-esm`

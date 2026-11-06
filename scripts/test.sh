@@ -41,6 +41,15 @@ trap cleanup EXIT
 
 export TMPDIR="$RUN_TMP"
 
+# Hide the machine's global and system git config, as on a CI runner
+# with no identity. useConfigOnly stops git from guessing one from
+# the user name and hostname, so a test repo that does not set
+# user.name and user.email fails here, not only in CI.
+GIT_CONFIG_GLOBAL="$RUN_TMP/gitconfig"
+printf '[user]\n\tuseConfigOnly = true\n' > "$GIT_CONFIG_GLOBAL"
+export GIT_CONFIG_GLOBAL
+export GIT_CONFIG_NOSYSTEM=1
+
 SOURCES=()
 for name in "${TESTS[@]}"; do
     SOURCES+=("test/$name.test.ts")

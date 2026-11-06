@@ -118,6 +118,9 @@ async function withHarness (
             { cwd: projectDir })
         execSync('git config core.hooksPath /dev/null',
             { cwd: projectDir })
+        execSync('git config user.email test@example.com',
+            { cwd: projectDir })
+        execSync('git config user.name "Test"', { cwd: projectDir })
         const base = join(projectDir, '.scratch', FEAT)
         const issuesDir = join(base, 'issues')
         mkdirSync(issuesDir, { recursive: true })

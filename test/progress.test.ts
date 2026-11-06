@@ -44,6 +44,8 @@ function initTempRepo ():string {
     )
     execSync('git init', { cwd: dir })
     execSync('git config core.hooksPath /dev/null', { cwd: dir })
+    execSync('git config user.email test@example.com', { cwd: dir })
+    execSync('git config user.name "Test"', { cwd: dir })
     execSync('git commit --allow-empty -m "init" --no-verify', {
         cwd: dir,
         env: {
