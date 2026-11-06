@@ -9,12 +9,10 @@ This is a minimal Node-based AI orchestrator. It reads local markdown tickets
 produced by
 [`to-tickets` skill](https://github.com/mattpocock/skills/blob/main/skills/engineering/to-tickets/SKILL.md),
 resolves their dependency graph, and runs agents in parallel,
-honoring ticket dependencies. During setup you can choose a GitHub issue
-tracker, which installs skill instructions that use `gh` CLI conventions,
-but the ticket source is always local markdown files.
+honoring ticket dependencies.
 
 This is inspired by [nightshift](https://github.com/Shaurya-Sethi/nightshift/).
-I made it because I noticed the API in `nightshift` had already drifted
+I made this because I noticed the API in `nightshift` had already drifted
 from the skill definitions. This module bundles its skill dependencies,
 so they can't drift as long as you install the skills with this package.
 (See [the section on the `init` command](#install-dependency-skills).)
@@ -24,32 +22,32 @@ so they can't drift as long as you install the skills with this package.
 - [Install](#install)
   * [Requirements](#requirements)
   * [Install Dependency Skills](#install-dependency-skills)
-- [Workflow](#workflow)
+- [Example Workflow](#example-workflow)
   * [Create Issues](#create-issues)
 - [Examples](#examples)
+  * [Keep Your Machine Awake](#keep-your-machine-awake)
+    + [Mac OS](#mac-os)
+  * [Claude Opus 4.6](#claude-opus-46)
+  * [Claude Opus 5.5](#claude-opus-55)
+  * [Claude Sonnet 5.5](#claude-sonnet-55)
+  * [Claude Haiku 5.5](#claude-haiku-55)
+  * [Claude Fable 5.1](#claude-fable-51)
+  * [`pi` + OpenRouter model](#pi--openrouter-model)
+  * [`codex` + Luna](#codex--luna)
+  * [`codex` + Terra](#codex--terra)
 - [Command Line Arguments](#command-line-arguments)
   * [Notes](#notes)
   * [`--spec ` option](#--spec--option)
   * [`graph` command](#graph-command)
   * [`--prefer-subagent` option](#--prefer-subagent-option)
+  * [Environment Settings](#environment-settings)
 - [How It Works](#how-it-works)
-  * [Select a ticket](#select-a-ticket)
   * [Worktrees](#worktrees)
   * [Progress](#progress)
   * [Integration branch](#integration-branch)
+  * [`.scratch/` in git](#scratch-in-git)
   * [Review](#review)
   * [Status display](#status-display)
-- [Keep Your Machine Awake](#keep-your-machine-awake)
-  * [Mac OS](#mac-os)
-    + [Claude Opus 4.6](#claude-opus-46)
-    + [Claude Opus 5.5](#claude-opus-55)
-    + [Claude Sonnet 5.5](#claude-sonnet-55)
-    + [Claude Haiku 5.5](#claude-haiku-55)
-    + [Claude Fable 5.1](#claude-fable-51)
-    + [`pi` + OpenRouter model](#pi--openrouter-model)
-    + [`codex` + Luna](#codex--luna)
-    + [`codex` + Terra](#codex--terra)
-    + [Mercury + `pi`](#mercury--pi)
 
 <!-- tocstop -->
 
@@ -62,15 +60,10 @@ npm i -S nightralph
 ### Requirements
 
 - Node 24 or newer (see `engines` in `package.json`) and git.
-- The agent CLI you name on the command line (`claude`, `codex` or
-  `pi`) installed and on your `PATH`. After it finds tickets,
-  nightralph checks for this command before it touches git, and
-  exits with code 2 if the command is not found. A run with no
-  tickets stops before the check. With `--dry-run` it prints the
-  problem and keeps going.
-- macOS or Linux. nightralph runs agents in their own process group
-  and uses `sh -c` for test and install commands, so it does not
-  run on Windows.
+- The agent CLI you name on the command line (`claude`, `codex` or `pi`)
+  installed and in your `PATH`. A run with no
+- macOS or Linux. `nightralph` runs agents in their own process group
+  and uses `sh -c` for test and install commands. Does not run on Windows.
 
 ### Install Dependency Skills
 
@@ -92,7 +85,11 @@ They are cloned with some metadata, visible in
 That's how we prevent skill vs API drift.
 
 
-## Workflow
+## Example Workflow
+
+1. create spec
+2. [create tickets](#create-issues)
+3. TDD
 
 **The expected flow is**
 
@@ -103,25 +100,14 @@ grill -> to-spec -> to-tickets -> tdd
 >
 > [!NOTE]  
 > The `grill` step can be changed to something else. Output from step 1
-> needs to be a prose description.
+> needs to be a prose description in a locall markdown file.
+> The `nightralph` CLI does the `tdd` part of the workflow.
 >
-
-First create issues.
-
-After installing this package, use
-[the `npx nightralph init` command](#install-dependency-skills)
-to add the required skills to your local `.agents/skills/` folder.
 
 ### Create Issues
 
 Use the `to-tickets` skill to create issues in local markdown files from
-a prose text description.
-
-The `nightralph` CLI does the `tdd` part of the workflow: the agent
-prompt tells the agent to write a failing test per acceptance
-criterion at the seams named in the spec's Testing Decisions, and
-the orchestrator runs the project's test command, when there is
-one, in the worktree before a ticket can be marked `done`.
+a spec text description.
 
 >
 > [!NOTE]  
@@ -141,36 +127,68 @@ one, in the worktree before a ticket can be marked `done`.
 ## Examples
 
 After you have the tickets, use the `nightralph` loop to execute.
-The `to-tickets` skill produces markdown files at
-`.scratch/<feature>/issues/<NN>-<slug>.md`, with task dependency info.
+`nightralph` will executre the tickets in the most efficient, parallel way
+possible, with respect to the ticket dependencies.
 
-```bash
-# Auto-discover .scratch features and run with claude
-npx nightralph claude -m claude-opus-4-6
+### Keep Your Machine Awake
 
-# Run with pi and an OpenRouter model
-npx nightralph pi -m openrouter/z-ai/glm-5.3-flash
+This is expected to run for a long time, like overnight.
 
-# Dry run to inspect the dependency graph and prompt
-npx nightralph codex --dry-run
+#### Mac OS
 
-# Show which features wait on tickets in other features
-npx nightralph graph
+Use `caffeinate` to prevent your machine from sleeping. These examples will
+keep the machine awake, but the display can still go dark.
 
-# Use codex with a specific model
-npx nightralph codex -m gpt-5.6-luna
+### Claude Opus 4.6
 
-# Specify a feature by name
-npx nightralph claude -m claude-opus-4-6 --spec my-feature
+```sh
+caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort medium --prefer-subagent claude-haiku-5-5
+```
 
-# Cap each agent at 30 agentic turns
-npx nightralph claude -m claude-opus-4-6 --max-turns 30
+### Claude Opus 5.5
 
-# Same thing, using the positional shorthand
-npx nightralph claude -m claude-opus-4-6 30
+```sh
+caffeinate -i npx nightralph claude -m claude-opus-5-5 --effort medium --prefer-subagent claude-haiku-5-5
+```
 
-# Start pi at medium effort and allow one escalated retry
-npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --effort medium --retries 1
+### Claude Sonnet 5.5
+
+```sh
+caffeinate -i npx nightralph claude -m claude-sonnet-5-5 --effort medium
+```
+
+### Claude Haiku 5.5
+
+```sh
+caffeinate -i npx nightralph claude -m claude-haiku-5-5 --effort high
+```
+
+### Claude Fable 5.1
+
+```sh
+caffeinate -i npx nightralph claude -m claude-fable-5-1 --effort medium
+```
+
+### `pi` + OpenRouter model
+
+```sh
+caffeinate -i npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --effort high
+```
+
+```sh
+caffeinate -i npx nightralph pi -m openrouter/inception/mercury-2.5 --effort high
+```
+
+### `codex` + Luna
+
+```sh
+caffeinate -i npx nightralph codex -m gpt-6-luna --effort high
+```
+
+### `codex` + Terra
+
+```sh
+caffeinate -i npx nightralph codex -m gpt-6.1-terra --effort medium
 ```
 
 ## Command Line Arguments
@@ -335,71 +353,31 @@ held-import-review (0/2 ready)
 Not waiting on other features: analytics, newsletter-audit
 ```
 
-Each block opens with the feature's counts as the picker shows them,
-for a run of that feature alone. `(0/2 ready)` means neither ticket
-can start: `01` waits on another feature and `02` waits on `01`. The
+Each block opens with the feature's counts.
 `X waits on Y` lines group the blocking refs by feature pair, so a
 block also shows waits further up the chain, such as a feature this
 one waits on that itself waits on a third.
 
-`Run together` names the features to select in the picker. The
-suggestion is checked by simulating a run of those features with the
-same wave logic as `--dry-run`, assuming every ticket succeeds. The
-line under it counts how many of the feature's `ready-for-agent`
-tickets become runnable. That total can differ from the header's,
-which counts every ticket, as the picker does. A suggested feature the
-picker does not list, such as a nested one like `rollout/billing`, is
-named in the parenthetical as not in the picker.
-
-Some tickets can't run whatever you select:
-
-* `stays blocked` names a ticket and the blocker that stops it: a
-  ticket in a status an agent doesn't pick up, such as
-  `ready-for-human`, or a ref that matches no ticket, shown as
-  `(not found)`.
-* `deadlocked` names tickets in or behind a cycle.
-
-A feature whose only problem is a ref into another feature that
-matches no ticket gets a block with no `Run together` line. The
-remaining features share the `Not waiting on other features` line,
-and any typo warnings come last.
-
-The picker labels a feature that waits on others the same way, for
-example `held-import-review (0/2 ready, waits on newsletter-audit)`.
-The label names only the features its tickets wait on directly, and
-the counts still mean ready if the feature runs alone.
-
-`graph` is read-only: it runs no git, no provider check, and writes
-nothing. It reads `.scratch/` in the current checkout, not an
-integration branch, so tickets a run finished on
-`nightralph--<feature>` show as open until that branch is merged.
-`Run together` can only be acted on in the picker, since `--spec`
-takes one name.
-
 
 ### `--prefer-subagent` option
 
-Use this to use a strong model on the ticket while a cheaper, faster
-model handles the reading. The main agent writes the code and makes
-every commit. Subagents explore the codebase, search for code, and run
-tests whose output would flood the main agent's context, then report
-back a short answer.
+Usecase is a strong model on the ticket, and cheaper, faster
+model to handle exploring the codebase, searching, and running
+tests whose output would flood the main agent's context. The subagent then
+reports back a short answer to the main agent.
 
-The flag does two things for every claude agent nightralph spawns
-(tickets, merge-conflict re-spawns, the reviewer and the fixer):
+The flag does two things for every claude agent nightralph spawns.
 
-1. It sets `CLAUDE_CODE_SUBAGENT_MODEL=<model>` in the agent's
-   environment.
+1. It sets `CLAUDE_CODE_SUBAGENT_MODEL=<model>` in the agent's environment.
 2. It adds a rule to the prompt: hand read-only work to subagents,
    brief each one fully, do not delegate a lookup that takes a single
-   tool call, and never let a subagent edit files or commit. The
-   reviewer gets the same rule without the edit and commit line.
+   tool call, and never let a subagent edit files or commit.
 
-`<model>` is anything Claude Code accepts as a model: an alias such as
+`<model>` is anything the harness accepts as a model, like an alias, eg
 `sonnet` or `haiku`, or a full model ID. Sonnet is the safer choice
 when subagents need judgment, such as tracing a call path across
 modules. Haiku is cheaper and faster, and suits mechanical lookups and
-summarizing long test output, but it is more likely to miss something.
+summarizing long test output, but it is more likely to miss things.
 
 ```sh
 # Opus writes the code, Sonnet subagents explore and run tests
@@ -409,59 +387,35 @@ npx nightralph claude -m claude-opus-4-6 --prefer-subagent sonnet
 npx nightralph claude -m claude-opus-4-6 --prefer-subagent haiku
 
 # A Sonnet main agent with Haiku subagents
-npx nightralph claude -m claude-sonnet-4-6 --prefer-subagent haiku
+npx nightralph claude -m claude-sonnet-5-5 --prefer-subagent haiku
 
 # Pin an exact model ID instead of an alias
-npx nightralph claude -m claude-opus-4-6 --prefer-subagent claude-sonnet-5-5
+npx nightralph claude -m claude-opus-5-5 --prefer-subagent claude-sonnet-5-5
 
+# dry run
 # Check the setting and the prompt rule without running anything
 npx nightralph claude --prefer-subagent claude-haiku-5-5 --dry-run
 ```
 
-Only the `claude` provider supports this flag. With `codex` or `pi` it
-is skipped with one warning at startup.
-
-`--prefer-subagent <model>` sets the model that a claude agent's
-subagents default to. It's a fallback, not a mandate. A model passed on
-an individual subagent call wins, and so does the `model` in a subagent
-definition. The built-in Explore subagent picks its own model.
-nightralph never sets `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so without
-the flag a value you exported in your shell still applies.
+Only the `claude` provider supports the `--prefer-subagent` flag.
+With `codex` or `pi` it is skipped with one warning at startup.
 
 Subagent turns do not count toward `--max-turns`. That was observed on
 Claude Code 2.1.296 and is not documented by Anthropic, so it may
 change. Subagent time does count against `--timeout`, because the
 timeout covers the whole agent process.
 
+### Environment Settings
+
 Spawned agents load your global `~/.claude` plugins and hooks. Those
 can spend turns and steer delegation their own way, and nightralph does
 not isolate agents from them.
 
-Subagent stats are recorded for every claude run, whether or not
-`--prefer-subagent` is set. When a claude agent ran, the attempt's
-entry in `learnings.md` includes `Subagents: <n>.` and `Cost: $<x>.`,
-each left out when the agent did not report it. The
-ticket's row in the status display shows the running total across its
-attempts, as in `a/03 - 2 subagents, $0.42`. After the finish summary,
-one line totals the subagents, agent runs and cost over every ticket
-attempt, merge-conflict re-spawn, the reviewer and the fixer:
-
-```
-Subagents: 5 started across 7 agent runs, cost $3.18 (cost from 6 of 7 runs)
-```
-
-The part in parentheses appears only when some runs reported no cost.
-A claude agent reports cost only when it finishes, so one killed at
-`--timeout` usually reports none. Codex and pi runs report nothing, so
-a run that used only them gets no stats line. Stats are advisory: they
-never change a ticket's outcome or the exit code.
-
-
-
+---
 
 ## How It Works
 
-Tickets run in waves. A wave is a batch of tickets whose blockers are
+Tickets run in "waves". A wave is a batch of tickets whose blockers are
 all done. The tickets in a wave run in parallel, up to `--concurrency`
 at once, and each ticket gets a worktree named after the ticket slug.
 `nightralph` waits for the whole batch to finish, merges the branches of
@@ -474,19 +428,11 @@ a prediction made at startup. It assumes every ticket succeeds. When a
 ticket fails, its dependents never become ready, so the run can end
 before it reaches the predicted last wave.
 
-
-### Select a ticket
-
-* Build a ticket dependency graph with the `Blocked by:` fields
-* A ticket is eligible for execution when its status is `ready-for-agent` and
-  every ticket listed in its `Blocked by:` field is completed.
-
-
 ### Worktrees
 
 Each ticket gets its own git worktree. Agents work in
-isolation so parallel tickets never conflict on disk. After a wave
-completes, successful branches are merged back into the base branch.
+isolation so parallel tickets never conflict. After a wave completes,
+successful branches are merged back into the base branch.
 The first branch merges directly, and subsequent branches rebase
 onto the updated base before merging.
 
@@ -500,8 +446,8 @@ the same name before creating a new one.
 A fresh worktree has only tracked files, so there is no
 `node_modules`. Before the agent starts, the orchestrator installs
 dependencies with the command that matches the project's lockfile
-(see `--install-cmd`), and the prompt tells the agent not to run
-another installer. The install never writes a lockfile, so ticket
+(see `--install-cmd`). The prompt tells the agent not to run another installer.
+The install never writes a lockfile, so ticket
 branches do not commit one by accident.
 
 If a merge conflict occurs, the behavior depends on the `-X` flag: by
@@ -519,7 +465,7 @@ another terminal by reading the file.
 Launched from your default branch (`main`), nightralph does not merge
 into it. It creates `nightralph--<feature>` (or `nightralph--all` for
 several features), merges every ticket there, and leaves you on that
-branch. Running again from `main` resumes the same branch, so finished
+branch. Running again from `main` resumes the same branch. Finished
 tickets stay finished. Launched from any other branch, it merges into
 that branch.
 
@@ -528,6 +474,8 @@ fast-forwards it to `main` and resumes. If the branch has commits `main`
 lacks, nightralph reports how far behind it is; merge `main` into it or
 delete it with `git branch -D`.
 
+### `.scratch/` in git
+
 If `.scratch/` is gitignored, the bookkeeping files (tickets, progress,
 learnings, review) are force-added and live on the integration branch, so
 they disappear from disk when you check out `main`.
@@ -535,11 +483,12 @@ they disappear from disk when you check out `main`.
 ### Review
 
 After the last wave, an agent reviews everything merged since the last
-review and writes its findings to `.scratch/<feature>/review.md` (`.scratch/review.md`
-for a multi-feature run). A
-second agent fixes them test-first; its work merges only if the test
-command passes. Findings it could not fix stay unchecked in
-`review.md`. Skip this with `--no-review`.
+review and writes its findings to `.scratch/<feature>/review.md`
+(`.scratch/review.md` for a multi-feature run). A second agent fixes them
+test-first; its work merges only if the test command passes.
+Findings it could not fix stay unchecked in `review.md`.
+Skip this with `--no-review`.
+
 
 ### Status display
 
@@ -598,69 +547,3 @@ Known limit: with `-X`, the run stops at the first merge conflict. A
 ticket whose branch succeeded but came after the conflicting branch is
 never merged, and its row stays on the cyan "waiting to merge" dot when
 the run stops.
-
-
----
-
-## Keep Your Machine Awake
-
-This is expected to run for a long time, like overnight.
-
-### Mac OS
-
-Use `caffeinate` to prevent your machine from sleeping. These examples will
-keep the machine awake, but the display can still go dark.
-
-#### Claude Opus 4.6
-
-```sh
-caffeinate -i npx nightralph claude -m claude-opus-4-6 --effort medium
-```
-
-#### Claude Opus 5.5
-
-```sh
-caffeinate -i npx nightralph claude -m claude-opus-5-5 --effort medium
-```
-
-#### Claude Sonnet 5.5
-
-```sh
-caffeinate -i npx nightralph claude -m claude-sonnet-5-5 --effort medium
-```
-
-#### Claude Haiku 5.5
-
-```sh
-caffeinate -i npx nightralph claude -m claude-haiku-5-5 --effort high
-```
-
-#### Claude Fable 5.1
-
-```sh
-caffeinate -i npx nightralph claude -m claude-fable-5-1 --effort medium
-```
-
-#### `pi` + OpenRouter model
-
-```sh
-caffeinate -i npx nightralph pi -m openrouter/z-ai/glm-5.3-flash --effort high
-```
-
-#### `codex` + Luna
-
-```sh
-caffeinate -i npx nightralph codex -m gpt-5.6-luna --effort high
-```
-
-#### `codex` + Terra
-
-```sh
-caffeinate -i npx nightralph codex -m gpt-5.6-terra --effort medium
-```
-
-#### Mercury + `pi`
-
-```sh
-caffeinate -i npx nightralph pi -m openrouter/inception/mercury-2.5 --effort high
-```
